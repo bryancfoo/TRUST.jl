@@ -76,7 +76,7 @@ Convert a temperature `x`, given in the unit named by `key` (`:T_eV` or `:T_keV`
 
 `conventions.md` 1.2, 11.4.
 """
-T_to_si(x, key::Symbol = :T_eV) = x * _unit_factor(:T, key)
+T_to_si(x, key::Symbol = :T_eV) = x * _unit_factor(:T, key, :T_to_si)
 
 """
     T_from_si(x, key::Symbol = :T_eV) -> Float64
@@ -85,7 +85,7 @@ Convert a temperature `x`, in joules, to the unit named by `key` (`:T_eV` or `:T
 
 `conventions.md` 1.2, 11.4.
 """
-T_from_si(x, key::Symbol = :T_eV) = x / _unit_factor(:T, key)
+T_from_si(x, key::Symbol = :T_eV) = x / _unit_factor(:T, key, :T_from_si)
 
 """
     n_to_si(x, key::Symbol = :n_cm3) -> Float64
@@ -94,7 +94,7 @@ Convert a number density `x`, given in the unit named by `key` (`:n_cm3` or `:n_
 
 `conventions.md` 1.2, 11.4.
 """
-n_to_si(x, key::Symbol = :n_cm3) = x * _unit_factor(:n, key)
+n_to_si(x, key::Symbol = :n_cm3) = x * _unit_factor(:n, key, :n_to_si)
 
 """
     n_from_si(x, key::Symbol = :n_cm3) -> Float64
@@ -103,7 +103,7 @@ Convert a number density `x`, in m⁻³, to the unit named by `key` (`:n_cm3` or
 
 `conventions.md` 1.2, 11.4.
 """
-n_from_si(x, key::Symbol = :n_cm3) = x / _unit_factor(:n, key)
+n_from_si(x, key::Symbol = :n_cm3) = x / _unit_factor(:n, key, :n_from_si)
 
 """
     u_to_si(x, key::Symbol = :u_kms) -> Float64
@@ -112,7 +112,7 @@ Convert a velocity `x`, given in the unit named by `key` (`:u_kms` or `:u_ms`), 
 
 `conventions.md` 1.2, 11.4.
 """
-u_to_si(x, key::Symbol = :u_kms) = x * _unit_factor(:u, key)
+u_to_si(x, key::Symbol = :u_kms) = x * _unit_factor(:u, key, :u_to_si)
 
 """
     u_from_si(x, key::Symbol = :u_kms) -> Float64
@@ -121,7 +121,7 @@ Convert a velocity `x`, in m/s, to the unit named by `key` (`:u_kms` or `:u_ms`)
 
 `conventions.md` 1.2, 11.4.
 """
-u_from_si(x, key::Symbol = :u_kms) = x / _unit_factor(:u, key)
+u_from_si(x, key::Symbol = :u_kms) = x / _unit_factor(:u, key, :u_from_si)
 
 """
     mass_to_si(x, key::Symbol = :mass_amu) -> Float64
@@ -130,7 +130,7 @@ Convert a mass `x`, given in the unit named by `key` (`:mass_amu` or `:mass_kg`)
 
 `conventions.md` 1.2, 11.4.
 """
-mass_to_si(x, key::Symbol = :mass_amu) = x * _unit_factor(:mass, key)
+mass_to_si(x, key::Symbol = :mass_amu) = x * _unit_factor(:mass, key, :mass_to_si)
 
 """
     mass_from_si(x, key::Symbol = :mass_amu) -> Float64
@@ -139,7 +139,7 @@ Convert a mass `x`, in kg, to the unit named by `key` (`:mass_amu` or `:mass_kg`
 
 `conventions.md` 1.2, 11.4.
 """
-mass_from_si(x, key::Symbol = :mass_amu) = x / _unit_factor(:mass, key)
+mass_from_si(x, key::Symbol = :mass_amu) = x / _unit_factor(:mass, key, :mass_from_si)
 
 """
     lambda_to_si(x, key::Symbol = :lambda_nm) -> Float64
@@ -148,7 +148,7 @@ Convert a wavelength `x`, given in the unit named by `key` (`:lambda_nm` or `:la
 
 `conventions.md` 1.2, 11.4.
 """
-lambda_to_si(x, key::Symbol = :lambda_nm) = x * _unit_factor(:lambda, key)
+lambda_to_si(x, key::Symbol = :lambda_nm) = x * _unit_factor(:lambda, key, :lambda_to_si)
 
 """
     lambda_from_si(x, key::Symbol = :lambda_nm) -> Float64
@@ -157,7 +157,7 @@ Convert a wavelength `x`, in m, to the unit named by `key` (`:lambda_nm` or `:la
 
 `conventions.md` 1.2, 11.4.
 """
-lambda_from_si(x, key::Symbol = :lambda_nm) = x / _unit_factor(:lambda, key)
+lambda_from_si(x, key::Symbol = :lambda_nm) = x / _unit_factor(:lambda, key, :lambda_from_si)
 
 """
     t_to_si(x, key::Symbol = :t_ns) -> Float64
@@ -166,7 +166,7 @@ Convert a time `x`, given in the unit named by `key` (`:t_ns` or `:t_s`), to s.
 
 `conventions.md` 1.2, 11.4.
 """
-t_to_si(x, key::Symbol = :t_ns) = x * _unit_factor(:t, key)
+t_to_si(x, key::Symbol = :t_ns) = x * _unit_factor(:t, key, :t_to_si)
 
 """
     t_from_si(x, key::Symbol = :t_ns) -> Float64
@@ -175,7 +175,7 @@ Convert a time `x`, in s, to the unit named by `key` (`:t_ns` or `:t_s`).
 
 `conventions.md` 1.2, 11.4.
 """
-t_from_si(x, key::Symbol = :t_ns) = x / _unit_factor(:t, key)
+t_from_si(x, key::Symbol = :t_ns) = x / _unit_factor(:t, key, :t_from_si)
 
 """
     theta_to_si(x, key::Symbol = :theta_deg) -> Float64
@@ -184,7 +184,7 @@ Convert an angle `x`, given in the unit named by `key` (`:theta_deg` or `:theta_
 
 `conventions.md` 1.2, 11.4.
 """
-theta_to_si(x, key::Symbol = :theta_deg) = x * _unit_factor(:theta, key)
+theta_to_si(x, key::Symbol = :theta_deg) = x * _unit_factor(:theta, key, :theta_to_si)
 
 """
     theta_from_si(x, key::Symbol = :theta_deg) -> Float64
@@ -193,18 +193,19 @@ Convert an angle `x`, in rad, to the unit named by `key` (`:theta_deg` or `:thet
 
 `conventions.md` 1.2, 11.4.
 """
-theta_from_si(x, key::Symbol = :theta_deg) = x / _unit_factor(:theta, key)
+theta_from_si(x, key::Symbol = :theta_deg) = x / _unit_factor(:theta, key, :theta_from_si)
 
 """
-    _unit_factor(quantity::Symbol, key::Symbol) -> Float64
+    _unit_factor(quantity::Symbol, key::Symbol, caller::Symbol) -> Float64
 
 Look up the SI conversion factor for `key` in the `ACCEPTED_UNITS` row named `quantity`,
-throwing an `ArgumentError` naming both if `key` is not an accepted unit for `quantity`.
+throwing an `ArgumentError` naming `caller` (the conversion function the user actually called,
+e.g. `:n_from_si`) if `key` is not an accepted unit for `quantity`.
 """
-function _unit_factor(quantity::Symbol, key::Symbol)
+function _unit_factor(quantity::Symbol, key::Symbol, caller::Symbol)
     row = getfield(ACCEPTED_UNITS, quantity)
     haskey(row, key) || throw(ArgumentError(
-        "$(quantity)_to_si: :$key is not an accepted unit key for $quantity; " *
+        "$(caller): :$key is not an accepted unit key for $quantity; " *
         "expected one of $(keys(row))"))
     return getfield(row, key)
 end

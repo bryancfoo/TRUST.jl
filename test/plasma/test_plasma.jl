@@ -103,7 +103,7 @@ end
 @testset "Q12: mean_charge_state / mean_ion_mass with no ions throws" begin
     p = Plasma(n_e_cm3 = 1e19, electrons = [electrons(T_eV = 500)])
     @test_throws "mean_charge_state is undefined for a plasma with no ion species" mean_charge_state(p)
-    @test_throws "mean_charge_state is undefined for a plasma with no ion species" mean_ion_mass(p)
+    @test_throws "mean_ion_mass is undefined for a plasma with no ion species" mean_ion_mass(p)
 end
 
 @testset "Q13: vectors vs tuples give equal plasmas" begin

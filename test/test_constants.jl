@@ -44,6 +44,7 @@ end
 
 @testset "boundary units: unknown key throws (D10)" begin
     @test_throws "T_to_si: :T_erg is not an accepted unit key for T; expected one of (:T_eV, :T_keV)" T_to_si(1, :T_erg)
+    @test_throws "n_from_si: :bogus is not an accepted unit key for n; expected one of (:n_cm3, :n_m3)" n_from_si(1.0, :bogus)
 end
 
 @testset "_basefloat" begin

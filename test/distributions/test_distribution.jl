@@ -40,7 +40,7 @@ end
     @test isapprox(moment(f, 1), 0; atol = 1e-10)
     @test isapprox(moment(f, 2), 0.5; atol = 1e-10)
     @test isapprox(dfdx(f, 0.5), -2 * 0.5 * exp(-0.5^2) / sqrt(pi); rtol = 1e-10)
-    @test isapprox(cauchy_dfdv(f, 0.5), Zprime(0.5); atol = 1e-9)
+    @test isapprox(cauchy_dfdv(f, 0.5), Zprime(0.5); atol = 1e-10)
 end
 
 @testset "G4: dfdx throws for a shape without a complex method" begin

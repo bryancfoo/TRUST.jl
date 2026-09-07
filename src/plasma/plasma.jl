@@ -122,7 +122,7 @@ ion species.
 `conventions.md` Section 4; spec D20.
 """
 function mean_ion_mass(p::Plasma)
-    isempty(p.ions) && throw(ArgumentError("mean_charge_state is undefined for a plasma with no ion species"))
+    isempty(p.ions) && throw(ArgumentError("mean_ion_mass is undefined for a plasma with no ion species"))
     return sum(sp.n * sp.mass for sp in p.ions) / sum(sp.n for sp in p.ions)
 end
 

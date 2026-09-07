@@ -24,15 +24,15 @@ end
 end
 
 @testset "M4: generic fallback vs Zprime, Im xi > 0" begin
-    for re in (-3.0, -1.0, 0.0, 1.0, 3.0), im in (0.1, 0.3, 1.0, 2.0)
-        xi = complex(re, im)
+    for re in (-3.0, -1.0, 0.0, 1.0, 3.0), b in (0.1, 0.3, 1.0, 2.0)
+        xi = complex(re, b)
         @test isapprox(_cauchy_upper(f, xi), Zprime(xi); atol = 1e-10)
     end
 end
 
 @testset "M5: generic fallback vs Zprime, Im xi < 0" begin
-    for re in (-3.0, -1.0, 0.0, 1.0, 3.0), im in (-0.1, -0.3, -1.0, -2.0)
-        xi = complex(re, im)
+    for re in (-3.0, -1.0, 0.0, 1.0, 3.0), b in (-0.1, -0.3, -1.0, -2.0)
+        xi = complex(re, b)
         @test isapprox(_cauchy_lower(f, xi), Zprime(xi); atol = 1e-10)
     end
 end
