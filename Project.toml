@@ -1,0 +1,9 @@
+name = "OTIS"
+uuid = "9a288518-95a0-434c-aa8d-fc74e0293225"
+authors = ["Bryan Foo <bryancfoo@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+
+[compat]
+julia = "1.10"
