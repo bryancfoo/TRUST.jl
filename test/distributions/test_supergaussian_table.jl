@@ -172,7 +172,6 @@ end
     # the panel starting there), not at an offset -- an offset of h picks up ~2h*R'(edge), which
     # swamps a round-off-level tolerance long before it says anything about the shared node.
     interior_edges = SG_TABLE.edges[2:end-1]
-    hfd = 1e-4
     for edge in interior_edges, m in (1.5, 2.0, 5.0, 8.0)
         f = SuperGaussian(m)
         v_below = _sg_table_eval(SG_TABLE, f.slice, prevfloat(edge))
@@ -181,9 +180,11 @@ end
 
         d_below = ForwardDiff.derivative(x -> _sg_table_eval(SG_TABLE, f.slice, x), edge - 1e-8)
         d_above = ForwardDiff.derivative(x -> _sg_table_eval(SG_TABLE, f.slice, x), edge + 1e-8)
-        fd = (_sg_principal_value(m, edge + hfd) - _sg_principal_value(m, edge - hfd)) / (2hfd)
-        floor_ = 1e-6 * max(abs(fd), 1e-12)
-        @test isapprox(d_below, d_above; rtol = 1e-6, atol = floor_)
+        # Clarified 2026-09-08, round 2: the floor is TB7's own set-level floor, `_TB7_FLOOR`,
+        # not one recomputed per edge (conventions.md 8.4: one factor times the largest
+        # finite-difference derivative over the grid, so a point where the derivative happens to
+        # be small is not held to round-off).
+        @test isapprox(d_below, d_above; rtol = 1e-6, atol = _TB7_FLOOR)
     end
 end
 
@@ -197,37 +198,18 @@ end
     end
 end
 
-@testset "TB11: evenness and xi = 0" begin
-    # Rewritten 2026-09-08, round 1 (spec D12, and the note under Section 4's test table):
-    # the old single-point derivative clause at xi=0 escalated tau to the 1e-12 floor for
-    # almost no diagnostic gain -- R'(0) = 0 exactly for every m > 0 (R is even), so a sign
-    # or chain-rule bug is invisible there, and near a panel endpoint a polynomial fit only
-    # approximates the derivative of the |xi|^(m+1) leading non-analytic term algebraically,
-    # so degree buys almost nothing. Three clauses instead: (a) and (b) are exact identities
-    # of the abs() chain rule, tested where they can actually fail (a != 0); (c) keeps a
-    # coarse sanity bound at xi=0 that may NOT drive tau (only TB7/TB8 may, per D12).
-    rng = Random.Xoshiro(_rng_seed)
-    xis_pos = 10 .* rand(rng, 8)
+@testset "TB11: xi = 0 sanity bound" begin
+    # Rewritten 2026-09-08, round 1, then cut back to one clause round 2 (spec D12, and the
+    # note under Section 4's test table). Round 1 kept clause (c), a coarse sanity bound at
+    # xi=0 that may NOT drive tau (only TB7/TB8 may, per D12), and added two evenness clauses,
+    # (a) and (b). Round 2 removed (a) and (b): _sg_table_eval never applies abs() -- it takes
+    # |xi| >= 0 by contract, and the abs() that makes the shape's Cauchy integral even lives in
+    # cauchy_dfdv, which is Step 1.SG.3's. Written against _sg_table_eval, (a) compared
+    # abs(xi) with abs(-xi) -- the same Float64 -- and asserted v == v, and (b) exercised
+    # ForwardDiff's own abs() rule inside the test's closure; neither could test this package at
+    # this step. The real evenness test is DP8 in Step 1.SG.3, against cauchy_dfdv, where the
+    # identity is the package's own and can fail.
     ms = (1.5, 2.0, 5.0, 8.0)
-
-    # (a) R(|xi|) == R(|-xi|) exactly -- both branches route through the same abs() call.
-    for m in ms, xi in xis_pos
-        f = SuperGaussian(m)
-        v_pos = _sg_table_eval(SG_TABLE, f.slice, abs(xi))
-        v_neg = _sg_table_eval(SG_TABLE, f.slice, abs(-xi))
-        @test isapprox(v_pos, v_neg; rtol = 1e-14)
-    end
-
-    # (b) dR/dxi(-a) == -dR/dxi(a) at a != 0, the chain-rule identity through abs() where a
-    # sign or chain-rule bug is actually visible (unlike at a = 0, where both sides are 0).
-    for m in ms
-        f = SuperGaussian(m)
-        for a in (0.05, 0.3, 1.7, 6.0)
-            d_pos = ForwardDiff.derivative(x -> _sg_table_eval(SG_TABLE, f.slice, abs(x)), a)
-            d_neg = ForwardDiff.derivative(x -> _sg_table_eval(SG_TABLE, f.slice, abs(x)), -a)
-            @test isapprox(d_neg, -d_pos; rtol = 1e-14)
-        end
-    end
 
     # (c) a coarse sanity bound on |R'(0)|, 100x TB7's floor, deliberately loose and barred
     # from driving tau (D12): a genuinely broken panel selection or transposed tensor would
@@ -259,6 +241,12 @@ end
 end
 
 @testset "TB13: the error map" begin
+    # Clarified 2026-09-08, round 2: the assertion is TB4's, verbatim -- isapprox(tv, rv;
+    # rtol = 1e-8, atol = 1e-8), nothing tighter. The normalized ratio abs(tv-rv)/max(abs(rv),
+    # 1e-8) is a pure relative test with the floor folded into the denominator instead of the
+    # tolerance, which demands far more accuracy than the target near the ξ≈0.92, m=2 crossing
+    # (where rv is near zero) and is unsatisfiable there for reasons that are not a defect. It is
+    # computed and reported below for the error map, never asserted on.
     panel_worst = zeros(length(SG_TABLE.edges) - 1)
     for i in eachindex(_TB_XI)
         xi = _TB_XI[i]
@@ -269,8 +257,11 @@ end
         p = clamp(searchsortedlast(SG_TABLE.edges, xi), 1, length(SG_TABLE.edges) - 1)
         relerr = abs(tv - rv) / max(abs(rv), 1e-8)
         panel_worst[p] = max(panel_worst[p], relerr)
-        @test relerr <= 1e-8
+        @test isapprox(tv, rv; rtol = 1e-8, atol = 1e-8)
     end
+    # The 100 points near xi=0, m in [1.5,2] are _TB_XI[401:500], already asserted above (they
+    # are part of eachindex(_TB_XI)); this loop only recomputes the normalized ratio for the
+    # report, so it is reported and not asserted a second time.
     near0_worst = 0.0
     for i in 401:length(_TB_XI)
         xi = _TB_XI[i]
@@ -282,5 +273,4 @@ end
     end
     @info "TB13 error map: worst per panel" panel_worst
     @info "TB13 worst near xi=0, m in [1.5,2]" near0_worst
-    @test near0_worst <= 1e-8
 end

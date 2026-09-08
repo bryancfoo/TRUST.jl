@@ -50,21 +50,33 @@ _sg_C(m) = 1 / (2 * _sg_x0(m) * gamma(3 / m))
 
 """
     SuperGaussian(m::Real)
+    (f::SuperGaussian)(x::Real) -> Real
 
-The public, one-argument constructor (`conventions.md` Section 11). Throws for `m ≤ 0`; computes
-`x0 = _sg_x0(m)` and `C = _sg_C(m)`; promotes `m`, `x0`, `C` to their common type `FT`; computes
-`slice = _sg_slice(SG_TABLE, m)` at the promoted `m` (so `slice`'s element type is `FT` too);
-returns `SuperGaussian{FT,L}`, `L` the table's slice length, the same integer for every shape
-built in a session. Every constructor path recomputes all three cached fields and the slice from
-`m` — there is no constructor that takes them directly. The uncached form the table's own
-generator needs, `SuperGaussian{FT,0}` with `slice = ()`, is built only by `_sg_uncached`, never
-by this constructor (spec D3, D11).
+The public, one-argument constructor (`conventions.md` Section 11), and the shape's call
+overload. **Both are documented here because they share one doc-system key** (spec Pitfall 21):
+`SuperGaussian(m::Real)` and `(f::SuperGaussian)(x::Real)` are both methods of the binding
+`SuperGaussian` with signature `Tuple{Real}`, so two separate docstrings on them collide and one
+is silently dropped, with a `Replacing docs` warning at precompile.
+
+**The constructor.** Throws for `m ≤ 0`; computes `x0 = _sg_x0(m)` and `C = _sg_C(m)`; promotes
+`m`, `x0`, `C` to their common type `FT`; computes `slice = _sg_slice(SG_TABLE, m)` at the
+promoted `m` (so `slice`'s element type is `FT` too); returns `SuperGaussian{FT,L}`, `L` the
+table's slice length, the same integer for every shape built in a session. Every constructor path
+recomputes all three cached fields and the slice from `m` — there is no constructor that takes
+them directly. The uncached form the table's own generator needs, `SuperGaussian{FT,0}` with
+`slice = ()`, is built only by `_sg_uncached`, never by this constructor (spec D3, D11).
 
 Dimensionless: `m` is the exponent of the 3-D form (`conventions.md` notation dictionary), not a
 physical quantity. Tested for `m ∈ [1.4999, 8.5]`; below `m = 1` the quadrature fallback's second
 derivative at `x = 0` can be `NaN` under ForwardDiff (spec Pitfall 14), so no test asks for it.
 
-Spec D3, D4; `docs/derivations/supergaussian.md`.
+**The call.** `φ(x) = C(m) Γ(2/m, |x/x₀(m)|^m)`, the upper incomplete gamma function.
+Dimensionless in and out. `x = 0` is handled in closed form, `φ(0) = C(m) Γ(2/m)`, rather than
+through `_upper_gamma`: `iszero(x)` is `false` for a `ForwardDiff.Dual` whose value is zero, so
+the guard is `iszero(ForwardDiff.value(x))`, and without it `|x/x₀|^m` under a dual `m` evaluates
+`0 · log 0 = NaN` in the m-partial (spec Pitfall 1).
+
+PACM Eq. 26; spec D3, D4, D5; `docs/derivations/supergaussian.md`.
 """
 function SuperGaussian(m::Real)
     m > 0 || throw(ArgumentError("SuperGaussian: m must be positive; got $m"))
@@ -111,17 +123,7 @@ cauchy_dfdv(f::SuperGaussian{<:Real,0}, xi::Number) = throw(ArgumentError(
     "uncached form the table's generator builds and must not be used for evaluation; " *
     "construct the shape with SuperGaussian(m)."))
 
-"""
-    (f::SuperGaussian)(x::Real) -> Real
-
-`φ(x) = C(m) Γ(2/m, |x/x₀(m)|^m)`, the upper incomplete gamma function. `x = 0` is handled in
-closed form, `φ(0) = C(m) Γ(2/m)`, rather than through `_upper_gamma`: `iszero(x)` is `false` for
-a `ForwardDiff.Dual` whose value is zero, so the guard is `iszero(ForwardDiff.value(x))`, and
-without it `|x/x₀|^m` under a dual `m` evaluates `0 · log 0 = NaN` in the m-partial (spec
-Pitfall 1). Dimensionless in and out.
-
-PACM Eq. 26; spec D4, D5; `docs/derivations/supergaussian.md`.
-"""
+# Documented above, on SuperGaussian(m::Real): the two share one doc-system key (spec Pitfall 21).
 function (f::SuperGaussian)(x::Real)
     iszero(ForwardDiff.value(x)) && return f.C * gamma(2 / f.m)
     return f.C * _upper_gamma(2 / f.m, abs(x / f.x0)^f.m)

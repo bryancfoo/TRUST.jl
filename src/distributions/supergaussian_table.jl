@@ -346,9 +346,9 @@ _sg_panel_index(table, x) = clamp(searchsortedlast(table.edges, x), 1, length(ta
 The table's ξ-coefficients at this `m`, one panel after another, flattened: for every slice
 entry `i = 1, …, L`, the one-dimensional Clenshaw evaluation in `m` of `coeffs`' `i`-th
 `(nm+1)`-block. `Val(L)`, never a plain `L`, so the result is `NTuple{L, FT}`, inferable and
-heap-free — measured at `4.47 µs`, zero allocation, `L = 102` (spec D3, D13). With a dual `m`
-this returns an `NTuple` of duals of the same tag, which is how the m-derivative flows through a
-cached shape.
+heap-free — measured at `5.53 µs`, zero allocation, `L = 198` (spec D3, D13, round 2). With a dual
+`m` this returns an `NTuple` of duals of the same tag, which is how the m-derivative flows through
+a cached shape.
 
 Spec D13.
 """
@@ -363,7 +363,7 @@ end
 The per-bin evaluator: `R` at `|ξ| = x ≥ 0` (possibly a `Dual`), read out of a shape's own
 `slice` by one panel's one-dimensional Clenshaw in ξ. The panel index is taken at `x`'s primal
 value (`_primal_value`, spec 5.12 — an index is never built from a dual); the Clenshaw evaluation
-itself is generic in `x`'s type. Measured at `52.7 ns`, zero allocation, `n_ξ = 16` (spec D13).
+itself is generic in `x`'s type. Measured at `39.3 ns`, zero allocation (spec D13, round 2).
 
 Spec D13.
 """
