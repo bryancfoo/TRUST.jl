@@ -7,6 +7,8 @@ using ForwardDiff: Dual
     # Tight (1e-14 relative): two floating-point multiplications; anything worse is a table
     # error (spec Section 4, Step 0.2).
     quantities = (:T, :n, :u, :mass, :lambda, :t, :theta)
+    # lambda_probe and polarization (Step 1.3, spec D4) have no _to_si/_from_si pair of their
+    # own -- they reuse lambda_to_si/theta_to_si -- so they are round-tripped separately below.
     for q in quantities
         row = getfield(ACCEPTED_UNITS, q)
         to_si = getfield(OTIS, Symbol(q, "_to_si"))
@@ -40,6 +42,14 @@ end
     @test first(keys(ACCEPTED_UNITS.lambda)) == :lambda_nm
     @test first(keys(ACCEPTED_UNITS.t)) == :t_ns
     @test first(keys(ACCEPTED_UNITS.theta)) == :theta_deg
+end
+
+@testset "GE14: lambda_probe and polarization rows (spec D4)" begin
+    # Tight: guards the show/deck contract (conventions.md 1.2), same as the other rows above.
+    @test first(keys(ACCEPTED_UNITS.lambda_probe)) == :lambda_probe_nm
+    @test first(keys(ACCEPTED_UNITS.polarization)) == :polarization_deg
+    @test values(ACCEPTED_UNITS.lambda_probe) == values(ACCEPTED_UNITS.lambda)
+    @test values(ACCEPTED_UNITS.polarization) == values(ACCEPTED_UNITS.theta)
 end
 
 @testset "boundary units: unknown key throws (D10)" begin

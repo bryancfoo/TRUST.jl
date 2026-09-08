@@ -56,7 +56,11 @@ the one `show` methods and result files use.
 
 `conventions.md` 1.2 ([OQ-5](../dev/open_questions.md#oq-5)); the `n_e` row is a Phase 0
 addition (spec D4) carrying the same factors as `n`, needed because `Plasma`'s density field is
-named `n_e` (`conventions.md` 11.1) while OQ-5's original table only names `n`.
+named `n_e` (`conventions.md` 11.1) while OQ-5's original table only names `n`. The
+`lambda_probe` and `polarization` rows are a Phase 1 addition (Step 1.3, spec D4), carrying the
+same factors as `lambda` and `theta` respectively, needed because `ScatteringGeometry`'s
+constructor keywords are `lambda_probe_nm`/`lambda_probe_m` and
+`polarization_deg`/`polarization_rad`, not `lambda_nm` or `theta_deg`.
 """
 const ACCEPTED_UNITS = (
     T      = (T_eV      = EV,               T_keV     = 1000 * EV),
@@ -67,6 +71,8 @@ const ACCEPTED_UNITS = (
     lambda = (lambda_nm = 1e-9,             lambda_m  = 1.0),
     t      = (t_ns      = 1e-9,             t_s       = 1.0),
     theta  = (theta_deg = π / 180,          theta_rad = 1.0),
+    lambda_probe = (lambda_probe_nm = 1e-9,    lambda_probe_m   = 1.0),
+    polarization = (polarization_deg = π / 180, polarization_rad = 1.0),
 )
 
 """
