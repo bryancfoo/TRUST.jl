@@ -11,3 +11,4 @@ using SafeTestsets
 @safetestset "susceptibility" begin include("scattering/test_susceptibility.jl") end
 @safetestset "spectral density" begin include("scattering/test_spectral_density.jl") end
 @safetestset "scattering geometry" begin include("scattering/test_geometry.jl") end
+@safetestset "spectrum" begin include("scattering/test_spectrum.jl") end

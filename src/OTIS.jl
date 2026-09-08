@@ -10,6 +10,7 @@ include("plasma/plasma.jl")         # Plasma constructor uses Species and the un
 include("scattering/susceptibility.jl")   # new: needs alpha, xi, cauchy_dfdv
 include("scattering/spectral_density.jl") # new: needs susceptibility, dielectric, f_lab
 include("scattering/geometry.jl")         # new: needs the unit table and Plasma
+include("scattering/spectrum.jl")         # new: needs wavevector and spectral_density
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -28,7 +29,7 @@ export thermal_speed, plasma_frequency, debye_length, alpha, xi, f_lab
 export mean_charge_state, mean_ion_mass, neutrality_residual, zeff
 
 # scattering
-export susceptibility, dielectric, spectral_density
+export susceptibility, dielectric, spectral_density, spectrum, spectrum!
 
 # geometry
 export ScatteringGeometry, wavevector, polarization_factor
