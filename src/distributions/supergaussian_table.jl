@@ -10,9 +10,14 @@
 The table build's constants (spec D10, D12): the default panel edges before bisection; the
 domain `|ξ| ∈ [0, SG_XI_MAX]`, `m ∈ [SG_M_LO, SG_M_HI]`; the starting degree in each direction;
 the per-panel ξ-degree cap and the single global m-degree cap; the maximum number of times any
-one original panel may be bisected; and `τ`, the trailing-coefficient fit target (D12: lowered by
-a factor of ten, to a floor of `1e-12`, if the derivative certification TB7/TB8 does not pass at
-the previous value, and then pinned and reported — never asserted at runtime).
+one original panel may be bisected; and `τ`, the trailing-coefficient fit target (D12, revised
+2026-09-08 round 1: starts at `1e-9`, the value target with one order of margin, and — driven
+**only** by the derivative certification TB7/TB8, never by a single-point test — may be lowered by
+one factor of ten, to a floor of `1e-10`, if TB7/TB8 does not pass at `1e-9`. The floor is `1e-10`,
+not lower, because the generator itself (`CAUCHY_RTOL = 1e-10`) measures only ~1e-11 relative
+against a BigFloat oracle: τ below `1e-10` fits the generator's own quadrature noise rather than
+the true interpolation error, which is exactly what drove the degrees up without the accuracy
+improving in round 1's `τ = 1e-12` build. Pinned and reported — never asserted at runtime).
 
 These are `Float64` and `Int` constants of the *build*, not quantities that follow an argument's
 element type (`conventions.md` 5.1's clarification of 2026-09-08 covers this exactly): they are
@@ -28,7 +33,7 @@ const SG_DEGREE_START = 8
 const SG_DEGREE_CAP_XI = 64
 const SG_DEGREE_CAP_M = 48
 const SG_BISECT_MAX = 4
-const SG_FIT_TOL = 1e-12
+const SG_FIT_TOL = 1e-9
 
 """
     SuperGaussianTable{L,FT<:AbstractFloat}
@@ -37,9 +42,19 @@ The immutable table object (spec D10): `edges` (`np+1` panel edges, ascending, `
 `edges[end] == xi_max`), `nxi` (`np` per-panel ξ-degrees), `offset` (`np` zero-based starts of
 each panel's block within a slice), `nm` (the one global m-degree), `coeffs` (the
 `L*(nm+1)`-length flat tensor-coefficient array, in slice order: slice entry `i`'s `(nm+1)`
-m-coefficients are `coeffs[(i-1)*(nm+1)+1 : i*(nm+1)]`, spec D10's Layout), `m_lo`, `m_hi`,
-`xi_max` (the domain), and `tau` (the fit target actually used to build it). `L = Σ_p (nxi[p]+1)`
-is the slice length and the struct's second type parameter.
+m-coefficients are `coeffs[(i-1)*(nm+1)+1 : i*(nm+1)]`, spec D10's Layout), `xi_converged` (`np`
+booleans, one per panel: did the ξ-direction trailing-coefficient check pass at the degree finally
+used there?), `m_converged` (one boolean for the whole table: did the m-direction check pass, for
+every panel, at `nm`, the degree finally used?), `m_lo`, `m_hi`, `xi_max` (the domain), and `tau`
+(the fit target actually used to build it). `L = Σ_p (nxi[p]+1)` is the slice length and the
+struct's second type parameter.
+
+**"At the cap" and "failing at the cap" are different** (spec D9, corrected 2026-09-08 round 1):
+a panel or the m-direction that reaches its degree cap and passes the trailing-coefficient check
+there is a fine panel; `xi_converged[p]` or `m_converged` being `false` means a direction stopped
+*while still failing* the check — that, and only that, is the finding
+[OQ-31](../../dev/open_questions.md#oq-31) item 2 asks for, and TB3 asserts on these flags rather
+than on `nxi[p] < SG_DEGREE_CAP_XI`.
 
 Built once, by `_sg_build_table()`, into the module `const` `SG_TABLE`
 (`conventions.md` 5.6, the second named exception to "no global mutable state").
@@ -52,6 +67,8 @@ struct SuperGaussianTable{L,FT<:AbstractFloat}
     offset::Vector{Int}
     nm::Int
     coeffs::Vector{FT}
+    xi_converged::Vector{Bool}
+    m_converged::Bool
     m_lo::FT
     m_hi::FT
     xi_max::FT
@@ -258,8 +275,15 @@ The whole build (spec D9–D12), run once at include time: **Pass 1** adapts eve
 the final panel edges, each panel's own `nxi` and its own *required* `nm`. **Pass 2** sets
 `nm = max` over every panel's required `nm` (one global m-degree,
 [OQ-31](../../dev/open_questions.md#oq-31) item 2) and rebuilds any panel whose own `nm` fell
-short, reusing that panel's memo so only the new m-nodes cost a reference evaluation. Assembles
-the flat `coeffs` array in slice order (spec D10's Layout) and returns the `SuperGaussianTable`.
+short, reusing that panel's memo so only the new m-nodes cost a reference evaluation, then
+re-checks `_trailing_ok` in *both* directions on each panel's final tensor — "the degree finally
+used" (spec D9) is `nxi[p]` for the ξ direction and the shared `nm` for the m direction, and
+re-checking after Pass 2's rebuild is what makes that literal: a panel's own Pass-1 `nm` can be
+smaller than the global `nm`, and the extra m-columns Pass 2 adds could in principle change either
+direction's row/column maxima. `xi_converged[p]` is that per-panel ξ recheck; `m_converged` is the
+AND of the m recheck over every panel, since one global `nm` either serves the whole table or it
+does not. Assembles the flat `coeffs` array in slice order (spec D10's Layout) and returns the
+`SuperGaussianTable`.
 
 Deterministic, machine-independent, silent, `Float64` throughout, never `BigFloat`, and bounded
 by construction (`SG_BISECT_MAX`, `SG_DEGREE_CAP_XI`, `SG_DEGREE_CAP_M`) — the build runs at
@@ -276,13 +300,18 @@ function _sg_build_table()
     final = NamedTuple[]
     for p in panels
         C = p.nm < nm_global ? _tensor_coeffs(_sg_sample_grid!(p.memo, p.a, p.b, p.nxi, nm_global)) : p.C
-        push!(final, (a = p.a, b = p.b, nxi = p.nxi, C = C))
+        xi_converged = _trailing_ok(C, 1, tau)
+        m_converged = _trailing_ok(C, 2, tau)
+        push!(final, (a = p.a, b = p.b, nxi = p.nxi, C = C,
+                      xi_converged = xi_converged, m_converged = m_converged))
     end
     edges = Float64[final[1].a]
     for p in final
         push!(edges, p.b)
     end
     nxi_vec = Int[p.nxi for p in final]
+    xi_converged_vec = Bool[p.xi_converged for p in final]
+    m_converged = all(p.m_converged for p in final)
     offset = Int[]
     off = 0
     for n in nxi_vec
@@ -298,6 +327,7 @@ function _sg_build_table()
         end
     end
     return SuperGaussianTable{L,Float64}(edges, nxi_vec, offset, nm_global, coeffs,
+                                          xi_converged_vec, m_converged,
                                           SG_M_LO, SG_M_HI, SG_XI_MAX, tau)
 end
 

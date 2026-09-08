@@ -1,6 +1,6 @@
 using Test
 using OTIS
-using OTIS: SG_TABLE, SG_DEGREE_CAP_XI, SG_DEGREE_CAP_M, _sg_slice, _sg_table_eval,
+using OTIS: SG_TABLE, _sg_slice, _sg_table_eval,
             _sg_principal_value, _cheb_nodes, _cheb_coeffs, _cheb_eval, _cheb_map
 using Random
 import ForwardDiff
@@ -35,7 +35,7 @@ end
     end
 end
 
-@testset "TB3: table structure and cap findings" begin
+@testset "TB3: table structure and convergence" begin
     @test SG_TABLE.edges[1] == 0.0
     @test SG_TABLE.edges[end] == SG_TABLE.xi_max
     @test issorted(SG_TABLE.edges) && allunique(SG_TABLE.edges)
@@ -44,10 +44,13 @@ end
     @test length(SG_TABLE.nxi) == length(SG_TABLE.offset) == length(SG_TABLE.edges) - 1
     L = sum(SG_TABLE.nxi .+ 1)
     @test L == length(SG_TABLE.coeffs) ÷ (SG_TABLE.nm + 1)
-    for (p, n) in enumerate(SG_TABLE.nxi)
-        @test n < SG_DEGREE_CAP_XI
-    end
-    @test SG_TABLE.nm < SG_DEGREE_CAP_M
+    # Corrected 2026-09-08, round 1: assert on the converged flags (spec D9), not on
+    # nxi[p] < cap -- a panel that reaches its cap and passes the trailing-coefficient check
+    # there is a fine panel; only a flag that is false (a direction stopped while still
+    # failing) is the finding OQ-31 item 2 asks for.
+    @test length(SG_TABLE.xi_converged) == length(SG_TABLE.nxi)
+    @test all(SG_TABLE.xi_converged)
+    @test SG_TABLE.m_converged
 end
 
 const _rng_seed = 20260908
@@ -195,18 +198,44 @@ end
 end
 
 @testset "TB11: evenness and xi = 0" begin
-    # "Zero to TB7's floor" (spec D15) means TB7's own floor, from its whole certification set
-    # -- not a floor recomputed from the generator's central difference AT xi=0, which is itself
-    # ~0 by R'(0) = 0 and says nothing about the scale of derivatives elsewhere in the domain.
-    for m in (1.5, 2.0, 5.0, 8.0)
+    # Rewritten 2026-09-08, round 1 (spec D12, and the note under Section 4's test table):
+    # the old single-point derivative clause at xi=0 escalated tau to the 1e-12 floor for
+    # almost no diagnostic gain -- R'(0) = 0 exactly for every m > 0 (R is even), so a sign
+    # or chain-rule bug is invisible there, and near a panel endpoint a polynomial fit only
+    # approximates the derivative of the |xi|^(m+1) leading non-analytic term algebraically,
+    # so degree buys almost nothing. Three clauses instead: (a) and (b) are exact identities
+    # of the abs() chain rule, tested where they can actually fail (a != 0); (c) keeps a
+    # coarse sanity bound at xi=0 that may NOT drive tau (only TB7/TB8 may, per D12).
+    rng = Random.Xoshiro(_rng_seed)
+    xis_pos = 10 .* rand(rng, 8)
+    ms = (1.5, 2.0, 5.0, 8.0)
+
+    # (a) R(|xi|) == R(|-xi|) exactly -- both branches route through the same abs() call.
+    for m in ms, xi in xis_pos
         f = SuperGaussian(m)
-        for xi in (0.3, 1.7, 4.2)
-            v_pos = _sg_table_eval(SG_TABLE, f.slice, abs(xi))
-            v_neg = _sg_table_eval(SG_TABLE, f.slice, abs(-xi))
-            @test v_pos == v_neg
+        v_pos = _sg_table_eval(SG_TABLE, f.slice, abs(xi))
+        v_neg = _sg_table_eval(SG_TABLE, f.slice, abs(-xi))
+        @test isapprox(v_pos, v_neg; rtol = 1e-14)
+    end
+
+    # (b) dR/dxi(-a) == -dR/dxi(a) at a != 0, the chain-rule identity through abs() where a
+    # sign or chain-rule bug is actually visible (unlike at a = 0, where both sides are 0).
+    for m in ms
+        f = SuperGaussian(m)
+        for a in (0.05, 0.3, 1.7, 6.0)
+            d_pos = ForwardDiff.derivative(x -> _sg_table_eval(SG_TABLE, f.slice, abs(x)), a)
+            d_neg = ForwardDiff.derivative(x -> _sg_table_eval(SG_TABLE, f.slice, abs(x)), -a)
+            @test isapprox(d_neg, -d_pos; rtol = 1e-14)
         end
+    end
+
+    # (c) a coarse sanity bound on |R'(0)|, 100x TB7's floor, deliberately loose and barred
+    # from driving tau (D12): a genuinely broken panel selection or transposed tensor would
+    # put this at O(1), not at a few times TB7's floor.
+    for m in ms
+        f = SuperGaussian(m)
         d0 = ForwardDiff.derivative(x -> _sg_table_eval(SG_TABLE, f.slice, abs(x)), 0.0)
-        @test isapprox(d0, 0.0; atol = _TB7_FLOOR)
+        @test abs(d0) <= 100 * _TB7_FLOOR
     end
 end
 
