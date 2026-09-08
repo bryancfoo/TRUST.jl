@@ -4,6 +4,7 @@ include("constants.jl")
 include("plasma_dispersion.jl")
 include("distributions/distribution.jl")
 include("distributions/maxwellian.jl")
+include("distributions/supergaussian.jl")         # new (1.SG.1)
 include("plasma/species.jl")
 include("plasma/parameters.jl")     # methods on Species and SpeciesSpec
 include("plasma/plasma.jl")         # Plasma constructor uses Species and the unit table
@@ -13,7 +14,7 @@ include("scattering/geometry.jl")         # new: needs the unit table and Plasma
 include("scattering/spectrum.jl")         # new: needs wavevector and spectral_density
 
 # types
-export AbstractVelocityDistribution, Maxwellian, SpeciesSpec, Species, SpeciesSet, Plasma
+export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
 
 # shape interface
 export dfdx, cauchy_dfdv, moment, skewness, excess_kurtosis, parameters, reconstruct

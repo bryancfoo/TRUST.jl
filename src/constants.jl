@@ -287,3 +287,17 @@ _basefloat(x) = _basefloat(typeof(x))
 _basefloat(::Type{T}) where {T} = throw(ArgumentError(
     "_basefloat: no primal float type for $T; for a complex x call _basefloat(real(x)) " *
     "(conventions.md 5.12)"))
+
+"""
+    _primal_value(x) -> Real
+
+The primal (non-dual) *value* behind `x`, the value analogue of `_basefloat` (which returns the
+primal float *type*). Recurses through nested `ForwardDiff.Dual`s, so that a
+`Dual{T1,Dual{T2,...}}` unwraps to a plain float. Used to build a quadrature breakpoint from a
+dual argument without making the breakpoint itself dual (`conventions.md` 5.12's clause
+permitting a breakpoint at a dual's primal value).
+
+`conventions.md` 5.12; spec D8.
+"""
+_primal_value(x::Real) = x
+_primal_value(d::ForwardDiff.Dual) = _primal_value(ForwardDiff.value(d))

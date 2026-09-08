@@ -81,12 +81,24 @@ const CAUCHY_ATOL = 1e-12
 evaluated by singularity subtraction in the shifted variable `u = x − ξ` so that `ξ` appears
 only in the integrand, never in the quadrature limits (spec D9, D13; Pitfall 1). The symmetric
 window's `φ'(ξ) P∫_{−L}^{L} du/u` term is exactly zero and is not computed.
+
+The window's segment list carries one extra breakpoint, at `u0 = −ξ` taken at `ξ`'s *primal
+value* (`_primal_value`, never `ξ` itself: `conventions.md` 5.12's clause permitting a breakpoint
+at a dual's primal value). `u0` is where the m-partial of a super-Gaussian's integrand is least
+smooth (`|x|^m ln|x|` at `x = 0`); splitting the window there is what Step 1.SG.1's D8 measured to
+improve the m-derivative of `_cauchy_real` from 5.07e-6 to 1.56e-9 relative at `m = 2, ξ = 0.5`,
+with no measurable change on the Maxwellian (spec D8; Phase 0's M3–M5 tests still pass unchanged).
 """
 function _cauchy_real(f::AbstractVelocityDistribution, xi::Real)
     QT = _basefloat(xi)
     L = QT(CAUCHY_WINDOW)
+    z = zero(QT)
     g(u) = iszero(u) ? _d2fdx2(f, xi) : (dfdx(f, xi + u) - dfdx(f, xi)) / u
-    pv, _ = quadgk(g, -L, zero(QT), L; rtol = CAUCHY_RTOL, atol = CAUCHY_ATOL)
+    u0 = QT(-_primal_value(xi))
+    segments = z < u0 < L  ? (-L, z, u0, L) :
+               -L < u0 < z ? (-L, u0, z, L) :
+                             (-L, z, L)
+    pv, _ = quadgk(g, segments...; rtol = CAUCHY_RTOL, atol = CAUCHY_ATOL)
     tail_neg, _ = quadgk(u -> dfdx(f, xi + u) / u, QT(-Inf), -L; rtol = CAUCHY_RTOL, atol = CAUCHY_ATOL)
     tail_pos, _ = quadgk(u -> dfdx(f, xi + u) / u, L, QT(Inf); rtol = CAUCHY_RTOL, atol = CAUCHY_ATOL)
     return pv + tail_neg + tail_pos + im * QT(pi) * dfdx(f, xi)
@@ -141,6 +153,92 @@ function cauchy_dfdv(f::AbstractVelocityDistribution, xi::Number)
     else
         _cauchy_real(f, real(xi))
     end
+end
+
+"""
+    CAUCHY_SERIES_RTOL, CAUCHY_SERIES_MAXTERMS
+
+Numerical-method constants for `_cauchy_series`, the generic large-`|ξ|` Laurent series for
+`𝒞φ(ξ)` (spec D6). `CAUCHY_SERIES_RTOL` is the relative tolerance the running sum must reach
+before the series is declared converged; `CAUCHY_SERIES_MAXTERMS` is the term cap, reached at
+`m ≤ 2` near the low end of the series' converging range (spec D6 measured 37 of 40 terms needed
+at `m = 1.5, |ξ| = 8`) and deliberately not lowered.
+"""
+const CAUCHY_SERIES_RTOL = 1e-12
+const CAUCHY_SERIES_MAXTERMS = 40
+
+"""
+    _require_high_moments(f::AbstractVelocityDistribution)
+
+Throws unless `f` defines `moment(f, n)` up to `n = CAUCHY_SERIES_MAXTERMS − 1`, the highest
+moment `_cauchy_series` needs. Called once, before the term loop (never inside it, spec D6), so
+that a shape whose `moment` stops at the shared contract's `n = 0` to `4`
+(`conventions.md` Section 4) fails with a message naming the requirement rather than an opaque
+`ArgumentError` from deep inside the series.
+
+Spec D6, D18.
+"""
+function _require_high_moments(f::AbstractVelocityDistribution)
+    try
+        moment(f, 5)
+    catch
+        throw(ArgumentError(
+            "_cauchy_series: the shape $(typeof(f)) defines moment only for n = 0 to 4, but the " *
+            "Laurent series needs moments up to n = $(CAUCHY_SERIES_MAXTERMS - 1). A shape whose " *
+            "cauchy_dfdv uses this series must define moment(f, n) in closed form for every " *
+            "integer n >= 0 (conventions.md Section 4, OQ-3 item 7)."))
+    end
+    return nothing
+end
+
+"""
+    _cauchy_series(f::AbstractVelocityDistribution, xi::Number) -> (value, converged::Bool)
+
+The large-`|ξ|` asymptotic (not convergent) Laurent series for the principal-value part of
+`𝒞φ(ξ)`,
+
+    𝒞φ(ξ) ~ Σ_{n≥1} n M_{n−1} / ξ^{n+1} = 1/ξ² + 3/(2ξ⁴) + 5 M₄/ξ⁶ + 7 M₆/ξ⁸ + …,
+
+from `∫ xⁿ φ' dx = −n M_{n−1}` (integration by parts) and the geometric expansion of
+`1/(x−ξ)`, written once against `moment(f, n)` so that any shape with closed-form moments beyond
+`n = 4` reuses it. The Plemelj term `iπφ'(ξ)` is exact and is added by the caller, not here.
+
+The stopping rule, in this order for each `n = 1, …, CAUCHY_SERIES_MAXTERMS`: (1) an odd
+`M_{n−1}` of a symmetric shape is exactly zero, so its term is skipped and not counted; (2) a
+non-finite term (the first term is `Inf` at `ξ = 0`, and `Inf ≤ rtol·Inf` is `true`, so this guard
+is mandatory — without it the series reports convergence and returns `Inf`, spec Pitfall 3)
+returns `(sum, false)` immediately; (3) a term whose magnitude exceeds the previous term's means
+the series has turned, and returns `(sum, false)` without adding it; (4) otherwise the term is
+added; (5) if `|term| ≤ CAUCHY_SERIES_RTOL · |sum|` the series has converged, `(sum, true)`.
+Falling off the loop without converging returns `(sum, false)`.
+
+Spec D6; `docs/derivations/supergaussian.md`.
+"""
+function _cauchy_series(f::AbstractVelocityDistribution, xi::Number)
+    _require_high_moments(f)
+    M0 = moment(f, 0)
+    total = zero(promote_type(typeof(xi), typeof(M0)))
+    prev_mag = oftype(abs(total), Inf)
+    converged = false
+    for n in 1:CAUCHY_SERIES_MAXTERMS
+        Mnm1 = moment(f, n - 1)
+        iszero(Mnm1) && continue
+        term = n * Mnm1 / xi^(n + 1)
+        if !isfinite(term)
+            return (total, false)
+        end
+        mag = abs(term)
+        if mag > prev_mag
+            return (total, false)
+        end
+        total += term
+        prev_mag = mag
+        if mag <= CAUCHY_SERIES_RTOL * abs(total)
+            converged = true
+            break
+        end
+    end
+    return (total, converged)
 end
 
 """

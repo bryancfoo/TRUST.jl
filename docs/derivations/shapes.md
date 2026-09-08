@@ -97,4 +97,11 @@ What remains is `∫_{−L}^{L} [φ'(ξ+u) − φ'(ξ)]/u du`, whose integrand i
 (it is a difference quotient converging to `φ''(ξ)`, handled explicitly as a removable
 singularity, Pitfall 8), plus the two tail integrals, plus the residue `iπφ'(ξ)`. `L = 6`
 (`CAUCHY_WINDOW`) is wide enough that the tails are negligible for the Maxwellian's Gaussian
-decay and, per spec D9, for the heavier-tailed shapes arriving at Step 1.5.
+decay and, per spec D9, for the heavier-tailed shapes arriving at Step 1.SG.1.
+
+## 5. `SuperGaussian`, the second concrete shape
+
+`SuperGaussian` (Step 1.SG.1) is derived in `docs/derivations/supergaussian.md`. Its Cauchy
+integral is served, on the real axis and inside a domain in `(ξ, m)`, from a Chebyshev table
+built at precompile time (Step 1.SG.2); the generic quadrature fallback above remains its
+reference method and the table's own generator.
