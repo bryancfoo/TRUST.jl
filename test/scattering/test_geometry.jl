@@ -159,6 +159,16 @@ end
     _wv_approx()
     @test (@allocated _wv_exact()) == 0
     @test (@allocated _wv_approx()) == 0
+
+    # PF2 (Step 1.6): the same, on a two-electron/two-ion plasma.
+    p2 = Plasma(n_e_cm3 = 1e19,
+        electrons = (electrons(name = "e1", T_eV = 500, fraction = 0.5),
+                     electrons(name = "e2", T_eV = 800, fraction = 0.5)),
+        ions = (ion(name = "D", mass_amu = 2.014, charge = 1, T_eV = 250, fraction = 0.5),
+                ion(name = "C", mass_amu = 12.011, charge = 6, T_eV = 300, fraction = 0.5)))
+    _wv_exact2() = wavevector(g_exact, lam, p2)
+    _wv_exact2()
+    @test (@allocated _wv_exact2()) == 0
 end
 
 @testset "GE13: AD" begin

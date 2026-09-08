@@ -1,5 +1,27 @@
 # The scattered power spectrum P(λ_s)
 
+> **Front matter (Step 1.6, 2026-09-08).** Windows 11, Julia 1.12.7; SpecialFunctions 2.9.0,
+> QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1. Measured on this machine, latency
+> (one isolated call, warmed up) and throughput (best mean of 5 passes of 2000 calls for
+> `_spectrum_at`, 500 calls for `spectrum!`, both warmed up, measured inside a function per
+> Phase 0 pitfall 15 / spec pitfall 14) and `@allocated` after warm-up:
+>
+> | Call | latency | throughput | `@allocated` |
+> |---|---|---|---|
+> | `_spectrum_at`, Maxwellian | ~100 ns (timer resolution) | 157 ns | 0 |
+> | `spectrum!`, 512 bins, Maxwellian | 84.1 µs | 84.5 µs | 0 |
+>
+> Spec D24's reference numbers are 144 ns and 71 µs; both of mine run 9-19% slower, ordinary
+> machine variation — the allocation counts, the assertion that actually matters, are zero in
+> both cases, confirmed for a one-electron/one-ion **and** a two-electron/two-ion plasma
+> (`test/scattering/test_susceptibility.jl` CH8, `test/scattering/test_spectral_density.jl` SD9,
+> `test/scattering/test_geometry.jl` GE12, `test/scattering/test_spectrum.jl` SP11, spec PF2).
+> A `Plasma{ForwardDiff.Dual}` and a `ScatteringGeometry{ForwardDiff.Dual}` go through the exact
+> same `spectrum!` code as the `Float64` build (no method specializes on element type beyond
+> `FT<:Real`), which is what the SP9, SP10 gradient tests and PF3 (the dual plasma's value part
+> matching the `Float64` spectrum to `1e-14` relative) exercise. No cache was added and
+> `src/distributions/` was not touched (Phase 1 adds no quadrature to `src/`, spec Section 7).
+
 This document derives what `src/scattering/spectrum.jl` implements: the prefactor, the exact
 wavelength Jacobian, and the three benchmarks against Sheffield's noncollective and collective
 limiting cases.

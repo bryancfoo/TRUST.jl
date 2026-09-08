@@ -1,5 +1,18 @@
 # The scattering geometry and k(λ_s)
 
+> **Front matter (Step 1.6, 2026-09-08).** Windows 11, Julia 1.12.7; SpecialFunctions 2.9.0,
+> QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1. Measured on this machine, throughput
+> (best mean of 5 passes of 2000 calls, warmed up, measured inside a function) and `@allocated`
+> after warm-up:
+>
+> | Call | throughput | `@allocated` (1e/1i) | `@allocated` (2e/2i) |
+> |---|---|---|---|
+> | `wavevector` | 12 ns | 0 | 0 |
+>
+> Spec D24's reference is 21 ns; mine is faster on this machine, ordinary run-to-run variation.
+> Latency (one isolated call) is at this machine's `time_ns` resolution (~100 ns), too fast to
+> resolve individually at 12 ns throughput.
+
 This document derives what `src/scattering/geometry.jl` implements: the probed wavevector and
 frequency shift from the light-wave dispersion relation, the exact and approximate forms of `k`,
 the mean **k̂** convention, and the polarization factor.

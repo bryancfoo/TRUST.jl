@@ -1,5 +1,21 @@
 # Susceptibility and the dielectric function
 
+> **Front matter (Step 1.6, 2026-09-08).** Windows 11, Julia 1.12.7; SpecialFunctions 2.9.0,
+> QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1. Measured on this machine, throughput
+> (best mean of 5 passes of 2000 calls, warmed up, measured inside a function per Phase 0
+> pitfall 15) and `@allocated` after warm-up:
+>
+> | Call | throughput | `@allocated` (1e/1i) | `@allocated` (2e/2i) |
+> |---|---|---|---|
+> | `susceptibility`, Maxwellian species | 87 ns | 0 | 0 |
+> | `dielectric`, one electron + one ion | 112 ns | 0 | 0 |
+>
+> Both differ from spec D24's reference numbers (59 ns, 96 ns) by 15-50%, consistent with
+> ordinary machine-to-machine and run-to-run variation; the allocation counts, the assertion
+> that matters, agree exactly. Latency (one isolated call) is at this machine's `time_ns`
+> resolution (~100 ns) for both, too fast to resolve individually — see `spectrum.md`'s front
+> matter for the same note applied to the whole per-bin kernel.
+
 This document derives what `src/scattering/susceptibility.jl` implements: the per-species
 susceptibility `χ_s(k, ω)` in the package's shape normalization, and the longitudinal dielectric
 function `ε(k, ω)`.

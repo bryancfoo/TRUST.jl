@@ -1,5 +1,19 @@
 # The spectral density function S(k, ω)
 
+> **Front matter (Step 1.6, 2026-09-08).** Windows 11, Julia 1.12.7; SpecialFunctions 2.9.0,
+> QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1. Measured on this machine, throughput
+> (best mean of 5 passes of 2000 calls, warmed up, measured inside a function) and `@allocated`
+> after warm-up:
+>
+> | Call | throughput | `@allocated` |
+> |---|---|---|
+> | `spectral_density`, one electron + one ion | 138 ns | 0 |
+> | `spectral_density`, two electron + two ion species | 254 ns | 0 |
+>
+> Spec D24's reference numbers are 127 ns and 200 ns; both of mine run 8-27% slower, ordinary
+> machine variation, and the allocation counts (the assertion that matters) agree exactly at
+> zero for both species counts.
+
 This document derives what `src/scattering/spectral_density.jl` implements: `S(k, ω)` for any
 number of electron and ion species, its reduction to Sheffield's one-electron/one-ion form, the
 origin of the ion weight, its units, and the two sum rules Step 1.2 tests.

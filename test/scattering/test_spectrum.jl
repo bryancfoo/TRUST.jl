@@ -252,3 +252,16 @@ end
     P64 = spectrum(p64, g64, [lam])
     @test isapprox(P32[1], P64[1]; rtol = 1e-14)
 end
+
+@testset "PF3: a Dual plasma's spectrum matches the Float64 value" begin
+    p64 = reference_plasma()
+    g = ScatteringGeometry(lambda_probe_nm = 526.5, theta_deg = 90)
+    lambdas = collect(range(lambda_to_si(500.0, :lambda_nm), lambda_to_si(560.0, :lambda_nm); length = 16))
+    P64 = spectrum(p64, g, lambdas)
+
+    Te_dual = ForwardDiff.Dual(500.0, 1.0)
+    p_dual = Plasma(n_e_cm3 = 1e19, electrons = (electrons(T_eV = Te_dual),),
+                     ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
+    P_dual = spectrum(p_dual, g, lambdas)
+    @test isapprox(ForwardDiff.value.(P_dual), P64; rtol = 1e-14)
+end
