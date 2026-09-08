@@ -1,0 +1,22 @@
+# Planning documents and phase hand-offs (see CLAUDE.md): local only
+dev/
+
+# Reference material (textbook and papers): local only
+context/
+
+# Julia environments: Project.toml is tracked, resolved manifests are not
+Manifest.toml
+Manifest-v*.toml
+
+# Documenter output
+docs/build/
+docs/site/
+
+# Coverage and allocation tracking
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+lcov.info
+
+# Notebook checkpoints
+.ipynb_checkpoints/
