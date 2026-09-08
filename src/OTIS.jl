@@ -7,6 +7,7 @@ include("distributions/maxwellian.jl")
 include("plasma/species.jl")
 include("plasma/parameters.jl")     # methods on Species and SpeciesSpec
 include("plasma/plasma.jl")         # Plasma constructor uses Species and the unit table
+include("scattering/susceptibility.jl")   # new: needs alpha, xi, cauchy_dfdv
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -23,6 +24,9 @@ export thermal_speed, plasma_frequency, debye_length, alpha, xi, f_lab
 
 # plasma quantities
 export mean_charge_state, mean_ion_mass, neutrality_residual
+
+# scattering
+export susceptibility, dielectric
 
 # constants
 export ELECTRON_MASS, ELEMENTARY_CHARGE, VACUUM_PERMITTIVITY, SPEED_OF_LIGHT,
