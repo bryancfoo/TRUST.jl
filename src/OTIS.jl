@@ -5,6 +5,7 @@ include("plasma_dispersion.jl")
 include("distributions/distribution.jl")
 include("distributions/maxwellian.jl")
 include("distributions/supergaussian.jl")         # new (1.SG.1)
+include("distributions/supergaussian_table.jl")   # new (1.SG.2): builds SG_TABLE at include time
 include("plasma/species.jl")
 include("plasma/parameters.jl")     # methods on Species and SpeciesSpec
 include("plasma/plasma.jl")         # Plasma constructor uses Species and the unit table

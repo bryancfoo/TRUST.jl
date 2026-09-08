@@ -6,6 +6,7 @@ using SafeTestsets
 @safetestset "distribution interface" begin include("distributions/test_distribution.jl") end
 @safetestset "Maxwellian" begin include("distributions/test_maxwellian.jl") end
 @safetestset "SuperGaussian" begin include("distributions/test_supergaussian.jl") end
+@safetestset "SuperGaussian table" begin include("distributions/test_supergaussian_table.jl") end
 @safetestset "species" begin include("plasma/test_species.jl") end
 @safetestset "plasma parameters" begin include("plasma/test_parameters.jl") end
 @safetestset "plasma" begin include("plasma/test_plasma.jl") end

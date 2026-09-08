@@ -159,7 +159,95 @@ inside `_cauchy_real`, Section 8) while never evaluating `0^{dual\ m}`.
 
 ## 7. The table (Step 1.SG.2)
 
-*This section is completed at Step 1.SG.2.*
+**The domain.** `R(ξ; m) = P∫ φ'(x; m)/(x−ξ) dx`, the real (principal-value) part of `𝒞φ` on the
+real axis, is tabulated on `|ξ| ∈ [0, 10]` (`SG_XI_MAX`) `× m ∈ [1.5, 8]` (`SG_M_LO`, `SG_M_HI`),
+evaluated by the reference quadrature of Section 6 at the Chebyshev–Lobatto nodes of every ξ
+panel and of the m interval, at Phase 0's `CAUCHY_RTOL = 1e-10`, `CAUCHY_ATOL = 1e-12`, through
+`_sg_uncached(m)` so that the build never touches the table it is building
+([OQ-31](../../dev/open_questions.md#oq-31) item 1). Its imaginary part is exactly `iπ φ'(ξ)`,
+never tabulated; `R` is even in ξ (`φ'` is odd), so only `ξ ≥ 0` is stored and evaluation reads
+`|ξ|`.
+
+**The panels and degrees, as built (this machine, 2026-09-08).** Starting from the default panel
+edges `(0, 0.25, 0.5, 1, 2, 4, 10)` (`SG_PANEL_EDGES`), the fit at `τ = 1e-12` bisected the first
+panel once, giving:
+
+| Panel | `[a, b]` | `n_ξ` |
+|---|---|---|
+| 1 | [0, 0.125] | 64 |
+| 2 | [0.125, 0.25] | 16 |
+| 3 | [0.25, 0.5] | 16 |
+| 4 | [0.5, 1] | 16 |
+| 5 | [1, 2] | 32 |
+| 6 | [2, 4] | 64 |
+| 7 | [4, 10] | 32 |
+
+with one global `n_m = 48` and slice length `L = Σ(n_ξ+1) = 247`. **Panels 1 and 6 sit exactly at
+`SG_DEGREE_CAP_XI = 64`, and `n_m` sits exactly at `SG_DEGREE_CAP_M = 48`** — three cap findings
+(`test/distributions/test_supergaussian_table.jl` TB3), reported and not worked around
+(spec Pitfall 19, [OQ-31](../../dev/open_questions.md#oq-31) item 2). Panel 1 bisected once
+(depth 1 of the `SG_BISECT_MAX = 4` allowed) and still reaches the cap on its smaller half; panel
+6, `[2, 4]`, reaches the cap without ever needing to bisect (its value-based trailing-coefficient
+test is satisfied exactly at `n_ξ = 64`, so `_sg_adapt_panel!` never attempts a split there — see
+the go/no-go discussion in the hand-off report for what this implies).
+
+**τ's escalation history** (spec D12): the fit started at `SG_FIT_TOL = 1e-8`, the value target.
+At `1e-8`, `1e-9`, `1e-10` and `1e-11` the general derivative certification (TB7, TB8) passed
+comfortably, but the AD `∂R/∂ξ` at `ξ = 0` for `m` near `1.5` (TB11) — the panel abutting the
+domain's least-smooth point, where `R(ξ; m) − R(0; m) ~ |ξ|^{m+1}` — did not: measured `3.5e-5`
+at `τ = 1e-8`, falling to `4.4e-6` at `τ = 1e-10` and `1e-11` (no further change between the two,
+because panel 1 was already sitting at its degree cap and further tightening the value target
+could not push it past that), and only reaching `1.6e-6` — inside TB7's own floor — once `τ` fell
+to the **floor, `1e-12`**, where panel 1 bisected and the smaller sub-panel resolved the boundary
+better. **`SG_FIT_TOL` is pinned at `1e-12`.**
+
+**The error map** (`test/distributions/test_supergaussian_table.jl` TB13, 500 seeded points,
+`Xoshiro(20260908)`, 400 uniform over the domain plus 100 concentrated in `ξ ∈ [0, 0.5]`,
+`m ∈ [1.5, 2]`): worst relative value error per panel, against the target `rtol = atol = 1e-8`:
+
+| Panel | `[a, b]` | worst value error |
+|---|---|---|
+| 1 | [0, 0.125] | 5.3e-10 |
+| 2 | [0.125, 0.25] | 8.0e-14 |
+| 3 | [0.25, 0.5] | 4.4e-14 |
+| 4 | [0.5, 1] | 1.7e-13 |
+| 5 | [1, 2] | (interior, ≤ round-off) |
+| 6 | [2, 4] | 2.2e-11 |
+| 7 | [4, 10] | 5.1e-11 |
+
+worst near `ξ = 0` at `m ≤ 2` (the 100 concentrated points): `5.3e-10`, inside target by more than
+an order of magnitude. `∂R/∂ξ` worst absolute error `6.0e-7` against the floor `3.8e-6`
+(`1e-6 × max|∂R/∂ξ|` over the 500-point set); `∂R/∂m` worst absolute error `2.1e-8` against the
+floor `1.5e-6`.
+
+**The smoothness caveat.** `R` is not analytic at `ξ = 0`: its leading non-analytic term is
+`|ξ|^{m+1}`, so `R′(0) = 0` for every `m > 0` (`m + 1 > 1`) but `R` is only `C^{⌈m+1⌉-1}` there —
+for `m = 1.5`, only `C²` (the second derivative exists; the third does not). A Chebyshev series
+fitted on a one-sided panel `[0, b]` has no way to know `R` is even, so it does not automatically
+reproduce `R′(0) = 0` to the same relative accuracy the fit achieves in its interior; that is
+exactly what drove `τ`'s escalation and panel 1's bisection above, and is the risk
+[OQ-31](../../dev/open_questions.md#oq-31) item 4 anticipated.
+
+**Build and evaluation cost, this machine (Windows 11, Julia 1.12.7; SpecialFunctions 2.9.0,
+QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1), 2026-09-08:**
+
+| Quantity | Kind | Value |
+|---|---|---|
+| Reference evaluations for one build | count | 19 392 |
+| Generation + fit time | latency | ≈ 0.7–0.8 s (budget: 10 s) |
+| `Base.summarysize(SG_TABLE)` | size | 97 312 bytes |
+| Precompile time, before → after the table | latency | 4.6 s → 7.5 s (Δ ≈ +3.1 s; budget: Δ < 1 s, **missed**) |
+| Load time (warm cache), before → after | latency | 0.75 s → 0.91 s (Δ ≈ +0.16 s; within the < 1 s budget) |
+| `_sg_table_eval`, plain `ξ` | throughput | 40.8 ns |
+| `_sg_table_eval`, dual `ξ` | throughput | 53.3 ns |
+| `_sg_table_eval` on a dual-`m` shape (incl. slice build) | throughput | ≈ 19.3 µs |
+| `SuperGaussian(m)` construction, plain | throughput | ≈ 15.0 µs |
+| `SuperGaussian(m)` construction, dual `m` | throughput | ≈ 23.4 µs |
+
+`@allocated` is `0` for `_sg_table_eval` (plain, dual `ξ`, dual-`m` shape) and for `reconstruct`.
+**`L = 247` and the construction costs are well above the `L = 102`, `< 10 µs` anchor D3's caching
+decision was measured at** — driven by the same `m = 1.5`-near-`ξ = 0` boundary that drove `τ`'s
+escalation. See the hand-off report for the go/no-go judgement this is input to.
 
 ## 8. `_cauchy_real`'s breakpoint (spec D8)
 

@@ -52,11 +52,13 @@ _sg_C(m) = 1 / (2 * _sg_x0(m) * gamma(3 / m))
     SuperGaussian(m::Real)
 
 The public, one-argument constructor (`conventions.md` Section 11). Throws for `m ≤ 0`; computes
-`x0 = _sg_x0(m)` and `C = _sg_C(m)`; promotes `m`, `x0`, `C` to their common type `FT`; returns
-`SuperGaussian{FT,0}` with `slice = ()`. At Step 1.SG.1 no table exists yet, so every shape's `L`
-is `0`; Step 1.SG.2 gives this constructor an `_sg_slice` call and `L` becomes the table's slice
-length. Every constructor path recomputes all three cached fields from `m` — there is no
-constructor that takes them directly.
+`x0 = _sg_x0(m)` and `C = _sg_C(m)`; promotes `m`, `x0`, `C` to their common type `FT`; computes
+`slice = _sg_slice(SG_TABLE, m)` at the promoted `m` (so `slice`'s element type is `FT` too);
+returns `SuperGaussian{FT,L}`, `L` the table's slice length, the same integer for every shape
+built in a session. Every constructor path recomputes all three cached fields and the slice from
+`m` — there is no constructor that takes them directly. The uncached form the table's own
+generator needs, `SuperGaussian{FT,0}` with `slice = ()`, is built only by `_sg_uncached`, never
+by this constructor (spec D3, D11).
 
 Dimensionless: `m` is the exponent of the 3-D form (`conventions.md` notation dictionary), not a
 physical quantity. Tested for `m ∈ [1.4999, 8.5]`; below `m = 1` the quadrature fallback's second
@@ -69,8 +71,45 @@ function SuperGaussian(m::Real)
     x0 = _sg_x0(m)
     C = _sg_C(m)
     FT = promote_type(typeof(m), typeof(x0), typeof(C))
+    m_p, x0_p, C_p = FT(m), FT(x0), FT(C)
+    slice = _sg_slice(SG_TABLE, m_p)
+    return SuperGaussian(m_p, x0_p, C_p, slice)
+end
+
+"""
+    _sg_uncached(m::Real) -> SuperGaussian{FT,0}
+
+The generator's constructor, the *only* other way to build a `SuperGaussian`: computes `m`, `x0`
+and `C` exactly as the public constructor does, but sets `slice = ()`, giving a shape of the
+**distinct type** `SuperGaussian{FT,0}`. This breaks the cycle the table would otherwise create
+(`SuperGaussian(m)` needs `SG_TABLE`, and building `SG_TABLE` needs shapes to evaluate `R`):
+`_sg_principal_value` calls `_sg_cauchy_reference` on a shape built this way, and that path reads
+only `m`, `x0` and `C` — never `slice` and never `SG_TABLE` (spec D3, D11, Pitfall 2).
+
+`cauchy_dfdv` on a `SuperGaussian{<:Real,0}` throws (spec D18): a shape with a meaningless empty
+slice can never be evaluated by accident.
+
+Spec D3, D11; `docs/derivations/supergaussian.md`.
+"""
+function _sg_uncached(m::Real)
+    x0 = _sg_x0(m)
+    C = _sg_C(m)
+    FT = promote_type(typeof(m), typeof(x0), typeof(C))
     return SuperGaussian{FT,0}(FT(m), FT(x0), FT(C), ())
 end
+
+"""
+    cauchy_dfdv(f::SuperGaussian{<:Real,0}, xi::Number)
+
+Throws (spec D18): `f` is the uncached form the table's generator builds, with an empty,
+meaningless `slice`. It must never be evaluated; construct with `SuperGaussian(m)` instead. More
+specific than the generic `cauchy_dfdv(::SuperGaussian, ::Number)` method below, so a
+`SuperGaussian{<:Real,0}` always reaches this one first.
+"""
+cauchy_dfdv(f::SuperGaussian{<:Real,0}, xi::Number) = throw(ArgumentError(
+    "cauchy_dfdv(SuperGaussian{FT,0}, xi): this shape carries no table slice. It is the " *
+    "uncached form the table's generator builds and must not be used for evaluation; " *
+    "construct the shape with SuperGaussian(m)."))
 
 """
     (f::SuperGaussian)(x::Real) -> Real
