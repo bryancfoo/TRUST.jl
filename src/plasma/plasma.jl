@@ -126,6 +126,20 @@ function mean_ion_mass(p::Plasma)
     return sum(sp.n * sp.mass for sp in p.ions) / sum(sp.n for sp in p.ions)
 end
 
+"""
+    zeff(p::Plasma) -> FT
+
+The "other" mean charge, `Z_eff = ⟨Z²⟩/⟨Z⟩ = Σ_i n_i Z_i² / n_e`, the sum of the ion weights
+that appear in `spectral_density` (`conventions.md` 1.7, Section 4). Unlike
+`mean_charge_state` and `mean_ion_mass`, **`zeff` is 0, not an error, for a plasma with no ion
+species** — it is a plain sum with `init = zero(p.n_e)`; that contrast is by design.
+
+`conventions.md` Section 4; spec D10.
+"""
+function zeff(p::Plasma)
+    return sum(sp -> sp.charge^2 * sp.n, p.ions; init = zero(p.n_e)) / p.n_e
+end
+
 # --- show methods (spec D22) ---
 
 Base.show(io::IO, p::Plasma) = print(io, "Plasma($(length(p.electrons)) electron species, $(length(p.ions)) ion species)")

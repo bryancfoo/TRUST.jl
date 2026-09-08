@@ -149,6 +149,21 @@ end
     @test p.ions["D"].charge isa Int
 end
 
+@testset "SD10: zeff" begin
+    p1 = Plasma(n_e_cm3 = 1e19, electrons = [electrons(T_eV = 500)],
+                ions = [ion(mass_amu = 2.014, charge = 1, T_eV = 250)])
+    @test isapprox(zeff(p1), 1; rtol = 1e-14)
+
+    p2 = Plasma(n_e_cm3 = 1e19, electrons = [electrons(T_eV = 500)],
+                ions = [ion(name = "D", mass_amu = 2.014, charge = 1, T_eV = 250, fraction = 0.5),
+                        ion(name = "C", mass_amu = 12.011, charge = 6, T_eV = 250, fraction = 0.5)])
+    @test isapprox(zeff(p2), 3.5; rtol = 1e-14)
+
+    p3 = Plasma(n_e_cm3 = 1e19, electrons = [electrons(T_eV = 500)])
+    @test zeff(p3) == 0
+    @test_throws "mean_charge_state is undefined for a plasma with no ion species" mean_charge_state(p3)
+end
+
 @testset "Q18: dual promotion across species" begin
     d = ForwardDiff.Dual(300.0, 1.0)
     e = electrons(T_eV = 500.0)
