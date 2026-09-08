@@ -47,7 +47,7 @@ end
 end
 
 @testset "S8: species name validation" begin
-    for bad in ("", "D 2", "a.b", "a/b", "C6+")
+    for bad in ("", "D 2", "a.b", "a/b", "C6+", "names", "species")
         @test_throws "invalid species name" ion(name = bad, mass_amu = 2, charge = 1, T_eV = 300)
     end
     for good in ("D", "C6", "e_cold", "e-hot")
@@ -98,4 +98,5 @@ end
     @test_throws "mass must be positive; got 0.0 kg for species \"D\"" ion(name = "D", mass_kg = 0.0, charge = 1, T_eV = 300)
     @test_throws "temperature must be positive" ion(name = "D", mass_amu = 2, charge = 1, T_eV = -1)
     @test_throws "ion \"D\" has charge 0" ion(name = "D", mass_amu = 2, charge = 0, T_eV = 300)
+    @test_throws "ion \"D\" has charge -1; an ion's charge number must be a positive integer" ion(name = "D", mass_amu = 2, charge = -1, T_eV = 300)
 end

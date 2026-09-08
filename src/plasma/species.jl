@@ -59,12 +59,16 @@ spec(sp::Species) = SpeciesSpec(sp.name, sp.mass, sp.charge, sp.u, sp.T, sp.f, s
 
 Throws an `ArgumentError` unless `name` is non-empty and matches `r"^[A-Za-z0-9_-]+\$"`, TOML's
 bare-key character set (spec D23): a species name is also a parameter-path and deck-table
-segment, so it must be usable unquoted in both.
+segment, so it must be usable unquoted in both. `"names"` and `"species"` are reserved (they
+are `SpeciesSet`'s field names).
 """
 function _validate_species_name(name::AbstractString)
     occursin(r"^[A-Za-z0-9_-]+$", name) || throw(ArgumentError(
         "invalid species name \"$name\"; names must be non-empty and match [A-Za-z0-9_-]+ " *
         "(TOML's bare-key set) so they are valid as parameter-path and deck-table segments"))
+    name in ("names", "species") && throw(ArgumentError(
+        "invalid species name \"$name\"; \"names\" and \"species\" are reserved, being the " *
+        "field names of SpeciesSet (conventions.md 11.17)"))
     return nothing
 end
 
@@ -93,7 +97,8 @@ end
     ion(; name = "i", mass_amu | mass_kg, charge, T_eV | T_keV, u_kms | u_ms = 0, f = Maxwellian(), fraction = 1) -> SpeciesSpec
 
 Build the input form of an ion species. `mass`, `charge` and `T` are required (`charge` has no
-default: a charge number must always be stated); `u` defaults to zero.
+default and must be a positive integer: a charge number must always be stated, and negative
+ions are out of scope); `u` defaults to zero.
 
 `conventions.md` 1.2, Section 4; spec D11, D23.
 """
@@ -105,7 +110,7 @@ function ion(; name = "i", charge::Integer, f::F = Maxwellian(), fraction = 1, k
     _reject_extra_kwargs(kwargs, (:name, :mass_amu, :mass_kg, :charge, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction))
     mass > 0 || throw(ArgumentError("mass must be positive; got $mass kg for species \"$name\""))
     T > 0 || throw(ArgumentError("temperature must be positive; got $T J for species \"$name\""))
-    charge != 0 || throw(ArgumentError("ion \"$name\" has charge 0; an ion must have a non-zero charge number"))
+    charge >= 1 || throw(ArgumentError("ion \"$name\" has charge $charge; an ion's charge number must be a positive integer (negative ions are out of scope)"))
 
     FT = float(promote_type(typeof(mass), typeof(u), typeof(T), typeof(fraction)))
     return SpeciesSpec{FT,F}(String(name), FT(mass), Int(charge), FT(u), FT(T), f, FT(fraction))

@@ -10,7 +10,10 @@ kappa, and others) are first-class rather than fitted away.
 
 ## Status
 
-Phase 0 in progress; see the roadmap (not included in this tree).
+Phase 0 is complete: CODATA constants and boundary units, the plasma dispersion function
+`Z` with derivative rules, the velocity-shape interface with the Maxwellian, and `Species`,
+`Plasma` and the derived plasma quantities. Phase 1, the static forward model, is next. The
+roadmap is kept outside this tree.
 
 ## Installing and testing
 

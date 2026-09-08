@@ -271,9 +271,13 @@ end
 The primal (non-dual) float type behind `x`, used to construct quadrature integration limits
 (`conventions.md` 5.12) and float literals such as `sqrt(FT(π))` so that a dual argument does
 not drag a dead partial through a constant. Returns `Float64` for an `Integer` and unwraps a
-`ForwardDiff.Dual`, including a nested one, down to its underlying float type.
+`ForwardDiff.Dual`, including a nested one, down to its underlying float type; any other type
+raises an `ArgumentError` naming it.
 """
 _basefloat(::Type{FT}) where {FT<:AbstractFloat} = FT
 _basefloat(::Type{I}) where {I<:Integer} = Float64
 _basefloat(::Type{D}) where {D<:ForwardDiff.Dual} = _basefloat(ForwardDiff.valtype(D))
 _basefloat(x) = _basefloat(typeof(x))
+_basefloat(::Type{T}) where {T} = throw(ArgumentError(
+    "_basefloat: no primal float type for $T; for a complex x call _basefloat(real(x)) " *
+    "(conventions.md 5.12)"))

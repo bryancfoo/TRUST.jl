@@ -56,4 +56,6 @@ end
     @test _basefloat(d) === Float64
     dd = Dual(Dual(1.0, 1.0), Dual(1.0, 1.0))
     @test _basefloat(dd) === Float64
+    @test_throws "no primal float type for ComplexF64" _basefloat(1.0 + 2.0im)
+    @test_throws ArgumentError _basefloat(Complex{Float64})
 end
