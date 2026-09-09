@@ -20,3 +20,6 @@ lcov.info
 
 # Notebook checkpoints
 .ipynb_checkpoints/
+
+# Editor state
+.vscode/

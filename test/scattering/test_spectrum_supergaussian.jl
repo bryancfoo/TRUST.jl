@@ -95,14 +95,13 @@ end
     g = _ss_geometry()
     h = 1e-5
     for m in (2.0, 3.5)
-        # T_eV = 500.0 * one(mm) seeds a companion dual of mm's own tag with a zero partial, so
-        # that Plasma's FT (computed from the species' scalar fields, never from the shape's own
-        # element type -- spec Section 7's finding) is Dual, matching the values spectrum! writes
-        # under the hood; without it Plasma stays Float64-typed and spectrum! errors trying to
-        # store a Dual result into a Float64 output array.
+        # Plain T_eV = 500.0: Step 2.0 made the companion-dual seeding unnecessary. electrons()
+        # now promotes FT over values(parameters(f)) as well as the scalar fields, so a dual m
+        # already makes the species (and the plasma) dual with a zero partial on T_e, with no
+        # need to seed one by hand (spec Step 2.0 item 2, OQ-9 trap 6).
         function spec_of_m(mm)
             p = Plasma(n_e_cm3 = 5e19,
-                       electrons = (electrons(T_eV = 500.0 * one(mm), f = SuperGaussian(mm)),),
+                       electrons = (electrons(T_eV = 500.0, f = SuperGaussian(mm)),),
                        ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
             return spectrum(p, g, _SS_LAMBDA)
         end
@@ -219,18 +218,30 @@ end
     end
 
     @testset "dual on m" begin
-        # T_eV = 500.0 * one(m_dual) seeds a companion dual of m_dual's own tag with a zero
-        # partial (the SS2 pattern): _spectrum_eltype (src/scattering/spectrum.jl) promotes
-        # Plasma's and the geometry's own element types and eltype(lambda), never the shape's
-        # element type, so without this a Float64-typed Plasma is built happily and spectrum!
-        # only fails later, trying to store a Dual into a Float64 output array.
+        # Plain T_eV = 500.0: Step 2.0 made the companion-dual seeding unnecessary (see SS2's
+        # comment). electrons() now promotes FT over values(parameters(f)), so a dual m already
+        # makes the species and the plasma dual with a zero partial on T_e.
         m_dual = ForwardDiff.Dual(3.0, 1.0)
         p_dual_m = Plasma(n_e_cm3 = 5e19,
-                           electrons = (electrons(T_eV = 500.0 * one(m_dual), f = SuperGaussian(m_dual)),),
+                           electrons = (electrons(T_eV = 500.0, f = SuperGaussian(m_dual)),),
                            ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
         P_dual_m = spectrum(p_dual_m, g, _SS_LAMBDA)
         worst_m = maximum(abs.(ForwardDiff.value.(P_dual_m) .- P64)) / maximum(abs, P64)
         @info "SS8 dual m path vs Float64, worst normalized diff" worst_m
         @test isapprox(ForwardDiff.value.(P_dual_m), P64; rtol = 1e-14)
     end
+end
+
+@testset "HK4: the D22 regression plasma runs spectrum with no companion seeding (Step 2.0)" begin
+    # _ss_plasma(m) passes m straight through to SuperGaussian(m) and T_eV = 500 plain (no
+    # `* one(m)` companion): with electrons() now promoting FT over values(parameters(f)), a
+    # dual m alone is enough to make the whole plasma, and spectrum's output, dual.
+    g = _ss_geometry()
+    m_dual = ForwardDiff.Dual(3.0, 1.0)
+    p_dual = _ss_plasma(m_dual)
+    p64 = _ss_plasma(3.0)
+    P_dual = spectrum(p_dual, g, _SS_LAMBDA)
+    P64 = spectrum(p64, g, _SS_LAMBDA)
+    @test eltype(P_dual) <: ForwardDiff.Dual
+    @test isapprox(ForwardDiff.value.(P_dual), P64; rtol = 1e-14)
 end

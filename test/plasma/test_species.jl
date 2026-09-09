@@ -92,6 +92,26 @@ end
     @test !occursin(string(d.T), text)
 end
 
+@testset "HK3: a dual shape parameter makes the plasma dual with zero-partial scalars (Step 2.0)" begin
+    # OQ-9 trap 6, decided by Level 1 2026-09-09 (option (b), at the constructors): electrons()
+    # and ion() now promote FT over values(parameters(f)) as well as the scalar fields, so a
+    # SuperGaussian with a dual m makes the whole plasma dual, with the scalar fields carrying
+    # an exact zero partial, with no companion seeding needed on any scalar keyword.
+    m_dual = ForwardDiff.Dual{:HK}(3.5, 1.0)
+    p = Plasma(n_e_cm3 = 5e19,
+               electrons = (electrons(T_eV = 500.0, f = SuperGaussian(m_dual)),),
+               ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250.0),))
+    FT = typeof(p.n_e)
+    @test FT <: ForwardDiff.Dual
+    @test p.n_e isa FT
+    for sp in (p.electrons[1], p.ions[1])
+        for field in (sp.mass, sp.u, sp.T, sp.fraction, sp.n)
+            @test field isa FT
+            @test iszero(ForwardDiff.partials(field))
+        end
+    end
+end
+
 @testset "S11: non-positive T, mass, and zero ion charge" begin
     @test_throws "temperature must be positive; got" electrons(T_eV = -1.0)
     @test_throws "for species \"e\"" electrons(T_eV = -1.0)

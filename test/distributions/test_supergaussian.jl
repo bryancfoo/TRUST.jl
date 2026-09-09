@@ -305,14 +305,11 @@ end
 # --- Round 4 (2026-09-08): the three dual-path defects Level 1's review found ---
 
 @testset "R4.1: SuperGaussian(::Float32) promotes to Float64 (round 4, D3)" begin
-    # 3.0f0 round-trips exactly through Float32 (Phase 1's SP12 pattern), so m itself is
-    # bit-identical after promotion (checked below) -- but D3's constructor computes x0 and C
-    # from m *before* promoting (spec D3: "computes x0 = _sg_x0(m) ... promotes m, x0, C ...
-    # to a common FT"), so _sg_x0/_sg_C run gamma() at Float32 precision for f32 and at Float64
-    # precision for f64. The two shapes therefore agree only to Float32 precision (~1e-7
-    # measured), not to round-off; that is what "to Float32 precision" in the spec's test
-    # description means, and it is a property of the (unchanged) constructor design, not of
-    # round 4's fix (which only added the table's element type to the promotion).
+    # As of Step 2.0 (Phase 2 spec, item 1) the constructor promotes m to FT BEFORE computing
+    # x0(m) and C(m), so 3.0f0 -- which round-trips exactly through Float32 -- now gives a shape
+    # that agrees with SuperGaussian(3.0) to round-off, not merely to Float32 precision; HK1
+    # below is the bitwise version of this test. The rtol = 1e-6 comparisons here still hold
+    # (bitwise agreement implies them) and are kept as a looser, independent check.
     f32 = SuperGaussian(3.0f0)
     f64 = SuperGaussian(3.0)
     @test typeof(f32).parameters[1] === Float64
@@ -530,6 +527,46 @@ end
             dplus = ForwardDiff.derivative(x -> real(cauchy_dfdv(f, x)), a)
             dminus = ForwardDiff.derivative(x -> real(cauchy_dfdv(f, x)), -a)
             @test isapprox(dminus, -dplus; rtol = 1e-14)
+        end
+    end
+end
+
+# --- Step 2.0 (2026-09-09): the constructor promotes m before computing x0(m) and C(m) ---
+
+@testset "HK1: SuperGaussian(3.0f0) equals SuperGaussian(3.0) bitwise" begin
+    # 3.0f0 round-trips exactly through Float32, so m_p = FT(3.0f0) === 3.0 exactly; since the
+    # constructor now promotes BEFORE computing x0 and C (Phase 2 spec Step 2.0 item 1), every
+    # cached field is computed in Float64 arithmetic from that same value, not widened from a
+    # Float32-precision result. This is the whole point of the reorder: a relative tolerance
+    # would hide the old (wrong) behaviour, so the comparison here is bitwise.
+    f32 = SuperGaussian(3.0f0)
+    f64 = SuperGaussian(3.0)
+    @test typeof(f32) === typeof(f64)
+    @test f32.m === f64.m
+    @test f32.x0 === f64.x0
+    @test f32.C === f64.C
+    @test f32.slice === f64.slice
+end
+
+@testset "HK2: the Float32 path agrees bitwise in phi, dfdx and moment" begin
+    # 2.5f0, 3.0f0 and 0.5f0 are exactly representable in Float32 and round-trip exactly to
+    # Float64 (Phase 1's SP12 pattern, reused here for the same reason).
+    for m32 in (2.5f0, 3.0f0, 0.5f0)
+        f32 = SuperGaussian(m32)
+        f64 = SuperGaussian(Float64(m32))
+        @test typeof(f32) === typeof(f64)
+        for x in (0.0, 0.3, -0.3, 1.0, 2.5)
+            v32, v64 = f32(x), f64(x)
+            @test v32 === v64
+            @test typeof(v32) === Float64
+            d32, d64 = dfdx(f32, x), dfdx(f64, x)
+            @test d32 === d64
+            @test typeof(d32) === Float64
+        end
+        for n in 0:4
+            mo32, mo64 = moment(f32, n), moment(f64, n)
+            @test mo32 === mo64
+            @test typeof(mo32) === Float64
         end
     end
 end

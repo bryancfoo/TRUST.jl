@@ -58,20 +58,22 @@ overload. **Both are documented here because they share one doc-system key** (sp
 `SuperGaussian` with signature `Tuple{Real}`, so two separate docstrings on them collide and one
 is silently dropped, with a `Replacing docs` warning at precompile.
 
-**The constructor.** Throws for `m ≤ 0`; computes `x0 = _sg_x0(m)` and `C = _sg_C(m)`; promotes
-`m`, `x0`, `C` **and the table's own element type**, `eltype(SG_TABLE.coeffs)`, to their common
-type `FT` (spec D3, corrected 2026-09-08 round 4: without the table's element type, a `Float32 m`
-promotes the three scalars to `Float32` while `_sg_slice` returns an `NTuple{L,Float64}`, and the
-implicit constructor has no method for the mismatch — verified, `SuperGaussian(3.0f0)` threw a
-`MethodError` before this fix); computes `slice = _sg_slice(SG_TABLE, m)` at the promoted `m` (so
-`slice`'s element type is `FT` too); returns `SuperGaussian{FT,L}`, `L` the table's slice length,
-the same integer for every shape built in a session. Every constructor path recomputes all three
-cached fields and the slice from `m` — there is no constructor that takes them directly. The
-uncached form the table's own generator needs, `SuperGaussian{FT,0}` with `slice = ()`, is built
-only by `_sg_uncached`, never by this constructor (spec D3, D11), and **must not** get this same
-fourth-argument fix: it runs before `SG_TABLE` exists, so referring to it there is an undefined
-binding that would reintroduce the cycle D11 exists to break. The asymmetry between the two
-constructors is deliberate.
+**The constructor.** Throws for `m ≤ 0`; promotes `m` **first**, to `FT =
+promote_type(typeof(m), eltype(SG_TABLE.coeffs))`, then computes `x0 = _sg_x0(m_p)` and
+`C = _sg_C(m_p)` at the promoted `m_p` (spec D3, corrected 2026-09-09 at Step 2.0: promoting
+before computing, rather than computing at `m`'s own type and promoting the three scalars
+afterwards, is what `conventions.md` 5.1 asks for — "a `Float32` input promotes to `Float64` at
+the constructor" — since computing `x0` and `C` at `Float32` precision and then widening gives a
+different shape from `SuperGaussian(3.0)`, bit for bit, not merely to `Float32` precision; HK1
+is the test); computes `slice = _sg_slice(SG_TABLE, m_p)` at the promoted `m_p` (so `slice`'s
+element type is `FT` too); returns `SuperGaussian{FT,L}`, `L` the table's slice length, the same
+integer for every shape built in a session. Every constructor path recomputes all three cached
+fields and the slice from `m` — there is no constructor that takes them directly. The uncached
+form the table's own generator needs, `SuperGaussian{FT,0}` with `slice = ()`, is built only by
+`_sg_uncached`, never by this constructor (spec D3, D11), and **must not** get this same
+promote-first treatment: it runs before `SG_TABLE` exists, so naming `SG_TABLE` there is an
+undefined binding that would reintroduce the cycle D11 exists to break. The asymmetry between
+the two constructors is deliberate — do not tidy them into agreement.
 
 Dimensionless: `m` is the exponent of the 3-D form (`conventions.md` notation dictionary), not a
 physical quantity. Tested for `m ∈ [1.4999, 8.5]`; below `m = 1` the quadrature fallback's second
@@ -95,10 +97,10 @@ PACM Eq. 26; spec D3, D4, D5; `docs/derivations/supergaussian.md`.
 """
 function SuperGaussian(m::Real)
     m > 0 || throw(ArgumentError("SuperGaussian: m must be positive; got $m"))
-    x0 = _sg_x0(m)
-    C = _sg_C(m)
-    FT = promote_type(typeof(m), typeof(x0), typeof(C), eltype(SG_TABLE.coeffs))
-    m_p, x0_p, C_p = FT(m), FT(x0), FT(C)
+    FT = promote_type(typeof(m), eltype(SG_TABLE.coeffs))
+    m_p = FT(m)
+    x0_p = FT(_sg_x0(m_p))
+    C_p = FT(_sg_C(m_p))
     slice = _sg_slice(SG_TABLE, m_p)
     return SuperGaussian(m_p, x0_p, C_p, slice)
 end

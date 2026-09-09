@@ -78,6 +78,11 @@ end
 
 struct _Q9Shape <: OTIS.AbstractVelocityDistribution end
 (::_Q9Shape)(x) = exp(-x^2) / sqrt(pi)
+# Step 2.0 (Phase 2 spec): electrons()/ion() now call parameters(f) to promote FT over a
+# shape's own parameters (conventions.md Section 4 already requires every shape to implement
+# it; _Q9Shape had never been exercised through that path before).
+OTIS.parameters(::_Q9Shape) = NamedTuple()
+OTIS.reconstruct(f::_Q9Shape, ::NamedTuple) = f
 
 @testset "Q9: mixed shape types give a concrete Plasma type" begin
     p = Plasma(n_e_cm3 = 1e19, electrons = [electrons(T_eV = 500)],

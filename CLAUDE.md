@@ -177,7 +177,36 @@ message (`Step 0.2: constants and unit conversions`). Never commit `dev/`, `cont
 ## Environment
 
 Windows 11, Julia 1.12.7; the package targets Julia 1.10. The Bash tool on this machine has no
-coreutils (`sed`, `ls`, `cat` fail): use PowerShell or the file tools. PowerShell's `-replace`
-and `-match` are case-insensitive unless written `-creplace` and `-cmatch`. Julia sources here
-use Unicode identifiers (`φ`, `ω`, `α`); create and edit them with the file tools, never with
-`Set-Content` or `Out-File`, which do not preserve UTF-8 reliably.
+coreutils (`sed`, `ls`, `cat`, `grep`, `head` all fail) and no `python`: use PowerShell or the
+file tools. PowerShell's `-replace` and `-match` are case-insensitive unless written `-creplace`
+and `-cmatch`. Julia sources here use Unicode identifiers (`φ`, `ω`, `α`); create and edit them
+with the file tools, never with `Set-Content` or `Out-File`, which do not preserve UTF-8 reliably.
+
+**If Julia starts crashing repeatedly, stop and await further instruction.** Julia and its
+language server on this machine have crashed in bursts — most recently 2026-09-09, part-way
+through Phase 1.SG Step 1.SG.4, where restarting VSCode cleared it. One crash is bad luck;
+**three or four in a row with similar error messages is a broken environment, and the session
+must stop trying.** Record the error message and what you were running, once. Then:
+
+- **Do not keep reaching for another way to run it.** Retrying through `cmd`, through a different
+  shell, through a script file instead of `-e`, with different flags, or in a fresh call is not
+  diagnosis — it is the same failure again, and a burst of near-identical attempts buries the one
+  error message the user needs in noise.
+- **Do not try to fix the environment, and above all do not try repeatedly.** Clearing the
+  precompile cache, editing `Project.toml` or `Manifest.toml`, re-instantiating, reinstalling,
+  changing versions: each can leave the environment worse than you found it, and none of it is
+  any level's job here. **One attempt at a fix is already one too many** unless the user has
+  asked for it.
+- **Carry on with whatever does not need Julia**, then **hand back and wait for instructions.**
+  Say plainly what is done, what is blocked, and what the tree looks like. Do not press on into
+  work that depends on the blocked part, and do not treat handing back early as a failure — it
+  is the correct outcome, and it is far more useful than a long transcript of identical crashes.
+
+Committing work whose tests you could not run is not an option; leave it uncommitted and describe
+the state of the tree so the next session can pick it up.
+
+**Never report a number you could not measure, or a test you could not run.** Leave it explicitly
+blank and say why ("not measured — Julia crashed"). Do not estimate it, do not extrapolate it, and
+do not carry an earlier session's figure forward as if it were this one's. A missing measurement
+is something the user can act on; an invented one is not, because nobody downstream can tell it
+from a real one. The same holds for a test: say that it did not run, never that it passed.

@@ -55,6 +55,23 @@ The input form of `sp`: every field except the density `n`.
 spec(sp::Species) = SpeciesSpec(sp.name, sp.mass, sp.charge, sp.u, sp.T, sp.f, sp.fraction)
 
 """
+    _shape_eltype(f::AbstractVelocityDistribution) -> Type
+
+`promote_type` over the types of `values(parameters(f))`, or `Bool` (the promotion identity)
+for a shape with no parameters (`Maxwellian`). Folded into `electrons` and `ion`'s own element
+type so that a shape with dual parameters makes its species (and hence its plasma) dual with
+zero partials on the scalar fields, without `_spectrum_eltype` needing any knowledge of shapes
+([OQ-9](../../dev/open_questions.md#oq-9) trap 6, decided by Level 1 2026-09-09; spec Step 2.0
+item 2). The shape `f` itself is stored as given and is never converted here: it already carries
+whatever element type its own parameters do.
+"""
+function _shape_eltype(f::AbstractVelocityDistribution)
+    p = values(parameters(f))
+    isempty(p) && return Bool
+    return promote_type(typeof.(p)...)
+end
+
+"""
     _validate_species_name(name::AbstractString)
 
 Throws an `ArgumentError` unless `name` is non-empty and matches `r"^[A-Za-z0-9_-]+\$"`, TOML's
@@ -77,8 +94,12 @@ end
 
 Build the input form of an electron species. `mass` is `ELECTRON_MASS` and `charge` is `-1`;
 neither is a keyword. `T` is required, in eV or keV; `u` defaults to zero, in km/s or m/s.
+The element type `FT` is promoted over the scalar fields **and** over `values(parameters(f))`
+(`_shape_eltype`), so a shape with dual parameters makes the species (and hence the plasma)
+dual with zero partials on the scalars ([OQ-9](../../dev/open_questions.md#oq-9) trap 6,
+decided 2026-09-09; Phase 2 spec Step 2.0 item 2).
 
-`conventions.md` 1.2, Section 4; spec D11, D23.
+`conventions.md` 1.2, Section 4; spec D11, D23; Phase 2 spec Step 2.0.
 """
 function electrons(; name = "e", f::F = Maxwellian(), fraction = 1, kwargs...) where {F<:AbstractVelocityDistribution}
     _validate_species_name(name)
@@ -89,7 +110,7 @@ function electrons(; name = "e", f::F = Maxwellian(), fraction = 1, kwargs...) w
 
     mass = ELECTRON_MASS
     charge = -1
-    FT = float(promote_type(typeof(mass), typeof(u), typeof(T), typeof(fraction)))
+    FT = float(promote_type(typeof(mass), typeof(u), typeof(T), typeof(fraction), _shape_eltype(f)))
     return SpeciesSpec{FT,F}(String(name), FT(mass), charge, FT(u), FT(T), f, FT(fraction))
 end
 
@@ -98,9 +119,10 @@ end
 
 Build the input form of an ion species. `mass`, `charge` and `T` are required (`charge` has no
 default and must be a positive integer: a charge number must always be stated, and negative
-ions are out of scope); `u` defaults to zero.
+ions are out of scope); `u` defaults to zero. `FT` is promoted over the scalar fields and over
+`values(parameters(f))`, as `electrons`' docstring explains.
 
-`conventions.md` 1.2, Section 4; spec D11, D23.
+`conventions.md` 1.2, Section 4; spec D11, D23; Phase 2 spec Step 2.0.
 """
 function ion(; name = "i", charge::Integer, f::F = Maxwellian(), fraction = 1, kwargs...) where {F<:AbstractVelocityDistribution}
     _validate_species_name(name)
@@ -112,7 +134,7 @@ function ion(; name = "i", charge::Integer, f::F = Maxwellian(), fraction = 1, k
     T > 0 || throw(ArgumentError("temperature must be positive; got $T J for species \"$name\""))
     charge >= 1 || throw(ArgumentError("ion \"$name\" has charge $charge; an ion's charge number must be a positive integer (negative ions are out of scope)"))
 
-    FT = float(promote_type(typeof(mass), typeof(u), typeof(T), typeof(fraction)))
+    FT = float(promote_type(typeof(mass), typeof(u), typeof(T), typeof(fraction), _shape_eltype(f)))
     return SpeciesSpec{FT,F}(String(name), FT(mass), Int(charge), FT(u), FT(T), f, FT(fraction))
 end
 
