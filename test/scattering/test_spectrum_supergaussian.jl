@@ -207,10 +207,30 @@ end
     p64 = _ss_plasma(3.0)
     P64 = spectrum(p64, g, _SS_LAMBDA)
 
-    Te_dual = ForwardDiff.Dual(500.0, 1.0)
-    p_dual = Plasma(n_e_cm3 = 5e19,
-                     electrons = (electrons(T_eV = Te_dual, f = SuperGaussian(3.0)),),
-                     ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
-    P_dual = spectrum(p_dual, g, _SS_LAMBDA)
-    @test isapprox(ForwardDiff.value.(P_dual), P64; rtol = 1e-14)
+    @testset "dual on T_e" begin
+        Te_dual = ForwardDiff.Dual(500.0, 1.0)
+        p_dual_Te = Plasma(n_e_cm3 = 5e19,
+                            electrons = (electrons(T_eV = Te_dual, f = SuperGaussian(3.0)),),
+                            ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
+        P_dual_Te = spectrum(p_dual_Te, g, _SS_LAMBDA)
+        worst_Te = maximum(abs.(ForwardDiff.value.(P_dual_Te) .- P64)) / maximum(abs, P64)
+        @info "SS8 dual T_e path vs Float64, worst normalized diff" worst_Te
+        @test isapprox(ForwardDiff.value.(P_dual_Te), P64; rtol = 1e-14)
+    end
+
+    @testset "dual on m" begin
+        # T_eV = 500.0 * one(m_dual) seeds a companion dual of m_dual's own tag with a zero
+        # partial (the SS2 pattern): _spectrum_eltype (src/scattering/spectrum.jl) promotes
+        # Plasma's and the geometry's own element types and eltype(lambda), never the shape's
+        # element type, so without this a Float64-typed Plasma is built happily and spectrum!
+        # only fails later, trying to store a Dual into a Float64 output array.
+        m_dual = ForwardDiff.Dual(3.0, 1.0)
+        p_dual_m = Plasma(n_e_cm3 = 5e19,
+                           electrons = (electrons(T_eV = 500.0 * one(m_dual), f = SuperGaussian(m_dual)),),
+                           ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
+        P_dual_m = spectrum(p_dual_m, g, _SS_LAMBDA)
+        worst_m = maximum(abs.(ForwardDiff.value.(P_dual_m) .- P64)) / maximum(abs, P64)
+        @info "SS8 dual m path vs Float64, worst normalized diff" worst_m
+        @test isapprox(ForwardDiff.value.(P_dual_m), P64; rtol = 1e-14)
+    end
 end
