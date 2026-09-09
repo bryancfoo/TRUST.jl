@@ -59,22 +59,34 @@ overload. **Both are documented here because they share one doc-system key** (sp
 is silently dropped, with a `Replacing docs` warning at precompile.
 
 **The constructor.** Throws for `m ≤ 0`; computes `x0 = _sg_x0(m)` and `C = _sg_C(m)`; promotes
-`m`, `x0`, `C` to their common type `FT`; computes `slice = _sg_slice(SG_TABLE, m)` at the
-promoted `m` (so `slice`'s element type is `FT` too); returns `SuperGaussian{FT,L}`, `L` the
-table's slice length, the same integer for every shape built in a session. Every constructor path
-recomputes all three cached fields and the slice from `m` — there is no constructor that takes
-them directly. The uncached form the table's own generator needs, `SuperGaussian{FT,0}` with
-`slice = ()`, is built only by `_sg_uncached`, never by this constructor (spec D3, D11).
+`m`, `x0`, `C` **and the table's own element type**, `eltype(SG_TABLE.coeffs)`, to their common
+type `FT` (spec D3, corrected 2026-09-08 round 4: without the table's element type, a `Float32 m`
+promotes the three scalars to `Float32` while `_sg_slice` returns an `NTuple{L,Float64}`, and the
+implicit constructor has no method for the mismatch — verified, `SuperGaussian(3.0f0)` threw a
+`MethodError` before this fix); computes `slice = _sg_slice(SG_TABLE, m)` at the promoted `m` (so
+`slice`'s element type is `FT` too); returns `SuperGaussian{FT,L}`, `L` the table's slice length,
+the same integer for every shape built in a session. Every constructor path recomputes all three
+cached fields and the slice from `m` — there is no constructor that takes them directly. The
+uncached form the table's own generator needs, `SuperGaussian{FT,0}` with `slice = ()`, is built
+only by `_sg_uncached`, never by this constructor (spec D3, D11), and **must not** get this same
+fourth-argument fix: it runs before `SG_TABLE` exists, so referring to it there is an undefined
+binding that would reintroduce the cycle D11 exists to break. The asymmetry between the two
+constructors is deliberate.
 
 Dimensionless: `m` is the exponent of the 3-D form (`conventions.md` notation dictionary), not a
 physical quantity. Tested for `m ∈ [1.4999, 8.5]`; below `m = 1` the quadrature fallback's second
 derivative at `x = 0` can be `NaN` under ForwardDiff (spec Pitfall 14), so no test asks for it.
 
 **The call.** `φ(x) = C(m) Γ(2/m, |x/x₀(m)|^m)`, the upper incomplete gamma function.
-Dimensionless in and out. `x = 0` is handled in closed form, `φ(0) = C(m) Γ(2/m)`, rather than
-through `_upper_gamma`: `iszero(x)` is `false` for a `ForwardDiff.Dual` whose value is zero, so
+Dimensionless in and out. `x = 0` is handled in closed form, `φ(0) = C(m) Γ(2/m) · one(x)`, rather
+than through `_upper_gamma`: `iszero(x)` is `false` for a `ForwardDiff.Dual` whose value is zero, so
 the guard is `iszero(ForwardDiff.value(x))`, and without it `|x/x₀|^m` under a dual `m` evaluates
-`0 · log 0 = NaN` in the m-partial (spec Pitfall 1).
+`0 · log 0 = NaN` in the m-partial (spec Pitfall 1). **The `* one(x)` is not decoration** (spec D5,
+corrected 2026-09-08 round 4): without it this branch returns a plain `Float64` while the general
+branch returns a `Dual`, so the call's inferred return type at a dual `x` is `Union{Float64,Dual}`
+and the partials are silently dropped on this branch — harmless here only because φ′(0) = 0 for
+this shape, but a shape whose derivative at the guard point is nonzero would return the wrong
+answer.
 
 PACM Eq. 26; spec D3, D4, D5; `docs/derivations/supergaussian.md`.
 """
@@ -82,7 +94,7 @@ function SuperGaussian(m::Real)
     m > 0 || throw(ArgumentError("SuperGaussian: m must be positive; got $m"))
     x0 = _sg_x0(m)
     C = _sg_C(m)
-    FT = promote_type(typeof(m), typeof(x0), typeof(C))
+    FT = promote_type(typeof(m), typeof(x0), typeof(C), eltype(SG_TABLE.coeffs))
     m_p, x0_p, C_p = FT(m), FT(x0), FT(C)
     slice = _sg_slice(SG_TABLE, m_p)
     return SuperGaussian(m_p, x0_p, C_p, slice)
@@ -125,7 +137,7 @@ cauchy_dfdv(f::SuperGaussian{<:Real,0}, xi::Number) = throw(ArgumentError(
 
 # Documented above, on SuperGaussian(m::Real): the two share one doc-system key (spec Pitfall 21).
 function (f::SuperGaussian)(x::Real)
-    iszero(ForwardDiff.value(x)) && return f.C * gamma(2 / f.m)
+    iszero(ForwardDiff.value(x)) && return f.C * gamma(2 / f.m) * one(x)
     return f.C * _upper_gamma(2 / f.m, abs(x / f.x0)^f.m)
 end
 
@@ -274,9 +286,26 @@ arguments, so the both-dual method combines the value from `gamma(a,t)`, the a-p
 quadrature `_dgamma_da`, and the t-partial from the elementary `∂Γ(a,t)/∂t = −t^{a−1}e^{−t}`
 (guarded at `t = 0`, where that elementary form is singular for `a < 1`, since `t = 0` there is
 never actually reached with a nonzero t-partial — the call method's own `x = 0` guard routes
-around this method entirely). Four methods on purpose (plain, both-dual-same-tag, and the two
-promoting single-dual methods): do not collapse them (spec D5, verified to dispatch without
-ambiguity).
+around this method entirely).
+
+**The a-partial is computed only when `a` actually carries partials** (corrected 2026-09-08,
+round 4, from Level 1's review): `(a::Real, t::Dual)` has its own body below, the t-partial alone,
+instead of promoting into the both-dual method — promoting called `_dgamma_da`, an adaptive
+quadrature, and then multiplied its result by `a`'s all-zero partials. That is the path every
+`T_e`, `u` or `n_e` derivative of a fit takes, since `f_lab` calls `φ(x)` with a dual `x` and a
+plain `m`: measured, 79.2 ns plain against 7.2 µs dual (a 91× ratio) and 1536 bytes allocated where
+the plain call allocates none, violating `conventions.md` 5.2 and
+[OQ-9](../../dev/open_questions.md#oq-9) trap 1 (the x-partial is the closed form, never a
+quadrature). The both-dual method itself is also guarded, `iszero(ForwardDiff.partials(a))`, for
+the promoted cases (two duals of different tags) that still reach it. **The case where `m` carries
+partials keeps its quadrature** — that is design (a), correct, and not this round's business; it is
+the next bottleneck for fits with `m` free, recorded in OQ-9 trap 1 for Phase 3 to profile.
+
+Five methods on purpose (plain, both-dual-same-tag with its own body, `(Real, Dual)` with its own
+body, and the two promoting methods for a plain second argument and two duals of different tags):
+do not collapse them (spec D5, verified to dispatch without ambiguity — the `where {D<:Dual}`
+methods are diagonal and therefore more specific than the promoting ones, so they terminate the
+recursion once the arguments share a type).
 
 PACM's incomplete gamma; spec D5; `docs/derivations/supergaussian.md`.
 """
@@ -286,13 +315,19 @@ function _upper_gamma(a::D, t::D) where {D<:ForwardDiff.Dual}
     a0 = ForwardDiff.value(a)
     t0 = ForwardDiff.value(t)
     v = _upper_gamma(a0, t0)
-    da = _dgamma_da(a0, t0)
+    da = iszero(ForwardDiff.partials(a)) ? zero(t0) : _dgamma_da(a0, t0)
     dt = iszero(t0) ? zero(t0) : -t0^(a0 - 1) * exp(-t0)
     return D(v, da * ForwardDiff.partials(a) + dt * ForwardDiff.partials(t))
 end
 
+function _upper_gamma(a::Real, t::D) where {D<:ForwardDiff.Dual}
+    t0 = ForwardDiff.value(t)
+    v = _upper_gamma(a, t0)
+    dt = iszero(t0) ? zero(t0) : -t0^(a - 1) * exp(-t0)
+    return D(v, dt * ForwardDiff.partials(t))
+end
+
 _upper_gamma(a::ForwardDiff.Dual, t::Real) = _upper_gamma(promote(a, t)...)
-_upper_gamma(a::Real, t::ForwardDiff.Dual) = _upper_gamma(promote(a, t)...)
 _upper_gamma(a::ForwardDiff.Dual, t::ForwardDiff.Dual) = _upper_gamma(promote(a, t)...)
 
 """

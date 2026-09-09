@@ -300,3 +300,47 @@ end
     @test !occursin("x0", s)
     @test !occursin("slice", s)
 end
+
+# --- Round 4 (2026-09-08): the three dual-path defects Level 1's review found ---
+
+@testset "R4.1: SuperGaussian(::Float32) promotes to Float64 (round 4, D3)" begin
+    # 3.0f0 round-trips exactly through Float32 (Phase 1's SP12 pattern), so m itself is
+    # bit-identical after promotion (checked below) -- but D3's constructor computes x0 and C
+    # from m *before* promoting (spec D3: "computes x0 = _sg_x0(m) ... promotes m, x0, C ...
+    # to a common FT"), so _sg_x0/_sg_C run gamma() at Float32 precision for f32 and at Float64
+    # precision for f64. The two shapes therefore agree only to Float32 precision (~1e-7
+    # measured), not to round-off; that is what "to Float32 precision" in the spec's test
+    # description means, and it is a property of the (unchanged) constructor design, not of
+    # round 4's fix (which only added the table's element type to the promotion).
+    f32 = SuperGaussian(3.0f0)
+    f64 = SuperGaussian(3.0)
+    @test typeof(f32).parameters[1] === Float64
+    @test f32.m === f64.m
+    for x in (0.0, 0.5, -0.5, 2.5, -2.5)
+        @test isapprox(f32(x), f64(x); rtol = 1e-6)
+        @test isapprox(dfdx(f32, x), dfdx(f64, x); rtol = 1e-6)
+    end
+    for n in 0:4
+        @test isapprox(moment(f32, n), moment(f64, n); rtol = 1e-6, atol = 1e-6)
+    end
+end
+
+@testset "R4.2: phi at a dual x with a plain m allocates nothing (round 4, D5)" begin
+    f = SuperGaussian(3.0)
+    xd = ForwardDiff.Dual{:R4}(1.0, 1.0)
+    _call_dual() = f(xd)
+    _call_dual()   # warm up
+    @test (@allocated _call_dual()) == 0
+    v = _call_dual()
+    @test isfinite(ForwardDiff.value(v))
+    @test isapprox(ForwardDiff.value(v), f(1.0); rtol = 1e-14)
+    @test isapprox(ForwardDiff.partials(v)[1], dfdx(f, 1.0); rtol = 1e-12)
+end
+
+@testset "R4.3: phi at x=0 keeps a concrete return type under a dual (round 4, D5)" begin
+    f = SuperGaussian(3.0)
+    x0d = ForwardDiff.Dual{:R4}(0.0, 1.0)
+    v = @inferred f(x0d)
+    @test ForwardDiff.value(v) == f.C * gamma(2 / f.m)
+    @test ForwardDiff.partials(v)[1] == 0.0
+end

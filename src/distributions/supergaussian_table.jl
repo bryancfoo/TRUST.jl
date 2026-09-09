@@ -204,7 +204,7 @@ function _trailing_ok(C::AbstractMatrix{<:Real}, dim::Integer, tau)
 end
 
 """
-    _sg_sample_grid!(memo, a, b, nxi, nm, tau) -> Matrix{Float64}
+    _sg_sample_grid!(memo, a, b, nxi, nm) -> Matrix{Float64}
 
 Samples `R(ξ, m)` on the `(nxi+1) × (nm+1)` Lobatto grid of panel `[a, b] × [m_lo, m_hi]`,
 memoized by the exact `(ξ, m)` floating-point coordinate: a Lobatto node shared between degree
