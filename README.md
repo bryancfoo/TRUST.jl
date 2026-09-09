@@ -14,9 +14,13 @@ Phase 0 (CODATA constants and boundary units, the plasma dispersion function `Z`
 rules, the velocity-shape interface with the Maxwellian, and `Species`, `Plasma` and the derived
 plasma quantities) and Phase 1 (the static Maxwellian forward model: susceptibilities and the
 dielectric function, the spectral density `S(k, ω)`, the scattering geometry with the exact
-`k(λ_s)`, and the scattered power spectrum `P(λ_s)`) are complete. Phase 1.SG, the super-Gaussian
-shape and its precomputed Cauchy-integral table, is in progress. The roadmap is kept outside this
-tree.
+`k(λ_s)`, and the scattered power spectrum `P(λ_s)`) are complete.
+Phase 1.SG is complete too: the `SuperGaussian` shape — the one-dimensional marginal of an
+isotropic three-dimensional super-Gaussian, not `exp(-|x|^m)` — with closed-form moments, a
+derivative rule for the incomplete gamma function, and its Cauchy integral served from a
+Chebyshev table in (ξ, m) built when the package precompiles, so that a super-Gaussian spectrum
+costs about what a Maxwellian one does and is differentiable in the exponent `m`. Phase 2, time
+and the instrument model, is next. The roadmap is kept outside this tree.
 
 ## Installing and testing
 

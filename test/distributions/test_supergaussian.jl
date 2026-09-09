@@ -353,23 +353,33 @@ _dp_xis = [(2 * rand(_dp_rng) - 1) * SG_TABLE.xi_max for _ in 1:200]
 _dp_ms  = [SG_TABLE.m_lo + rand(_dp_rng) * (SG_TABLE.m_hi - SG_TABLE.m_lo) for _ in 1:200]
 
 @testset "DP1: cauchy_dfdv against _sg_cauchy_reference (seeded)" begin
+    worst_re = 0.0
+    worst_im = 0.0
     for (xi_pt, m) in zip(_dp_xis, _dp_ms)
         f = SuperGaussian(m)
         cur = cauchy_dfdv(f, xi_pt)
         ref = _sg_cauchy_reference(f, xi_pt)
+        worst_re = max(worst_re, abs(real(cur) - real(ref)) / max(abs(real(ref)), 1e-8))
+        worst_im = max(worst_im, abs(imag(cur) - imag(ref)) / max(abs(imag(ref)), 1e-12))
         @test isapprox(real(cur), real(ref); rtol = 1e-8, atol = 1e-8)
         @test isapprox(imag(cur), imag(ref); rtol = 1e-12, atol = 1e-12)
     end
+    @info "DP1 worst normalized error" worst_re worst_im
 end
 
 @testset "DP2: cauchy_dfdv against Zprime at m=2" begin
     f = SuperGaussian(2.0)
+    worst_re = 0.0
+    worst_im = 0.0
     for xi_pt in _dp_xis
         cur = cauchy_dfdv(f, xi_pt)
         ref = Zprime(xi_pt)
+        worst_re = max(worst_re, abs(real(cur) - real(ref)) / max(abs(real(ref)), 1e-8))
+        worst_im = max(worst_im, abs(imag(cur) - imag(ref)) / max(abs(imag(ref)), 1e-8))
         @test isapprox(real(cur), real(ref); rtol = 1e-8, atol = 1e-8)
         @test isapprox(imag(cur), imag(ref); rtol = 1e-8, atol = 1e-8)
     end
+    @info "DP2 worst normalized error" worst_re worst_im
 end
 
 @testset "DP3: the branches are the ones D14 names" begin
@@ -441,13 +451,18 @@ end
     end
     floor_xi = 1e-6 * maximum(abs, values(fd_xi))
     floor_m = 1e-6 * maximum(abs, values(fd_m))
+    worst_xi = 0.0
+    worst_m = 0.0
     for m in ms, xi_pt in xis
         f = SuperGaussian(m)
         ad_xi = ForwardDiff.derivative(x -> real(cauchy_dfdv(f, x)), xi_pt)
         ad_m = ForwardDiff.derivative(mm -> real(cauchy_dfdv(SuperGaussian(mm), xi_pt)), m)
+        worst_xi = max(worst_xi, abs(ad_xi - fd_xi[(m, xi_pt)]))
+        worst_m = max(worst_m, abs(ad_m - fd_m[(m, xi_pt)]))
         @test isapprox(ad_xi, fd_xi[(m, xi_pt)]; rtol = 1e-6, atol = floor_xi)
         @test isapprox(ad_m, fd_m[(m, xi_pt)]; rtol = 1e-6, atol = floor_m)
     end
+    @info "DP5 worst absolute error against its floor" worst_xi floor_xi worst_m floor_m
 end
 
 @testset "DP6: allocations through the dispatch, and susceptibility" begin
@@ -483,15 +498,18 @@ end
 
 @testset "DP7: continuity across the xi_max join" begin
     xmax = SG_TABLE.xi_max
+    worst = 0.0
     for m in (1.5, 2.0, 5.0)
         f = SuperGaussian(m)
         for dxi in -0.05:0.005:0.05
             xi_pt = xmax + dxi
             cur = real(cauchy_dfdv(f, xi_pt))
             ref = real(_sg_cauchy_reference(f, xi_pt))
+            worst = max(worst, abs(cur - ref) / max(abs(ref), 1e-8))
             @test isapprox(cur, ref; rtol = 1e-8, atol = 1e-8)
         end
     end
+    @info "DP7 worst normalized error at the xi_max join" worst
 end
 
 @testset "DP8: evenness, where the abs actually lives" begin

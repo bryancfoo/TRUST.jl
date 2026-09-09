@@ -14,3 +14,4 @@ using SafeTestsets
 @safetestset "spectral density" begin include("scattering/test_spectral_density.jl") end
 @safetestset "scattering geometry" begin include("scattering/test_geometry.jl") end
 @safetestset "spectrum" begin include("scattering/test_spectrum.jl") end
+@safetestset "super-Gaussian spectrum" begin include("scattering/test_spectrum_supergaussian.jl") end

@@ -1,5 +1,41 @@
 # The `SuperGaussian` shape
 
+> **Front matter (Step 1.SG.4, 2026-09-09).** Windows 11, Julia 1.12.7; SpecialFunctions 2.9.0,
+> QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1. Measured on this machine, latency (one
+> isolated call, warmed up) and throughput (best of 5 passes, warmed up, measured inside a
+> function per Phase 0 pitfall 15 — a closure over a non-`const` global lies) and `@allocated`
+> after warm-up:
+>
+> | Call | latency | throughput | `@allocated` |
+> |---|---|---|---|
+> | `susceptibility`, super-Gaussian species (`m = 3`) | 100 ns | 102.7 ns | 0 |
+> | `susceptibility`, Maxwellian (spec D23's baseline) | — | 86.9 ns | 0 |
+> | `spectrum!`, 512 bins, super-Gaussian electrons + Maxwellian D ions | 123.6 µs | 139.8 µs | 0 |
+> | `spectrum!`, 512 bins, Maxwellian (this machine, same run, cross-check) | — | 63.0 µs | 0 |
+> | `spectrum!`, 512 bins, Maxwellian (spec D23's baseline) | — | 84.5 µs | 0 |
+> | `cauchy_dfdv`, plain and dual-`m` shape | — | — | 0, 0 |
+> | `d(spectrum)/dT_e`, 512 bins (`ForwardDiff.derivative`) | — | 312.3 µs | 113 630 bytes |
+> | `d(spectrum)/dm`, 512 bins (`ForwardDiff.derivative`) | — | 3979.5 µs | 883 646 bytes |
+> | first super-Gaussian `spectrum` call, fresh session (`using` + build + compile + run) | 1.877 s | — | — |
+> | first Maxwellian `spectrum` call, fresh session (cross-check) | 0.899 s | — | — |
+>
+> **`spectrum!` on a super-Gaussian plasma runs at 139.8 µs against the Maxwellian's 63.0 µs on
+> this machine (ratio 2.22×) — or 84.5 µs from spec D23 (ratio 1.65×) — comfortably inside the
+> phase's 3× goal either way.** `susceptibility` and `cauchy_dfdv` are `@allocated`-zero for both
+> a plain shape and a dual-`m` shape (the table lookup and the Plemelj term `dfdx` are both closed
+> forms, so neither ever calls the incomplete gamma function). **`spectrum!` on a dual-`m` plasma
+> is *not* zero-allocation**, unlike the plain case: `spectral_density` calls `f_lab`, which
+> evaluates `φ(x)` directly (not just its Cauchy integral), and at a dual `m` this reaches
+> `_upper_gamma`'s both-dual branch, whose `a`-partial is a genuine quadrature (Section 6, D5,
+> [OQ-9](../../dev/open_questions.md#oq-9) trap 1) — the identical, already-documented cost the
+> `d(spectrum)/dm` row above measures directly, not a new defect. The `d(spectrum)/dT_e` row pays
+> a smaller, related cost (a same-tagged zero-partial dual `m`, needed only so `Plasma`'s element
+> type stays uniform across species, per `test/scattering/test_spectrum_supergaussian.jl`'s SS2/SS3
+> comments) without ever entering that quadrature, since a zero-partial `a` short-circuits it
+> (round 4's fix, D5). The first-call latency carries the `{FT, L}` type parameter's one-time
+> specialization cost: about **1.0 s** more than the Maxwellian's first call, on top of the
+> package's own `using OTIS` time (~0.36 s, not part of either figure above).
+
 This document derives what `src/distributions/supergaussian.jl` (and, from Step 1.SG.2,
 `src/distributions/supergaussian_table.jl`) implements, in the package's own normalization.
 
@@ -293,3 +329,41 @@ change is invisible (`|_cauchy_real − Zprime|` is `8.05e-16` before and `7.91e
 Phase 0's own M3 grid, the two forms differing by `2.2e-16`), and Phase 0's own tests
 (`test/distributions/test_distribution.jl`, `test/distributions/test_maxwellian.jl` M3–M5) pass
 unchanged with this breakpoint in place.
+
+## 9. Step 1.SG.4 — the forward model, and the accuracies achieved
+
+`spectrum!` on a super-Gaussian plasma runs through exactly the code Phase 1 wrote for the
+Maxwellian case (`src/scattering/spectrum.jl`, unchanged in this phase): nothing above the shape
+interface is touched anywhere in Phase 1.SG; `susceptibility` calls `cauchy_dfdv` and that is the
+whole coupling (spec Section 7, roadmap Step 1.SG.4).
+
+**The `m = 2` reduction, at the level of the whole spectrum
+(`test/scattering/test_spectrum_supergaussian.jl` SS1).** With one electron species carrying
+`SuperGaussian(2.0)` against the same plasma with `Maxwellian()`, D22's geometry (foo2026 Section
+III.A), all 512 bins: through `_sg_cauchy_reference` the two spectra agree to **`1e-12`
+relative** — round-off, since φ, φ′ and `𝒞φ(0)` all reduce exactly at `m = 2` (Section 4). Through
+the table they agree to **`1e-8` relative**, the table's own accuracy target (Section 7) rather
+than round-off, because the table interpolates `R(ξ; 2)` rather than evaluating the `m = 2` closed
+form directly. **The two tolerances are the point**: one certifies the physics, the other
+certifies the table.
+
+**The regression case (SS4, SS5), foo2026's EPW geometry (D22).** Through
+`_sg_cauchy_reference` — the path SS4 exercises — the three peak positions, FWHM values and peak
+values at `m ∈ {2, 3, 5}` reproduce D22's nine printed numbers (Section 6 of the spec) to **`1e-9`
+relative**, confirming that the shape and the scattering geometry are both right *before* the
+table is asked to reproduce anything. Through the table (SS5), the same nine numbers reproduce
+to well inside the `1e-6` relative tolerance the test asserts — table-versus-printed deltas of
+**4.2e-11 nm** in peak position, **4.8e-11 nm** in FWHM, and **4.1e-4** in peak value (against a
+peak value of order `7.7e+07`, about **3e-12 relative**) — essentially an exact reproduction of
+D22's nine numbers, not merely one inside the stated tolerance. `FWHM(5) < FWHM(3) < FWHM(2)`
+(weaker Landau damping at higher `m` at fixed second-moment `T_e`; PACM Fig. 5, Milder 2019) holds
+through both paths, and the peak moves blue by `1.16` nm from `m = 2` to `m = 5`, matching D22's
+characterization.
+
+**What this rests on** is Section 7's error map: the table's worst relative value error over its
+whole `(ξ, m)` domain is `5.3e-10`, in the least smooth region (near `ξ = 0` at `m ≤ 2`) —
+comfortably inside the `1e-8` target the spectrum-level tolerances above are built on, which is
+why the table-versus-printed deltas above come out so much smaller than the `1e-6` the test
+actually asserts: a table accurate to `1e-8` in the shape's own Cauchy integral propagates to an
+even smaller error in a derived quantity like a peak position or a FWHM, which depends on many
+bins at once rather than on a single evaluation of `R`.
