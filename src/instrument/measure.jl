@@ -1,0 +1,229 @@
+# ideal_streak, measure and the per-bin kernel; foreach_bin! and BinCache, the loop over time
+# bins. foreach_bin!'s serial branch is written at Step 2.2; its threaded (@tasks) branch is
+# Step 2.3's (conventions.md Section 6: this is the only file in the package that mentions
+# threads). Spec D16, D17.
+
+using LinearAlgebra: mul!
+
+"""
+    _effect_eltype(e::AbstractInstrumentEffect) -> Type
+
+`promote_type` over `values(parameters(e))`, or `Bool` (the promotion identity) for an effect
+with no parameters. A value that is itself a `Tuple` (`PolynomialBackground`'s `coefficients`)
+is flattened one level first, so every entry is promoted individually rather than the tuple's
+own (non-numeric) type being fed to `promote_type`.
+"""
+function _effect_eltype(e::AbstractInstrumentEffect)
+    p = values(parameters(e))
+    isempty(p) && return Bool
+    types = Type[]
+    for v in p
+        if v isa Tuple
+            for vi in v
+                push!(types, typeof(vi))
+            end
+        else
+            push!(types, typeof(v))
+        end
+    end
+    return promote_type(types...)
+end
+
+"""
+    _streak_eltype(expt::Experiment) -> Type{<:Real}
+
+The element type of `measure(expt)`/`ideal_streak(expt)`: `promote_type` of `eltype(expt.trace)`,
+the geometry's own element type, `eltype(expt.lambda)`, `eltype(expt.t)`, `_effect_eltype(e)` for
+every effect (plus `eltype(e.image)` for an `ImageBackground`). **This is the one place the
+element type is decided; every cache and output buffer downstream is typed from it** (Pitfall
+3).
+
+Spec D16.
+"""
+function _streak_eltype(expt::Experiment)
+    FT = promote_type(eltype(expt.trace), typeof(expt.geometry.lambda_probe),
+        eltype(expt.lambda), eltype(expt.t))
+    for e in expt.effects
+        FT = promote_type(FT, _effect_eltype(e))
+        e isa ImageBackground && (FT = promote_type(FT, eltype(e.image)))
+    end
+    return FT
+end
+
+"""
+    BinCache{FT<:Real}
+
+The per-task scratch space for the per-bin kernel: a length-`N_λ` column buffer.
+"""
+mutable struct BinCache{FT<:Real}
+    column::Vector{FT}
+end
+_make_cache(::Type{FT}, nlambda::Integer) where {FT} = BinCache{FT}(Vector{FT}(undef, nlambda))
+
+"""
+    foreach_bin!(kernel!, nbins::Integer, cache_factory; scheduler::Symbol = :auto)
+
+Calls `kernel!(j, cache)` once for every `j` in `1:nbins`. `cache_factory()` is called once per
+task and its result passed to every call that task makes. **This is the only function in the
+package that mentions threads or chunking** (`conventions.md` 6.2); caches are per task, never
+indexed by `Threads.threadid()` (`conventions.md` 6.3). `scheduler` is `:auto` (the default) or
+`:serial`.
+
+At this step (2.2) both values run the same serial loop; the `@tasks`/`DynamicScheduler`
+threaded branch for `scheduler === :auto` on more than one thread is Step 2.3's, and nothing
+above this function changes when it lands.
+
+Spec D17.
+"""
+function foreach_bin!(kernel!, nbins::Integer, cache_factory; scheduler::Symbol=:auto)
+    scheduler in (:auto, :serial) || throw(ArgumentError(
+        "foreach_bin!: scheduler must be :auto or :serial; got :$scheduler"))
+    cache = cache_factory()
+    for j in 1:nbins
+        kernel!(j, cache)
+    end
+    return nothing
+end
+
+"""
+    _kernel_effects(expt::Experiment) -> Tuple
+
+The leading run of `expt.effects` with `_chain_order == 1` (a prefix, since the tuple is
+sorted): the in-kernel effects, extracted once per streak, not per bin.
+"""
+function _kernel_effects(expt::Experiment)
+    effects = expt.effects
+    n = 0
+    for e in effects
+        _chain_order(e) == 1 || break
+        n += 1
+    end
+    return effects[1:n]
+end
+
+"""
+    _bin_kernel!(P::AbstractMatrix, expt::Experiment, j::Integer, cache::BinCache)
+
+The per-bin kernel: materializes `plasma(expt.trace, j)`, zeroes and accumulates into
+`cache.column` over the in-kernel effects' samples, then writes the column into `P[:, j]`.
+Allocation-free in the value pass and the dual pass alike (XP13).
+
+Spec D16.
+"""
+function _bin_kernel!(P::AbstractMatrix, expt::Experiment, j::Integer, cache::BinCache)
+    p = plasma(expt.trace, j)
+    col = cache.column
+    fill!(col, zero(eltype(col)))
+    _accumulate!(col, p, expt.geometry, expt.lambda, _kernel_effects(expt),
+        one(eltype(col)), _prefactor_flag(expt.prefactor))
+    @inbounds for l in eachindex(col)
+        P[l, j] = col[l]
+    end
+    return P
+end
+
+function _accumulate!(col, p, g, lambda, ::Tuple{}, w, first_order)
+    @inbounds for l in eachindex(lambda)
+        col[l] += w * _spectrum_at(p, g, lambda[l], first_order)
+    end
+    return col
+end
+
+function _accumulate!(col, p, g, lambda, effects::Tuple, w, first_order)
+    e = first(effects)
+    rest = Base.tail(effects)
+    for (wq, pq, gq) in samples(e, p, g)
+        _accumulate!(col, pq, gq, lambda, rest, w * wq, first_order)
+    end
+    return col
+end
+
+"""
+    ideal_streak!(P::AbstractMatrix, expt::Experiment; scheduler::Symbol = :auto) -> P
+
+Fills `P` (`N_λ x N_t`, wavelength first so a column is a contiguous view, Pitfall 15) with the
+ideal (pre-instrument) streak, one column per bin via `foreach_bin!`.
+
+Spec D16.
+"""
+function ideal_streak!(P::AbstractMatrix, expt::Experiment; scheduler::Symbol=:auto)
+    nl, nt_ = length(expt.lambda), length(expt.t)
+    size(P) == (nl, nt_) || throw(ArgumentError(
+        "ideal_streak!: P is $(size(P)) but the experiment's axes are $nl x $nt_"))
+    FT = eltype(P)
+    cache_factory = () -> _make_cache(FT, nl)
+    foreach_bin!(nbins(expt.trace), cache_factory; scheduler=scheduler) do j, cache
+        _bin_kernel!(P, expt, j, cache)
+    end
+    return P
+end
+
+"""
+    ideal_streak(expt::Experiment; scheduler::Symbol = :auto) -> Matrix
+
+Allocates `Matrix{_streak_eltype(expt)}(undef, N_λ, N_t)` and calls `ideal_streak!`.
+
+Spec D16.
+"""
+function ideal_streak(expt::Experiment; scheduler::Symbol=:auto)
+    FT = _streak_eltype(expt)
+    P = Matrix{FT}(undef, length(expt.lambda), length(expt.t))
+    return ideal_streak!(P, expt; scheduler=scheduler)
+end
+
+_needs_destination(::AbstractInstrumentEffect) = false
+_needs_destination(::SpectralIRF) = true
+_needs_destination(::TemporalIRF) = true
+
+apply!(dest, src, ::SpectralIRF, op) = mul!(dest, op, src)
+apply!(dest, src, ::TemporalIRF, op) = mul!(dest, src, transpose(op))
+function apply!(dest, src, e::Gain, op)
+    dest === src || copyto!(dest, src)
+    dest .*= e.gain
+    return dest
+end
+function apply!(dest, src, e::ConstantBackground, op)
+    dest === src || copyto!(dest, src)
+    dest .+= e.level
+    return dest
+end
+function apply!(dest, src, e::PolynomialBackground, op)
+    dest === src || copyto!(dest, src)
+    dest .+= op
+    return dest
+end
+function apply!(dest, src, e::ImageBackground, op)
+    size(e.image) == size(src) || throw(ArgumentError(
+        "ImageBackground: background image is $(size(e.image)) but the streak is $(size(src))"))
+    dest === src || copyto!(dest, src)
+    dest .+= e.scale .* e.image
+    return dest
+end
+
+"""
+    measure(expt::Experiment; scheduler::Symbol = :auto) -> Matrix
+
+The measured streak: `ideal_streak(expt)` walked through the detector effects (`_chain_order >
+1`) in canonical order via `apply!`, swapping between two buffers only where `SpectralIRF`/
+`TemporalIRF` need a separate destination (`_needs_destination`). Does not touch BLAS (spec
+D17's `pin_blas_threads` is the caller's job, from Step 2.3).
+
+Spec D16.
+"""
+function measure(expt::Experiment; scheduler::Symbol=:auto)
+    P = ideal_streak(expt; scheduler=scheduler)
+    spare = similar(P)
+    cur, buf = P, spare
+    for i in eachindex(expt.effects)
+        e = expt.effects[i]
+        _chain_order(e) == 1 && continue
+        op = expt.operators[i]
+        if _needs_destination(e)
+            apply!(buf, cur, e, op)
+            cur, buf = buf, cur
+        else
+            apply!(cur, cur, e, op)
+        end
+    end
+    return cur
+end

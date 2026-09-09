@@ -159,3 +159,6 @@ opposite of what Eq. 5.4.10 predicts. `spectrum!` uses the exact `k` uncondition
 red features) have different `λ_s`, so their Jacobians differ by `(λ_red/λ_blue)² ≈ 1.37` at the
 SP7/SP8 conditions, and comparing raw `P(λ)` peaks instead multiplies that factor in and fails
 by 37% for a reason that has nothing to do with the physics (spec D21 row 16, pitfall 9).
+
+**What happens to `P(λ_s)` after this point — the instrument chain, from `measure` — is
+`docs/derivations/instrument.md` (Phase 2, Step 2.2).**

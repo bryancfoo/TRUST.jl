@@ -60,7 +60,16 @@ named `n_e` (`conventions.md` 11.1) while OQ-5's original table only names `n`. 
 `lambda_probe` and `polarization` rows are a Phase 1 addition (Step 1.3, spec D4), carrying the
 same factors as `lambda` and `theta` respectively, needed because `ScatteringGeometry`'s
 constructor keywords are `lambda_probe_nm`/`lambda_probe_m` and
-`polarization_deg`/`polarization_rad`, not `lambda_nm` or `theta_deg`.
+`polarization_deg`/`polarization_rad`, not `lambda_nm` or `theta_deg`. The `fwhm_lambda`,
+`fwhm_t`, `half_angle` and `probe_offset` rows are a Phase 2 addition (Step 2.2, spec D3):
+their factors duplicate `lambda`, `t`, `theta` and `lambda` respectively, and the rows exist
+only so that `_si_value` accepts the keyword names `fwhm_nm`/`fwhm_ns`/`half_angle_deg`/
+`half_angle_rad`/`probe_offset_nm`/`probe_offset_m` and `_reject_extra_kwargs` catches a typo
+in one of them loudly; no `<quantity>_to_si`/`_from_si` pair is added for these four, since the
+existing `lambda_to_si` and `theta_to_si` already do the arithmetic. Unlike `lambda_probe` and
+`n_e`, whose keyword names carry their row's own name, `fwhm_nm` and `fwhm_ns` do not carry
+`fwhm_lambda`/`fwhm_t`'s row name, because they are what instrument papers quote (the user,
+2026-09-09).
 """
 const ACCEPTED_UNITS = (
     T      = (T_eV      = EV,               T_keV     = 1000 * EV),
@@ -73,6 +82,10 @@ const ACCEPTED_UNITS = (
     theta  = (theta_deg = π / 180,          theta_rad = 1.0),
     lambda_probe = (lambda_probe_nm = 1e-9,    lambda_probe_m   = 1.0),
     polarization = (polarization_deg = π / 180, polarization_rad = 1.0),
+    fwhm_lambda  = (fwhm_nm = 1e-9,          fwhm_m   = 1.0),
+    fwhm_t       = (fwhm_ns = 1e-9,          fwhm_s   = 1.0),
+    half_angle   = (half_angle_deg = π/180,  half_angle_rad = 1.0),
+    probe_offset = (probe_offset_nm = 1e-9,  probe_offset_m = 1.0),
 )
 
 """

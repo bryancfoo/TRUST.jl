@@ -529,35 +529,41 @@ end
 
 A `Plasma` equal to `p` but for the one leaf `ref` names, replaced by `value` (SI), with every
 species' density re-resolved from `n_e` and its (possibly just-changed) fraction, exactly as
-`plasma(trace, j)` does. Allocation-free by the same argument as `plasma(trace, j)`: `ntuple`
-over each `SpeciesSet`'s tuple, one position of which conditionally rewrites its species while
-every other position passes its species through unchanged — never a shape-type change, so every
-position's static return type is fixed regardless of which branch runs. What `GradientSmearing`
-calls (spec D10); EF9 asserts the zero.
+`plasma(trace, j)` does. `value`'s type need not match `p`'s own element type — a dual `value`
+(from a fitted `GradientSmearing` width, say) widens `p` first (`_widen_plasma`, the same
+promotion `PlasmaTrace`'s constructor does), so the widening is a compile-time-resolved no-op
+(and hence allocation-free) whenever `value`'s type already matches `p`'s. Allocation-free in
+that common case by the same argument as `plasma(trace, j)`: `ntuple` over each `SpeciesSet`'s
+tuple, one position of which conditionally rewrites its species while every other position
+passes its species through unchanged — never a shape-type change, so every position's static
+return type is fixed regardless of which branch runs. What `GradientSmearing` calls (spec D10);
+EF9 asserts the zero for the plain (non-widening) pass.
 
 Spec D8.
 """
-function _with_leaf(p::Plasma{FT}, ref::LeafRef, value) where {FT}
+function _with_leaf(p::Plasma, ref::LeafRef, value)
+    FT = promote_type(typeof(p.n_e), typeof(value))
+    p2 = _widen_plasma(p, FT)
     v = FT(value)
     if ref.set === :n_e
-        new_electrons = map(sp -> _redensify(sp, v, :electrons), p.electrons.species)
-        new_ions = map(sp -> _redensify(sp, v, :ions), p.ions.species)
-        electron_set = SpeciesSet(p.electrons.names, new_electrons)
-        ion_set = SpeciesSet(p.ions.names, new_ions)
+        new_electrons = map(sp -> _redensify(sp, v, :electrons), p2.electrons.species)
+        new_ions = map(sp -> _redensify(sp, v, :ions), p2.ions.species)
+        electron_set = SpeciesSet(p2.electrons.names, new_electrons)
+        ion_set = SpeciesSet(p2.ions.names, new_ions)
         return Plasma{FT,typeof(electron_set),typeof(ion_set)}(v, electron_set, ion_set)
     end
 
     kind = ref.set
     if kind === :electrons
-        new_species = ntuple(i -> _maybe_update_species(p.electrons.species[i], i, ref, kind, v, p.n_e),
-                              Val(length(p.electrons)))
-        electron_set = SpeciesSet(p.electrons.names, new_species)
-        return Plasma{FT,typeof(electron_set),typeof(p.ions)}(p.n_e, electron_set, p.ions)
+        new_species = ntuple(i -> _maybe_update_species(p2.electrons.species[i], i, ref, kind, v, p2.n_e),
+                              Val(length(p2.electrons)))
+        electron_set = SpeciesSet(p2.electrons.names, new_species)
+        return Plasma{FT,typeof(electron_set),typeof(p2.ions)}(p2.n_e, electron_set, p2.ions)
     else
-        new_species = ntuple(i -> _maybe_update_species(p.ions.species[i], i, ref, kind, v, p.n_e),
-                              Val(length(p.ions)))
-        ion_set = SpeciesSet(p.ions.names, new_species)
-        return Plasma{FT,typeof(p.electrons),typeof(ion_set)}(p.n_e, p.electrons, ion_set)
+        new_species = ntuple(i -> _maybe_update_species(p2.ions.species[i], i, ref, kind, v, p2.n_e),
+                              Val(length(p2.ions)))
+        ion_set = SpeciesSet(p2.ions.names, new_species)
+        return Plasma{FT,typeof(p2.electrons),typeof(ion_set)}(p2.n_e, p2.electrons, ion_set)
     end
 end
 

@@ -16,3 +16,6 @@ using SafeTestsets
 @safetestset "scattering geometry" begin include("scattering/test_geometry.jl") end
 @safetestset "spectrum" begin include("scattering/test_spectrum.jl") end
 @safetestset "super-Gaussian spectrum" begin include("scattering/test_spectrum_supergaussian.jl") end
+@safetestset "instrument effects" begin include("instrument/test_effects.jl") end
+@safetestset "instrument background" begin include("instrument/test_background.jl") end
+@safetestset "instrument experiment" begin include("instrument/test_experiment.jl") end

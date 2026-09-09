@@ -14,6 +14,10 @@ include("scattering/susceptibility.jl")   # new: needs alpha, xi, cauchy_dfdv
 include("scattering/spectral_density.jl") # new: needs susceptibility, dielectric, f_lab
 include("scattering/geometry.jl")         # new: needs the unit table and Plasma
 include("scattering/spectrum.jl")         # new: needs wavevector and spectral_density
+include("instrument/effects.jl")          # new (2.2): needs ScatteringGeometry, Plasma, LeafRef
+include("instrument/background.jl")       # new (2.2)
+include("instrument/experiment.jl")       # new (2.2): needs the effects and PlasmaTrace
+include("instrument/measure.jl")          # new (2.2/2.3): needs Experiment and spectrum!
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -39,6 +43,13 @@ export susceptibility, dielectric, spectral_density, spectrum, spectrum!
 
 # geometry
 export ScatteringGeometry, wavevector, polarization_factor
+
+# instrument (2.2, 2.3)
+export AbstractInstrumentEffect, SpectralIRF, TemporalIRF, KSmearing, GradientSmearing,
+       ProbeOffset, Gain, ConstantBackground, PolynomialBackground, ImageBackground,
+       GaussianKernel, TabulatedKernel
+export Experiment, measure, ideal_streak, ideal_streak!, islinear, stage, samples, apply!
+export foreach_bin!
 
 # constants
 export ELECTRON_MASS, ELEMENTARY_CHARGE, VACUUM_PERMITTIVITY, SPEED_OF_LIGHT,
