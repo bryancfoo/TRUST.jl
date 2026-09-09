@@ -76,6 +76,9 @@ constructors is deliberate.
 Dimensionless: `m` is the exponent of the 3-D form (`conventions.md` notation dictionary), not a
 physical quantity. Tested for `m ∈ [1.4999, 8.5]`; below `m = 1` the quadrature fallback's second
 derivative at `x = 0` can be `NaN` under ForwardDiff (spec Pitfall 14), so no test asks for it.
+**A shape's `m` outside the table's domain (`SG_TABLE.m_lo` to `SG_TABLE.m_hi`) is not an error**:
+`cauchy_dfdv` on it runs the reference quadrature instead of the table, correctly but about 60 µs
+a call against about 50 ns through the table (spec D18, D14).
 
 **The call.** `φ(x) = C(m) Γ(2/m, |x/x₀(m)|^m)`, the upper incomplete gamma function.
 Dimensionless in and out. `x = 0` is handled in closed form, `φ(0) = C(m) Γ(2/m) · one(x)`, rather
@@ -227,20 +230,35 @@ end
 """
     cauchy_dfdv(f::SuperGaussian, xi::Number) -> Complex
 
-The Cauchy integral of the shape's derivative (`conventions.md` 1.5). At Step 1.SG.1, before the
-table exists: `Im ξ < 0` throws and `Im ξ > 0` uses direct quadrature (both via
-`_sg_cauchy_reference`); real `ξ` tries the large-|ξ| Laurent series (`_cauchy_series`) first and
-falls back to the reference quadrature where the series does not converge. Step 1.SG.2's table
-inserts a third branch, checked before the series, for real `ξ` inside the table's domain — see
-`docs/derivations/supergaussian.md`.
+The Cauchy integral of the shape's derivative (`conventions.md` 1.5), in its final form (spec
+D14, Step 1.SG.3): off the real axis, `Im ξ < 0` throws and `Im ξ > 0` uses direct quadrature,
+both via `_sg_cauchy_reference` (D18) — the forward model never evaluates off the real axis, so
+this branch exists for tests and for Phase 4. For real `ξ`, three branches in order: **(1)**
+inside the table's domain — `|ξ| ≤ SG_TABLE.xi_max` and `SG_TABLE.m_lo ≤ m ≤ SG_TABLE.m_hi`, both
+read from the table object and never duplicated (`SG_TABLE` is the only place the domain lives) —
+`_sg_table_eval(SG_TABLE, f.slice, |ξ|)` plus the exact Plemelj term `iπ φ'(ξ)`, used **even where
+the large-|ξ| series would also converge** (the join at `|ξ| = xi_max` is a test, DP7/TB10, not a
+blend); **(2)** outside the table's domain, the large-|ξ| Laurent series (`_cauchy_series`) if it
+converges, plus the same Plemelj term; **(3)** otherwise, the reference quadrature
+`_sg_cauchy_reference`. **`m` outside `[m_lo, m_hi]` is not an error**: the fallback runs,
+correctly, about 60 µs a call, against about 50 ns through the table.
 
-`conventions.md` 1.5; spec D3, D6, D7; `docs/derivations/supergaussian.md`.
+Every branch decision is made on a primal value: comparisons on a `ForwardDiff.Dual` already
+compare values, so `|ξ| ≤ xi_max` and `m_lo ≤ m ≤ m_hi` need no help; only `_sg_table_eval`'s panel
+index is built from a primal (`_primal_value`, inside that function, spec 5.12).
+
+`conventions.md` 1.5; spec D14; `docs/derivations/supergaussian.md`.
 """
 function cauchy_dfdv(f::SuperGaussian, xi::Number)
     if !iszero(imag(xi))
         return _sg_cauchy_reference(f, xi)
     end
     rxi = real(xi)
+    axi = abs(rxi)
+    if axi <= SG_TABLE.xi_max && SG_TABLE.m_lo <= f.m <= SG_TABLE.m_hi
+        QT = _basefloat(rxi)
+        return _sg_table_eval(SG_TABLE, f.slice, axi) + im * QT(pi) * dfdx(f, rxi)
+    end
     series_val, converged = _cauchy_series(f, rxi)
     if converged
         QT = _basefloat(rxi)

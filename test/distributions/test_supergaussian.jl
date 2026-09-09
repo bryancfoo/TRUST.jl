@@ -1,11 +1,12 @@
 using Test
 using OTIS
 using OTIS: _sg_cauchy_reference, _cauchy_series, _require_high_moments, _upper_gamma,
-            _dgamma_da, _sg_x0, _sg_C
+            _dgamma_da, _sg_x0, _sg_C, _sg_table_eval, SG_TABLE, _cauchy_upper, _basefloat
 using ForwardDiff: derivative
 import ForwardDiff
 using SpecialFunctions: gamma, digamma
 using QuadGK: quadgk
+using Random
 
 include(joinpath(@__DIR__, "..", "shape_contract.jl"))
 
@@ -343,4 +344,174 @@ end
     v = @inferred f(x0d)
     @test ForwardDiff.value(v) == f.C * gamma(2 / f.m)
     @test ForwardDiff.partials(v)[1] == 0.0
+end
+
+# --- Step 1.SG.3: cauchy_dfdv served from the table (spec D14, Section 5) ---
+
+_dp_rng = Random.Xoshiro(20260908)
+_dp_xis = [(2 * rand(_dp_rng) - 1) * SG_TABLE.xi_max for _ in 1:200]
+_dp_ms  = [SG_TABLE.m_lo + rand(_dp_rng) * (SG_TABLE.m_hi - SG_TABLE.m_lo) for _ in 1:200]
+
+@testset "DP1: cauchy_dfdv against _sg_cauchy_reference (seeded)" begin
+    for (xi_pt, m) in zip(_dp_xis, _dp_ms)
+        f = SuperGaussian(m)
+        cur = cauchy_dfdv(f, xi_pt)
+        ref = _sg_cauchy_reference(f, xi_pt)
+        @test isapprox(real(cur), real(ref); rtol = 1e-8, atol = 1e-8)
+        @test isapprox(imag(cur), imag(ref); rtol = 1e-12, atol = 1e-12)
+    end
+end
+
+@testset "DP2: cauchy_dfdv against Zprime at m=2" begin
+    f = SuperGaussian(2.0)
+    for xi_pt in _dp_xis
+        cur = cauchy_dfdv(f, xi_pt)
+        ref = Zprime(xi_pt)
+        @test isapprox(real(cur), real(ref); rtol = 1e-8, atol = 1e-8)
+        @test isapprox(imag(cur), imag(ref); rtol = 1e-8, atol = 1e-8)
+    end
+end
+
+@testset "DP3: the branches are the ones D14 names" begin
+    xmax = SG_TABLE.xi_max
+    mlo = SG_TABLE.m_lo
+    mhi = SG_TABLE.m_hi
+
+    # (a) inside the table's domain, at both sides of the m and xi edges: the table branch, exact
+    for m in (mlo, 2.0, mhi), xi_pt in (0.0, 1.0, xmax)
+        f = SuperGaussian(m)
+        QT = _basefloat(xi_pt)
+        expected = _sg_table_eval(SG_TABLE, f.slice, abs(xi_pt)) + im * QT(pi) * dfdx(f, xi_pt)
+        @test cauchy_dfdv(f, xi_pt) == expected
+    end
+
+    # (b) just outside xi_max: the series branch, exact
+    let f = SuperGaussian(3.0), xi_pt = xmax + 1e-6
+        series_val, converged = _cauchy_series(f, xi_pt)
+        @test converged
+        QT = _basefloat(xi_pt)
+        expected = series_val + im * QT(pi) * dfdx(f, xi_pt)
+        @test cauchy_dfdv(f, xi_pt) == expected
+    end
+
+    # (c) m outside the table's domain, both sides: the reference, exact (xi = 2 never converges
+    # the series -- D6's switch curve starts at |xi| >= 3.47)
+    for m in (1.4999, 8.0001)
+        f = SuperGaussian(m)
+        xi_pt = 2.0
+        @test cauchy_dfdv(f, xi_pt) == _sg_cauchy_reference(f, xi_pt)
+    end
+
+    # (d) m at the table's edges exactly: the table branch
+    for m in (mlo, mhi)
+        f = SuperGaussian(m)
+        xi_pt = 2.0
+        QT = _basefloat(xi_pt)
+        expected = _sg_table_eval(SG_TABLE, f.slice, abs(xi_pt)) + im * QT(pi) * dfdx(f, xi_pt)
+        @test cauchy_dfdv(f, xi_pt) == expected
+    end
+end
+
+@testset "DP4: the upper half-plane and below it" begin
+    f = SuperGaussian(3.0)
+    for xi_pt in (0.5 + 0.5im, 2.0 + 1.0im, 5.0 + 0.3im)
+        @test cauchy_dfdv(f, xi_pt) == _cauchy_upper(f, xi_pt)
+    end
+    for (m, xi_pt) in ((1.5, 0.5 + 0.5im), (3.0, 0.5 + 0.5im), (1.5, 2.0 + 1.0im), (3.0, 2.0 + 1.0im))
+        fm = SuperGaussian(m)
+        oracle = _cauchy_ref_big(xi_pt, m)
+        val = cauchy_dfdv(fm, xi_pt)
+        @test isapprox(real(val), Float64(real(oracle)); rtol = 1e-9, atol = 1e-9)
+        @test isapprox(imag(val), Float64(imag(oracle)); rtol = 1e-9, atol = 1e-9)
+    end
+    @test_throws "requires Im xi >= 0" cauchy_dfdv(f, 0.5 - 0.5im)
+end
+
+@testset "DP5: AD through the dispatch" begin
+    ms = (1.75, 2.0, 3.5, 6.0)
+    xis = (0.1, 0.5, 0.92, 2.0, 5.0, 9.0)
+    h = 1e-4
+    fd_xi = Dict{Tuple{Float64,Float64},Float64}()
+    fd_m = Dict{Tuple{Float64,Float64},Float64}()
+    for m in ms, xi_pt in xis
+        fd_xi[(m, xi_pt)] = (real(_sg_cauchy_reference(SuperGaussian(m), xi_pt + h)) -
+                              real(_sg_cauchy_reference(SuperGaussian(m), xi_pt - h))) / (2h)
+        fd_m[(m, xi_pt)] = (real(_sg_cauchy_reference(SuperGaussian(m + h), xi_pt)) -
+                             real(_sg_cauchy_reference(SuperGaussian(m - h), xi_pt))) / (2h)
+    end
+    floor_xi = 1e-6 * maximum(abs, values(fd_xi))
+    floor_m = 1e-6 * maximum(abs, values(fd_m))
+    for m in ms, xi_pt in xis
+        f = SuperGaussian(m)
+        ad_xi = ForwardDiff.derivative(x -> real(cauchy_dfdv(f, x)), xi_pt)
+        ad_m = ForwardDiff.derivative(mm -> real(cauchy_dfdv(SuperGaussian(mm), xi_pt)), m)
+        @test isapprox(ad_xi, fd_xi[(m, xi_pt)]; rtol = 1e-6, atol = floor_xi)
+        @test isapprox(ad_m, fd_m[(m, xi_pt)]; rtol = 1e-6, atol = floor_m)
+    end
+end
+
+@testset "DP6: allocations through the dispatch, and susceptibility" begin
+    f = SuperGaussian(3.0)
+    xi_plain = 2.0
+    xi_dual = ForwardDiff.Dual{:DP6}(2.0, 1.0)
+    f_dual_m = SuperGaussian(ForwardDiff.Dual{:DP6}(3.0, 1.0))
+
+    _cd_plain() = cauchy_dfdv(f, xi_plain)
+    _cd_dualxi() = cauchy_dfdv(f, xi_dual)
+    _cd_dualm() = cauchy_dfdv(f_dual_m, xi_plain)
+    _cd_plain(); _cd_dualxi(); _cd_dualm()
+    @test (@allocated _cd_plain()) == 0
+    @test (@allocated _cd_dualxi()) == 0
+    @test (@allocated _cd_dualm()) == 0
+
+    plasma = Plasma(n_e_cm3 = 5e19,
+                     electrons = (electrons(T_eV = 500, f = SuperGaussian(3.0)),),
+                     ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
+    spe = plasma.electrons["e"]
+    k = 1.0e7
+    vth = thermal_speed(spe)
+    omega = k * 2.0 * vth
+    xi_s = xi(spe, k, omega)
+    expected = -(alpha(spe, k)^2 / 2) * cauchy_dfdv(spe.f, xi_s)
+    val = susceptibility(spe, k, omega)
+    @test isapprox(val, expected; rtol = 1e-14)
+
+    _susc() = susceptibility(spe, k, omega)
+    _susc()
+    @test (@allocated _susc()) == 0
+end
+
+@testset "DP7: continuity across the xi_max join" begin
+    xmax = SG_TABLE.xi_max
+    for m in (1.5, 2.0, 5.0)
+        f = SuperGaussian(m)
+        for dxi in -0.05:0.005:0.05
+            xi_pt = xmax + dxi
+            cur = real(cauchy_dfdv(f, xi_pt))
+            ref = real(_sg_cauchy_reference(f, xi_pt))
+            @test isapprox(cur, ref; rtol = 1e-8, atol = 1e-8)
+        end
+    end
+end
+
+@testset "DP8: evenness, where the abs actually lives" begin
+    rng8 = Random.Xoshiro(20260908)
+    xis8 = [rand(rng8) * SG_TABLE.xi_max for _ in 1:8]
+    for m in (1.5, 2.0, 5.0, 8.0)
+        f = SuperGaussian(m)
+        for xi_pt in xis8
+            plus = cauchy_dfdv(f, xi_pt)
+            minus = cauchy_dfdv(f, -xi_pt)
+            @test isapprox(real(minus), real(plus); rtol = 1e-14)
+            @test isapprox(imag(minus), -imag(plus); rtol = 1e-14)
+        end
+    end
+    for m in (1.5, 2.0, 5.0, 8.0)
+        f = SuperGaussian(m)
+        for a in (0.05, 0.3, 1.7, 6.0)
+            dplus = ForwardDiff.derivative(x -> real(cauchy_dfdv(f, x)), a)
+            dminus = ForwardDiff.derivative(x -> real(cauchy_dfdv(f, x)), -a)
+            @test isapprox(dminus, -dplus; rtol = 1e-14)
+        end
+    end
 end
