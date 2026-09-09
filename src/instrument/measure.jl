@@ -1,9 +1,10 @@
 # ideal_streak, measure and the per-bin kernel; foreach_bin! and BinCache, the loop over time
-# bins. foreach_bin!'s serial branch is written at Step 2.2; its threaded (@tasks) branch is
-# Step 2.3's (conventions.md Section 6: this is the only file in the package that mentions
-# threads). Spec D16, D17.
+# bins, and pin_blas_threads. This is the only file in the package that mentions threads
+# (conventions.md Section 6). Spec D16, D17.
 
 using LinearAlgebra: mul!
+using LinearAlgebra.BLAS: set_num_threads, get_num_threads
+using OhMyThreads: @tasks, DynamicScheduler
 
 """
     _effect_eltype(e::AbstractInstrumentEffect) -> Type
@@ -66,23 +67,51 @@ _make_cache(::Type{FT}, nlambda::Integer) where {FT} = BinCache{FT}(Vector{FT}(u
 Calls `kernel!(j, cache)` once for every `j` in `1:nbins`. `cache_factory()` is called once per
 task and its result passed to every call that task makes. **This is the only function in the
 package that mentions threads or chunking** (`conventions.md` 6.2); caches are per task, never
-indexed by `Threads.threadid()` (`conventions.md` 6.3). `scheduler` is `:auto` (the default) or
-`:serial`.
+selected by the running task's own thread number (`conventions.md` 6.3, Pitfall 1: never index
+a cache by the identifier `Threads` assigns the current thread). `scheduler` is `:auto` (the
+default) or `:serial`.
 
-At this step (2.2) both values run the same serial loop; the `@tasks`/`DynamicScheduler`
-threaded branch for `scheduler === :auto` on more than one thread is Step 2.3's, and nothing
-above this function changes when it lands.
+`:serial`, or `:auto` with `Threads.nthreads() == 1`, runs a plain loop with one cache. `:auto`
+with more than one thread runs OhMyThreads' `@tasks` with a `DynamicScheduler` and a per-task
+`@local` cache — **verified bitwise identical to the serial loop** on this machine at `-t 4`
+with OhMyThreads 0.8.6 (Level 2, 2026-09-09; TH1-TH3 repeat the check here). No reduction
+crosses bins in this phase (every bin writes its own column of a preallocated array), so the
+bitwise identity is a property of the design, not of the scheduler.
 
 Spec D17.
 """
 function foreach_bin!(kernel!, nbins::Integer, cache_factory; scheduler::Symbol=:auto)
     scheduler in (:auto, :serial) || throw(ArgumentError(
         "foreach_bin!: scheduler must be :auto or :serial; got :$scheduler"))
-    cache = cache_factory()
-    for j in 1:nbins
-        kernel!(j, cache)
+    if scheduler === :serial || Threads.nthreads() == 1
+        cache = cache_factory()
+        for j in 1:nbins
+            kernel!(j, cache)
+        end
+    else
+        @tasks for j in 1:nbins
+            @set scheduler = DynamicScheduler()
+            @local cache = cache_factory()
+            kernel!(j, cache)
+        end
     end
     return nothing
+end
+
+"""
+    pin_blas_threads(n::Integer = 1) -> Int
+
+Sets BLAS to `n` threads and returns the count it had before. OTIS threads over time bins
+itself (`foreach_bin!`); BLAS on many threads oversubscribes the machine against that, and
+`conventions.md` 6.6 asks for BLAS on one thread "in the driver" — `measure` has no driver of
+its own in this phase and never calls this implicitly, so call it yourself before a large
+`measure` (TH3 calls it before comparing threaded and serial results, since a multithreaded
+BLAS `mul!` may reassociate).
+"""
+function pin_blas_threads(n::Integer=1)
+    previous = get_num_threads()
+    set_num_threads(n)
+    return previous
 end
 
 """

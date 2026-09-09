@@ -19,3 +19,4 @@ using SafeTestsets
 @safetestset "instrument effects" begin include("instrument/test_effects.jl") end
 @safetestset "instrument background" begin include("instrument/test_background.jl") end
 @safetestset "instrument experiment" begin include("instrument/test_experiment.jl") end
+@safetestset "instrument measure" begin include("instrument/test_measure.jl") end

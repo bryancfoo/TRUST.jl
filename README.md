@@ -35,6 +35,6 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 julia --project -t auto
 ```
 
-launches Julia with all available threads. BLAS will be pinned to a single thread by the
-fitting driver once it exists, to avoid oversubscription when the package's own parallelism is
-in use.
+launches Julia with all available threads. Call `pin_blas_threads()` before a large evaluation:
+OTIS threads over time bins itself, and BLAS on many threads oversubscribes the machine against
+it.

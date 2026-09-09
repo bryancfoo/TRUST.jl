@@ -49,7 +49,7 @@ export AbstractInstrumentEffect, SpectralIRF, TemporalIRF, KSmearing, GradientSm
        ProbeOffset, Gain, ConstantBackground, PolynomialBackground, ImageBackground,
        GaussianKernel, TabulatedKernel
 export Experiment, measure, ideal_streak, ideal_streak!, islinear, stage, samples, apply!
-export foreach_bin!
+export foreach_bin!, pin_blas_threads
 
 # constants
 export ELECTRON_MASS, ELEMENTARY_CHARGE, VACUUM_PERMITTIVITY, SPEED_OF_LIGHT,
