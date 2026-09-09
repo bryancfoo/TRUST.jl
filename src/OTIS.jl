@@ -9,6 +9,7 @@ include("distributions/supergaussian_table.jl")   # new (1.SG.2): builds SG_TABL
 include("plasma/species.jl")
 include("plasma/parameters.jl")     # methods on Species and SpeciesSpec
 include("plasma/plasma.jl")         # Plasma constructor uses Species and the unit table
+include("plasma/trace.jl")          # new (2.1): needs Plasma, Species, reconstruct
 include("scattering/susceptibility.jl")   # new: needs alpha, xi, cauchy_dfdv
 include("scattering/spectral_density.jl") # new: needs susceptibility, dielectric, f_lab
 include("scattering/geometry.jl")         # new: needs the unit table and Plasma
@@ -29,6 +30,9 @@ export thermal_speed, plasma_frequency, debye_length, alpha, xi, f_lab
 
 # plasma quantities
 export mean_charge_state, mean_ion_mass, neutrality_residual, zeff
+
+# trace (2.1)
+export PlasmaTrace, LeafPath, plasma, nbins
 
 # scattering
 export susceptibility, dielectric, spectral_density, spectrum, spectrum!

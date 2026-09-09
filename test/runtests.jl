@@ -10,6 +10,7 @@ using SafeTestsets
 @safetestset "species" begin include("plasma/test_species.jl") end
 @safetestset "plasma parameters" begin include("plasma/test_parameters.jl") end
 @safetestset "plasma" begin include("plasma/test_plasma.jl") end
+@safetestset "plasma trace" begin include("plasma/test_trace.jl") end
 @safetestset "susceptibility" begin include("scattering/test_susceptibility.jl") end
 @safetestset "spectral density" begin include("scattering/test_spectral_density.jl") end
 @safetestset "scattering geometry" begin include("scattering/test_geometry.jl") end
