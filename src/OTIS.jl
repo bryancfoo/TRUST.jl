@@ -44,10 +44,10 @@ export susceptibility, dielectric, spectral_density, spectrum, spectrum!
 # geometry (the single-struct geometry type retired at Step 2.3a, spec D40)
 export ProbeBeam, Collection, wavevector, polarization_factor, kdirection, detector_axis
 
-# instrument (2.2, 2.3, 2.3a)
+# instrument (2.2, 2.3, 2.3a, 2.3b)
 export AbstractInstrumentEffect, SpectralIRF, TemporalIRF, KSmearing, GradientSmearing,
        ProbeOffset, Sensitivity, ConstantBackground, PolynomialBackground, ImageBackground,
-       GaussianKernel, TabulatedKernel
+       RationalBackground, GaussianKernel, TabulatedKernel
 export Experiment, measure, ideal_streak, ideal_streak!, islinear, stage, samples, apply!
 export foreach_bin!, pin_blas_threads
 

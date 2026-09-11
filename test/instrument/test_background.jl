@@ -122,3 +122,94 @@ end
     M3 = measure(expt3)
     @test eltype(M3) <: ForwardDiff.Dual
 end
+
+# --- Step 2.3b: RationalBackground (spec D46) ---
+
+@testset "RB1: rat11 and rat21 against hand-written formulas" begin
+    lambda = collect(range(235e-9, 255e-9; length=128))
+    lam0 = (first(lambda) + last(lambda)) / 2
+    dlam = (last(lambda) - first(lambda)) / 2
+    s = (lambda .- lam0) ./ dlam
+
+    rat11 = RationalBackground(numerator=(2.0, 0.5), denominator=(0.4,))
+    op11 = OTIS._prepare(rat11, lambda, [0.0])
+    oracle11 = (2.0 .+ 0.5 .* s) ./ (1 .+ 0.4 .* s)
+    @test isapprox(op11, oracle11; rtol=1e-14)
+
+    rat21 = RationalBackground(numerator=(2.0, 0.5, -0.3), denominator=(0.4,))
+    op21 = OTIS._prepare(rat21, lambda, [0.0])
+    oracle21 = (2.0 .+ 0.5 .* s .- 0.3 .* s .^ 2) ./ (1 .+ 0.4 .* s)
+    @test isapprox(op21, oracle21; rtol=1e-14)
+end
+
+@testset "RB2: Q = 0 is PolynomialBackground, bitwise" begin
+    lambda = collect(range(235e-9, 255e-9; length=64))
+    rat = RationalBackground(numerator=(1.0, 2.0, 3.0), denominator=())
+    poly = PolynomialBackground(coefficients=(1.0, 2.0, 3.0))
+    op_rat = OTIS._prepare(rat, lambda, [0.0])
+    op_poly = OTIS._prepare(poly, lambda, [0.0])
+    @test all(op_rat .=== op_poly)
+end
+
+@testset "RB3: the scaled variable is D14's" begin
+    # atol = 1e-14, matching BG2's own precedent for this identical s[1]/s[end] boundary check:
+    # (lambda[1]-lam0)/dlam is not exactly -1.0 in Float64 at these wavelength magnitudes.
+    lambda = collect(range(235e-9, 255e-9; length=129))   # odd length: exact middle bin
+    rat = RationalBackground(numerator=(0.0, 1.0), denominator=())   # B = s
+    op = OTIS._prepare(rat, lambda, [0.0])
+    @test isapprox(op[1], -1.0; atol=1e-14)
+    @test isapprox(op[(end+1)÷2], 0.0; atol=1e-14)
+    @test isapprox(op[end], 1.0; atol=1e-14)
+end
+
+@testset "RB4: the pole guard" begin
+    lambda = collect(range(235e-9, 255e-9; length=128))
+    rat_pole = RationalBackground(numerator=(1.0,), denominator=(1.2,))   # 1+1.2s = 0 at s=-1/1.2, inside [-1,1]
+    @test_throws "pole" OTIS._prepare(rat_pole, lambda, [0.0])
+
+    rat_ok = RationalBackground(numerator=(1.0,), denominator=(0.5,))   # min |1+0.5s| = 0.5 at s=-1
+    op = OTIS._prepare(rat_ok, lambda, [0.0])
+    @test all(isfinite, op)
+end
+
+@testset "RB5: the MATLAB conversion" begin
+    lambda = collect(range(235e-9, 255e-9; length=64))
+    p1, p2, q1 = 0.7, 2.0, 2.5
+    lam0 = (first(lambda) + last(lambda)) / 2
+    dlam = (last(lambda) - first(lambda)) / 2
+    s = (lambda .- lam0) ./ dlam
+    matlab_form = (p1 .* s .+ p2) ./ (s .+ q1)
+
+    rat = RationalBackground(numerator=(p2 / q1, p1 / q1), denominator=(1 / q1,))
+    op = OTIS._prepare(rat, lambda, [0.0])
+    @test isapprox(op, matlab_form; rtol=1e-14)
+end
+
+@testset "RB6: the affine identity, parameters/reconstruct, and a dual coefficient" begin
+    rng = Random.Xoshiro(20260915)
+    lambda = collect(range(235e-9, 255e-9; length=32))
+    P = rand(rng, 32, 4) .+ 0.1
+    Q = rand(rng, 32, 4) .+ 0.1
+    a, b = 0.37, -1.9
+
+    e = RationalBackground(numerator=(1.0, 0.5), denominator=(0.3,))
+    op = OTIS._prepare(e, lambda, [0.0])
+    B = repeat(op, 1, size(P, 2))
+    lhs = apply!(copy(a .* P .+ b .* Q), a .* P .+ b .* Q, e, op)
+    rhs = a .* apply!(copy(P), P, e, op) .+ b .* apply!(copy(Q), Q, e, op)
+    @test isapprox(lhs .- rhs, (1 - a - b) .* B; atol=1e-13)
+
+    r = reconstruct(e, parameters(e))
+    @test r.numerator == e.numerator
+    @test r.denominator == e.denominator
+
+    template = _bg_plasma()
+    probe = _bg_probe(); collection = _bg_collection()
+    trace = PlasmaTrace(template; t_ns=[0.0, 1.0])
+    num_dual = (ForwardDiff.Dual(1.0, 1.0), 0.5)
+    e_dual = RationalBackground(numerator=num_dual, denominator=(0.3,))
+    expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda,
+        effects=(e_dual,))
+    M = measure(expt)
+    @test eltype(M) <: ForwardDiff.Dual
+end

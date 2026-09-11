@@ -1,9 +1,10 @@
 # The instrument chain
 
-> **Front matter (Step 2.2, 2026-09-09/10).** Windows 11, Julia 1.12.7. This document's parts 1
-> to 4 are written at Step 2.2, alongside `src/instrument/effects.jl`,
-> `src/instrument/background.jl` and `src/instrument/experiment.jl`. Part 5 (the noise model)
-> is Step 2.5's.
+> **Front matter (Step 2.2, 2026-09-09/10; Section 6 added Step 2.3b, 2026-09-11).** Windows 11,
+> Julia 1.12.7. This document's parts 1 to 4 are written at Step 2.2, alongside
+> `src/instrument/effects.jl`, `src/instrument/background.jl` and
+> `src/instrument/experiment.jl`. Part 5 (the noise model) is Step 2.5's; Part 6
+> (`RationalBackground`) is Step 2.3b's.
 
 ## 1. The chain
 
@@ -25,7 +26,9 @@ M = B + g · (K_λ · P_kernel · K_tᵀ)
 
 with `K_λ` the spectral convolution matrix, `K_t` the temporal one, `g` the scalar sensitivity, and `B`
 the sum of the background terms (each additive; `ConstantBackground` and `PolynomialBackground`
-add a term independent of `P_kernel`, `ImageBackground` adds `scale · image`). `Experiment`'s
+add a term independent of `P_kernel`, `ImageBackground` adds `scale · image`,
+`RationalBackground` (Section 6) adds a rational function of the same scaled wavelength
+`PolynomialBackground` uses). `Experiment`'s
 constructor **stably sorts** the user's effects into this order (`_chain_order`), so the same
 set of effects given in any order produces a bitwise identical streak (XP6).
 
@@ -99,3 +102,38 @@ this effect be pushed through as a fixed linear operator?*
 Every effect with `islinear(e) == true` satisfies the linear identity to round-off (EF14); every
 background satisfies the affine identity instead (EF15, BG4); the three kernel effects have
 `stage(e) == :kernel` and `islinear(e) == false` by definition.
+
+## 5. The noise model
+
+Swadling's model is Part 5 of this document's front matter's plan; written at Step 2.5.
+
+## 6. `RationalBackground`: a fourth background family
+
+**Decided by the user, 2026-09-11 (spec D46), closing A26.** `rat11` (linear/linear) and `rat21`
+(quadratic/linear), on the same scaled variable `s = (λ-λ₀)/Δλ` `PolynomialBackground` uses:
+
+    B[l] = (Σ_{k=0}^{P-1} numerator[k+1]·s_l^k) / (1 + Σ_{k=1}^{Q} denominator[k]·s_l^k)
+
+**The denominator's constant term is fixed at `1`, not its leading coefficient** — unlike
+MATLAB's `rat11`/`rat21`, which are monic in the numerator's leading term instead:
+`(p1·s+p2)/(s+q1) ≡ (a0+a1·s)/(1+b1·s)` with `a0 = p2/q1`, `a1 = p1/q1`, `b1 = 1/q1`, valid
+whenever `q1 ≠ 0` (RB5 checks this conversion, `1e-14` relative — it is an algebraic identity).
+Fixing `b_0 = 1` does two things: it nests `PolynomialBackground` exactly (`denominator = ()`
+gives `1 + (empty sum) = 1` in the denominator, so `B` reduces to `PolynomialBackground`'s own
+formula bitwise — RB2, the row that makes the rational family a strict generalization of the
+polynomial one rather than a parallel family), and it is well conditioned at `s = 0`, the middle
+of the detector window, which is where the fitted feature usually sits.
+
+**The pole.** A rational background has a failure mode the other three do not: the denominator
+can vanish inside the window. `_prepare` (the first point that knows the axis) evaluates `1 +
+Σ b_k s^k` over the whole detector window and throws if it changes sign or if its minimum
+modulus falls below `1e-3` (RB4) — deliberately loose: the guard is not trying to locate the pole
+exactly, it is refusing a background that is already numerically ill-conditioned over the data.
+A fit that walks `denominator` into a pole would trip this guard on every rebuild; Step 3.1 will
+need bounds or a transform on `denominator` to fit one safely — noted here, not built.
+
+Like the other three backgrounds, `stage = :detector`, `_chain_order = 5`, `islinear = false`
+(RB6 checks the affine identity, as BG4 does for the others); `parameters(e) = (numerator =
+e.numerator, denominator = e.denominator)`, both tuple-valued, which is why `_effect_eltype`
+(spec D16) flattens a tuple-valued parameter generically rather than special-casing
+`PolynomialBackground`'s `coefficients` by name (spec D46).

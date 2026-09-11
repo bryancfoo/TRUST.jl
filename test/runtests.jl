@@ -59,8 +59,14 @@ end
 if _wanted("refactor")
     @safetestset "refactor (Step 2.3a)" begin include("scattering/test_refactor.jl") end
 end
+if _wanted("gain")
+    @safetestset "convective gain" begin include("scattering/test_gain.jl") end
+end
 if _wanted("instrument effects")
     @safetestset "instrument effects" begin include("instrument/test_effects.jl") end
+end
+if _wanted("sensitivity")
+    @safetestset "sensitivity" begin include("instrument/test_sensitivity.jl") end
 end
 if _wanted("instrument background")
     @safetestset "instrument background" begin include("instrument/test_background.jl") end

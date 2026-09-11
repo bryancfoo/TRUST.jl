@@ -487,13 +487,19 @@ _prepare(e::TemporalIRF, lambda, t) = _convolution_matrix(e.kernel, t)
     Sensitivity{FT<:Real,L,R} <: AbstractInstrumentEffect
 
 A fitted scalar `scale` turning `spectrum`'s m⁻¹ into detector counts, and, optionally, a fixed
-measured wavelength response curve `lambda`/`response` (`nothing`/`nothing` until Step 2.3b,
-which adds it), normalized to unit maximum at construction (`response_norm` the divisor kept, so
-the supplied curve is recoverable) so that `scale` reads as counts per m⁻¹ at the most sensitive
-wavelength. `Gain` until 2026-09-10 (`conventions.md` 1.8); `Sensitivity(; scale)` with no curve
-is bitwise `Gain(gain = scale)` (SN1).
+measured wavelength response curve `lambda`/`response`, normalized to unit maximum at
+construction (`response_norm` the divisor kept, so the supplied curve is recoverable) so that
+`scale` reads as counts per m⁻¹ at the most sensitive wavelength. **The curve is fixed data and
+the scalar is the fitted leaf** — the same division `ImageBackground` already uses — so the
+effect still exposes exactly one leaf, `scale`. `Gain` until 2026-09-10 (`conventions.md` 1.8);
+`Sensitivity(; scale)` with no curve is bitwise `Gain(gain = scale)` (SN1).
 
-Built with `Sensitivity(; scale = 1.0)`.
+Built with `Sensitivity(; scale = 1.0)` (no curve, `lambda`/`response` both `nothing`) or
+`Sensitivity(; scale = 1.0, lambda_nm | lambda_m, response)` (a measured curve, added Step
+2.3b). `_prepare` interpolates the curve onto `expt.lambda` **once**, linearly; a detector
+window not spanned by the calibration curve is a loud error (spec D28), never clamped or
+extrapolated, since silently extrapolating a sensitivity biases exactly the feature wings being
+fitted.
 
 Spec D40, D42.
 """
@@ -512,7 +518,27 @@ function Sensitivity(scale::Real)
     FT = typeof(float(scale))
     return Sensitivity{FT,Nothing,Nothing}(FT(scale), nothing, nothing, one(FT))
 end
-Sensitivity(; scale::Real=1.0) = Sensitivity(float(scale))
+
+function Sensitivity(; scale::Real=1.0, response=nothing, kwargs...)
+    if response === nothing
+        _reject_extra_kwargs(kwargs, ())
+        return Sensitivity(float(scale))
+    end
+    lambda_raw = _si_axis(:lambda, kwargs)
+    _reject_extra_kwargs(kwargs, (:lambda_nm, :lambda_m))
+    length(lambda_raw) == length(response) || throw(ArgumentError(
+        "Sensitivity: lambda has length $(length(lambda_raw)) but response has length $(length(response))"))
+    isempty(lambda_raw) && throw(ArgumentError("Sensitivity: the response curve must have at least one point"))
+    for l in 2:length(lambda_raw)
+        lambda_raw[l] > lambda_raw[l-1] || throw(ArgumentError(
+            "Sensitivity: the calibration wavelengths must be strictly increasing"))
+    end
+    norm = maximum(response)
+    FT = float(promote_type(typeof(scale), eltype(lambda_raw), eltype(response)))
+    lam = FT.(lambda_raw)
+    resp = FT.(response) ./ FT(norm)
+    return Sensitivity{FT,typeof(lam),typeof(resp)}(FT(scale), lam, resp, FT(norm))
+end
 
 stage(::Sensitivity) = :detector
 _chain_order(::Sensitivity) = 4
@@ -522,6 +548,48 @@ parameters(e::Sensitivity) = (scale=e.scale,)
 function reconstruct(e::Sensitivity{FT,L,R}, values::NamedTuple) where {FT,L,R}
     FT2 = typeof(float(values.scale))
     return Sensitivity{FT2,L,R}(FT2(values.scale), e.lambda, e.response, FT2(e.response_norm))
+end
+
+"""
+    _interpolate_response(lam_cal::AbstractVector, resp_cal::AbstractVector, lambda::AbstractVector) -> Vector
+
+Linear interpolation of `resp_cal(lam_cal)` onto `lambda`. `lambda` must lie within
+`[first(lam_cal), last(lam_cal)]` (checked by the caller, `_prepare`); the bracket for each
+`lambda[i]` is found by `searchsortedlast`.
+
+Spec D42, D45.
+"""
+function _interpolate_response(lam_cal::AbstractVector, resp_cal::AbstractVector, lambda::AbstractVector)
+    FT = promote_type(eltype(lam_cal), eltype(resp_cal), eltype(lambda))
+    n = length(lam_cal)
+    out = Vector{FT}(undef, length(lambda))
+    @inbounds for i in eachindex(lambda)
+        l = lambda[i]
+        j = searchsortedlast(lam_cal, l)
+        j = clamp(j, 1, n - 1)
+        x0, x1 = lam_cal[j], lam_cal[j+1]
+        y0, y1 = resp_cal[j], resp_cal[j+1]
+        out[i] = y0 + (l - x0) / (x1 - x0) * (y1 - y0)
+    end
+    return out
+end
+
+"""
+    _prepare(e::Sensitivity, lambda, t)
+
+`nothing` when `e` carries no response curve; otherwise `_interpolate_response(e.lambda,
+e.response, lambda)`, once, at `Experiment` construction. Throws if `lambda` (the detector
+window) is not spanned by `e.lambda` (the calibration curve's own range) — never clamped or
+extrapolated.
+
+Spec D42, D28.
+"""
+_prepare(::Sensitivity{FT,Nothing,Nothing}, lambda, t) where {FT} = nothing
+function _prepare(e::Sensitivity, lambda::AbstractVector, t::AbstractVector)
+    (first(lambda) >= first(e.lambda) && last(lambda) <= last(e.lambda)) || throw(ArgumentError(
+        "Sensitivity: the detector window $(first(lambda)) to $(last(lambda)) m is not spanned " *
+        "by the calibration curve's $(first(e.lambda)) to $(last(e.lambda)) m range"))
+    return _interpolate_response(e.lambda, e.response, lambda)
 end
 
 """

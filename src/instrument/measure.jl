@@ -206,9 +206,14 @@ _needs_destination(::TemporalIRF) = true
 
 apply!(dest, src, ::SpectralIRF, op) = mul!(dest, op, src)
 apply!(dest, src, ::TemporalIRF, op) = mul!(dest, src, transpose(op))
-function apply!(dest, src, e::Sensitivity{FT,Nothing}, op) where {FT}
+function apply!(dest, src, e::Sensitivity{FT,Nothing,Nothing}, op) where {FT}
     dest === src || copyto!(dest, src)
     dest .*= e.scale
+    return dest
+end
+function apply!(dest, src, e::Sensitivity, op)
+    dest === src || copyto!(dest, src)
+    dest .*= e.scale .* op
     return dest
 end
 function apply!(dest, src, e::ConstantBackground, op)
@@ -217,6 +222,11 @@ function apply!(dest, src, e::ConstantBackground, op)
     return dest
 end
 function apply!(dest, src, e::PolynomialBackground, op)
+    dest === src || copyto!(dest, src)
+    dest .+= op
+    return dest
+end
+function apply!(dest, src, e::RationalBackground, op)
     dest === src || copyto!(dest, src)
     dest .+= op
     return dest

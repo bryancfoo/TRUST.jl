@@ -48,7 +48,10 @@ bound explicitly); the fully relativistic treatment (Sheffield Section 3.5) is P
 `conventions.md` 1.8 packages everything except `S(k, ω)` and the `(1+2ω/ω_i)` factor into a
 single gain `G`, since only the *shape* of `P(λ_s)` matters for fitting:
 
-    P(λ_s) = G · (1 + 2ω/ω_i) · S(k(λ_s), ω(λ_s)) · 2πc/λ_s²,     G = 1 in `spectrum`.
+    P(λ_s) = G · (1 + 2ω/ω_i) · g(λ_s) · S(k(λ_s), ω(λ_s)) · 2πc/λ_s²,     G = 1 in `spectrum`.
+
+`g` is the convective gain of Step 2.3b, `docs/derivations/gain.md`: `g ≡ 1` when `gain = :none`
+(the default), so this reduces to the Phase 1 formula exactly.
 
 `_prefactor(omega, omega_probe, first_order)` is `1 + 2ω/ω_i` when `first_order` is true (the
 default, `prefactor = :first_order`) and `one(omega)` when false (`prefactor = :none`, which
