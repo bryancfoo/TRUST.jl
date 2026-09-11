@@ -5,7 +5,8 @@ import ForwardDiff
 
 # D22's regression geometry and plasma (foo2026 Section III.A, the EPW problem).
 
-_ss_geometry() = ScatteringGeometry(lambda_probe_nm = 263.25, theta_deg = 60, k_model = :exact)
+_ss_probe() = ProbeBeam(lambda_probe_nm = 263.25)
+_ss_collection() = Collection(theta_deg = 60, k_model = :exact)
 
 _ss_plasma(m; f_electron = SuperGaussian(m)) = Plasma(
     n_e_cm3 = 5e19,
@@ -75,14 +76,14 @@ const _SS_PRINTED = Dict(
 )
 
 @testset "SS1: reduction to Maxwellian at m=2" begin
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     p_ref = _ss_plasma(2.0; f_electron = _ReferencePathSG(SuperGaussian(2.0)))
     p_tab = _ss_plasma(2.0)
     p_mw = Plasma(n_e_cm3 = 5e19, electrons = (electrons(T_eV = 500),),
                   ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
-    P_ref = spectrum(p_ref, g, _SS_LAMBDA)
-    P_tab = spectrum(p_tab, g, _SS_LAMBDA)
-    P_mw = spectrum(p_mw, g, _SS_LAMBDA)
+    P_ref = spectrum(p_ref, probe, collection, _SS_LAMBDA)
+    P_tab = spectrum(p_tab, probe, collection, _SS_LAMBDA)
+    P_mw = spectrum(p_mw, probe, collection, _SS_LAMBDA)
     maxP = maximum(abs, P_mw)
     worst_ref = maximum(abs.(P_ref .- P_mw)) / maxP
     worst_tab = maximum(abs.(P_tab .- P_mw)) / maxP
@@ -92,7 +93,7 @@ const _SS_PRINTED = Dict(
 end
 
 @testset "SS2: d(spectrum)/dm vs central differences" begin
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     h = 1e-5
     for m in (2.0, 3.5)
         # Plain T_eV = 500.0: Step 2.0 made the companion-dual seeding unnecessary. electrons()
@@ -103,7 +104,7 @@ end
             p = Plasma(n_e_cm3 = 5e19,
                        electrons = (electrons(T_eV = 500.0, f = SuperGaussian(mm)),),
                        ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
-            return spectrum(p, g, _SS_LAMBDA)
+            return spectrum(p, probe, collection, _SS_LAMBDA)
         end
         ad = ForwardDiff.derivative(spec_of_m, m)
         fd = (spec_of_m(m + h) .- spec_of_m(m - h)) ./ (2h)
@@ -114,14 +115,14 @@ end
 end
 
 @testset "SS3: joint (T_e, m) gradient" begin
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     lambdas8 = collect(range(235e-9, 255e-9; length = 8))
     function spec_of_theta(theta)
         Te, mm = theta
         p = Plasma(n_e_cm3 = 5e19,
                    electrons = (electrons(T_eV = Te, f = SuperGaussian(mm)),),
                    ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
-        return spectrum(p, g, lambdas8)
+        return spectrum(p, probe, collection, lambdas8)
     end
     theta0 = [500.0, 3.5]
     steps = [1e-5 * theta0[1], 1e-5 * theta0[2]]
@@ -139,10 +140,10 @@ end
 end
 
 @testset "SS4: the regression case through the reference path" begin
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     for m in (2, 3, 5)
         p = _ss_plasma(Float64(m); f_electron = _ReferencePathSG(SuperGaussian(Float64(m))))
-        P = spectrum(p, g, _SS_LAMBDA)
+        P = spectrum(p, probe, collection, _SS_LAMBDA)
         lam_nm = _SS_LAMBDA .* 1e9
         pos, val = peak_position_and_value(lam_nm, P)
         width = fwhm(lam_nm, P)
@@ -155,13 +156,13 @@ end
 end
 
 @testset "SS5: the regression case through the table" begin
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     lam_nm = _SS_LAMBDA .* 1e9
     peaks = Dict{Int,Float64}()
     widths = Dict{Int,Float64}()
     for m in (2, 3, 5)
         p = _ss_plasma(Float64(m))
-        P = spectrum(p, g, _SS_LAMBDA)
+        P = spectrum(p, probe, collection, _SS_LAMBDA)
         pos, val = peak_position_and_value(lam_nm, P)
         width = fwhm(lam_nm, P)
         printed = _SS_PRINTED[m]
@@ -178,40 +179,40 @@ end
 end
 
 @testset "SS6: allocations" begin
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     p = _ss_plasma(3.0)
     P = similar(_SS_LAMBDA)
-    _spec!() = spectrum!(P, p, g, _SS_LAMBDA)
+    _spec!() = spectrum!(P, p, probe, collection, _SS_LAMBDA)
     _spec!()
     @test (@allocated _spec!()) == 0
 end
 
 @testset "SS7: the documented slow path" begin
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     lam32 = collect(range(235e-9, 255e-9; length = 32))
     p = _ss_plasma(8.5)
-    P = spectrum(p, g, lam32)
+    P = spectrum(p, probe, collection, lam32)
     @test all(isfinite, P)
     @test all(>(0), P)
 
     p_ref = _ss_plasma(8.5; f_electron = _ReferencePathSG(SuperGaussian(8.5)))
-    P_ref = spectrum(p_ref, g, lam32)
+    P_ref = spectrum(p_ref, probe, collection, lam32)
     worst = maximum(abs.(P .- P_ref)) / maximum(abs, P_ref)
     @info "SS7 slow path vs forced reference, worst normalized error" worst
     @test isapprox(P, P_ref; rtol = 1e-12)
 end
 
 @testset "SS8: the dual path" begin
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     p64 = _ss_plasma(3.0)
-    P64 = spectrum(p64, g, _SS_LAMBDA)
+    P64 = spectrum(p64, probe, collection, _SS_LAMBDA)
 
     @testset "dual on T_e" begin
         Te_dual = ForwardDiff.Dual(500.0, 1.0)
         p_dual_Te = Plasma(n_e_cm3 = 5e19,
                             electrons = (electrons(T_eV = Te_dual, f = SuperGaussian(3.0)),),
                             ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
-        P_dual_Te = spectrum(p_dual_Te, g, _SS_LAMBDA)
+        P_dual_Te = spectrum(p_dual_Te, probe, collection, _SS_LAMBDA)
         worst_Te = maximum(abs.(ForwardDiff.value.(P_dual_Te) .- P64)) / maximum(abs, P64)
         @info "SS8 dual T_e path vs Float64, worst normalized diff" worst_Te
         @test isapprox(ForwardDiff.value.(P_dual_Te), P64; rtol = 1e-14)
@@ -225,7 +226,7 @@ end
         p_dual_m = Plasma(n_e_cm3 = 5e19,
                            electrons = (electrons(T_eV = 500.0, f = SuperGaussian(m_dual)),),
                            ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250),))
-        P_dual_m = spectrum(p_dual_m, g, _SS_LAMBDA)
+        P_dual_m = spectrum(p_dual_m, probe, collection, _SS_LAMBDA)
         worst_m = maximum(abs.(ForwardDiff.value.(P_dual_m) .- P64)) / maximum(abs, P64)
         @info "SS8 dual m path vs Float64, worst normalized diff" worst_m
         @test isapprox(ForwardDiff.value.(P_dual_m), P64; rtol = 1e-14)
@@ -236,12 +237,12 @@ end
     # _ss_plasma(m) passes m straight through to SuperGaussian(m) and T_eV = 500 plain (no
     # `* one(m)` companion): with electrons() now promoting FT over values(parameters(f)), a
     # dual m alone is enough to make the whole plasma, and spectrum's output, dual.
-    g = _ss_geometry()
+    probe = _ss_probe(); collection = _ss_collection()
     m_dual = ForwardDiff.Dual(3.0, 1.0)
     p_dual = _ss_plasma(m_dual)
     p64 = _ss_plasma(3.0)
-    P_dual = spectrum(p_dual, g, _SS_LAMBDA)
-    P64 = spectrum(p64, g, _SS_LAMBDA)
+    P_dual = spectrum(p_dual, probe, collection, _SS_LAMBDA)
+    P64 = spectrum(p64, probe, collection, _SS_LAMBDA)
     @test eltype(P_dual) <: ForwardDiff.Dual
     @test isapprox(ForwardDiff.value.(P_dual), P64; rtol = 1e-14)
 end

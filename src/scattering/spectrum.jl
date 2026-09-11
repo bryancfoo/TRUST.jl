@@ -1,14 +1,14 @@
 # The scattered power spectrum P(lambda_s): the prefactor, the exact wavelength Jacobian, and
-# the per-bin kernel. conventions.md 1.8, 3.4; docs/derivations/spectrum.md; spec D11.
+# the per-bin kernel. conventions.md 1.8, 3.4; docs/derivations/spectrum.md; spec D11, D39.
 
 """
-    _omega_probe(geometry::ScatteringGeometry) -> FT
+    _omega_probe(probe::ProbeBeam) -> FT
 
 The probe frequency `ω_i = 2πc/λ_i`, rad/s.
 
-Sheffield Section 5.4.1; `conventions.md` 1.8; `docs/derivations/spectrum.md`; spec D11.
+Sheffield Section 5.4.1; `conventions.md` 1.8; `docs/derivations/spectrum.md`; spec D41.
 """
-_omega_probe(geometry::ScatteringGeometry) = 2π * SPEED_OF_LIGHT / geometry.lambda_probe
+_omega_probe(probe::ProbeBeam) = 2π * SPEED_OF_LIGHT / probe.lambda
 
 """
     _wavelength_jacobian(lambda_s) -> FT
@@ -45,36 +45,40 @@ function _prefactor_flag(prefactor::Symbol)
 end
 
 """
-    _spectrum_eltype(plasma::Plasma{FT1}, geometry::ScatteringGeometry{FT2}, lambda) where {FT1,FT2}
+    _spectrum_eltype(plasma::Plasma{FT1}, probe::ProbeBeam{FT2}, collection::Collection{FT3}, lambda) where {FT1,FT2,FT3}
 
-The element type of `spectrum`'s output: the promotion of the plasma's, the geometry's and the
-wavelength axis's element types.
+The element type of `spectrum`'s output: the promotion of the plasma's, the probe's, the
+collection's and the wavelength axis's element types.
 
-Spec D11.
+Spec D11, D40.
 """
-_spectrum_eltype(::Plasma{FT1}, ::ScatteringGeometry{FT2}, lambda) where {FT1,FT2} =
-    promote_type(FT1, FT2, eltype(lambda))
+_spectrum_eltype(::Plasma{FT1}, ::ProbeBeam{FT2}, ::Collection{FT3}, lambda) where {FT1,FT2,FT3} =
+    promote_type(FT1, FT2, FT3, eltype(lambda))
 
 """
-    _spectrum_at(plasma::Plasma, geometry::ScatteringGeometry, lambda_s, first_order::Bool = true) -> Real
+    _spectrum_at(plasma::Plasma, probe::ProbeBeam, collection::Collection, lambda_s, first_order::Bool = true) -> Real
 
 The scattered power at one scattered wavelength `lambda_s` (m):
-`(1 ± prefactor) · S(k(λ_s), ω(λ_s)) · 2πc/λ_s²`. The relativistic-prefactor flag is positional
-with a default so that `spectrum!` can hoist the `Symbol`-to-`Bool` conversion out of its loop
-while a test can still call this with one argument.
+`(1 ± prefactor) · S(k(λ_s), ω(λ_s)) · 2πc/λ_s²`. `dielectric` is evaluated **once** here and
+threaded into the four-argument `spectral_density`, so that Step 2.3b's convective gain can reuse
+`(ε, χ_e)` without a second `dielectric` call (spec D39; RF2 counts the calls). The
+relativistic-prefactor flag is positional with a default so that `spectrum!` can hoist the
+`Symbol`-to-`Bool` conversion out of its loop while a test can still call this with one argument.
 
-`conventions.md` 1.8; `docs/derivations/spectrum.md`; spec D11.
+`conventions.md` 1.8; `docs/derivations/spectrum.md`; spec D11, D39.
 """
-function _spectrum_at(plasma::Plasma, geometry::ScatteringGeometry, lambda_s, first_order::Bool = true)
-    k, omega = wavevector(geometry, lambda_s, plasma)
-    S = spectral_density(plasma, k, omega)
-    omega_probe = _omega_probe(geometry)
+function _spectrum_at(plasma::Plasma, probe::ProbeBeam, collection::Collection, lambda_s,
+                       first_order::Bool = true)
+    k, omega, k_s = wavevector(probe, collection, lambda_s, plasma)
+    d = dielectric(plasma, k, omega)
+    S = spectral_density(plasma, k, omega, d)
+    omega_probe = _omega_probe(probe)
     return _prefactor(omega, omega_probe, first_order) * S * _wavelength_jacobian(lambda_s)
 end
 
 """
-    spectrum!(P::AbstractVector, plasma::Plasma, geometry::ScatteringGeometry, lambda::AbstractVector;
-              prefactor::Symbol = :first_order) -> P
+    spectrum!(P::AbstractVector, plasma::Plasma, probe::ProbeBeam, collection::Collection,
+              lambda::AbstractVector; prefactor::Symbol = :first_order) -> P
 
 The in-place form of `spectrum`: fills `P` with the scattered power spectrum at every wavelength
 in `lambda` (m, increasing). `prefactor` is `:first_order` (Sheffield Eq. 2.3.17, default) or
@@ -82,21 +86,21 @@ in `lambda` (m, increasing). `prefactor` is `:first_order` (Sheffield Eq. 2.3.17
 allocation tests run.
 
 Sheffield Eqs. 2.3.13, 2.3.17; `conventions.md` 1.8, 3.4; `docs/derivations/spectrum.md`;
-spec D11.
+spec D11, D40.
 """
-function spectrum!(P::AbstractVector, plasma::Plasma, geometry::ScatteringGeometry,
+function spectrum!(P::AbstractVector, plasma::Plasma, probe::ProbeBeam, collection::Collection,
                     lambda::AbstractVector; prefactor::Symbol = :first_order)
     length(P) == length(lambda) || throw(ArgumentError(
         "spectrum!: P has length $(length(P)) but lambda has length $(length(lambda))"))
     first_order = _prefactor_flag(prefactor)
     @inbounds for i in eachindex(lambda)
-        P[i] = _spectrum_at(plasma, geometry, lambda[i], first_order)
+        P[i] = _spectrum_at(plasma, probe, collection, lambda[i], first_order)
     end
     return P
 end
 
 """
-    spectrum(plasma::Plasma, geometry::ScatteringGeometry, lambda::AbstractVector;
+    spectrum(plasma::Plasma, probe::ProbeBeam, collection::Collection, lambda::AbstractVector;
              prefactor::Symbol = :first_order) -> Vector
 
     P(λ_s) = (1 + 2ω/ω_i) · S(k(λ_s), ω(λ_s)) · 2πc/λ_s²,     G = 1,     units m⁻¹
@@ -105,10 +109,10 @@ The scattered power spectrum on the wavelength axis `lambda` (m, increasing). Al
 output with `similar(lambda, ...)` and calls `spectrum!`.
 
 Sheffield Eqs. 2.3.13, 2.3.17; `conventions.md` 1.8, 3.4; `docs/derivations/spectrum.md`;
-spec D11.
+spec D11, D40.
 """
-function spectrum(plasma::Plasma, geometry::ScatteringGeometry, lambda::AbstractVector;
+function spectrum(plasma::Plasma, probe::ProbeBeam, collection::Collection, lambda::AbstractVector;
                    prefactor::Symbol = :first_order)
-    P = similar(lambda, _spectrum_eltype(plasma, geometry, lambda))
-    return spectrum!(P, plasma, geometry, lambda; prefactor = prefactor)
+    P = similar(lambda, _spectrum_eltype(plasma, probe, collection, lambda))
+    return spectrum!(P, plasma, probe, collection, lambda; prefactor = prefactor)
 end

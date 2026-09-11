@@ -16,7 +16,7 @@
 > both cases, confirmed for a one-electron/one-ion **and** a two-electron/two-ion plasma
 > (`test/scattering/test_susceptibility.jl` CH8, `test/scattering/test_spectral_density.jl` SD9,
 > `test/scattering/test_geometry.jl` GE12, `test/scattering/test_spectrum.jl` SP11, spec PF2).
-> A `Plasma{ForwardDiff.Dual}` and a `ScatteringGeometry{ForwardDiff.Dual}` go through the exact
+> A `Plasma{ForwardDiff.Dual}` and a `ProbeBeam`/`Collection{ForwardDiff.Dual}` pair go through the exact
 > same `spectrum!` code as the `Float64` build (no method specializes on element type beyond
 > `FT<:Real`), which is what the SP9, SP10 gradient tests and PF3 (the dual plasma's value part
 > matching the `Float64` spectrum to `1e-14` relative) exercise. No cache was added and
@@ -54,8 +54,10 @@ single gain `G`, since only the *shape* of `P(λ_s)` matters for fitting:
 default, `prefactor = :first_order`) and `one(omega)` when false (`prefactor = :none`, which
 recovers the zeroth-order Eq. 2.3.13 and is what the `±ω` symmetry test SP6 needs, since the
 first-order term is itself odd in `ω` and breaks that symmetry by design).
-`polarization_factor(geometry)` (`|ŝ × (ŝ × Ê_i0)|²`) is **not** multiplied in: it is absorbed
-into `G`, computed only for reference (`conventions.md` 1.8, geometry.md Section 7).
+`polarization_factor(probe, collection)` (`|ŝ × (ŝ × Ê_i0)|²`) is **not** multiplied in: it is
+absorbed into `G` (`Sensitivity` since Step 2.3a), computed only for reference in `spectrum`
+itself (`conventions.md` 1.8, geometry.md Section 7) — though since Step 2.3b it is load-bearing
+through the convective gain, `docs/derivations/gain.md`.
 
 ## 2. The exact Jacobian, and why it belongs only in `spectrum`
 

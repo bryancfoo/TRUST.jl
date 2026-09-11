@@ -4,7 +4,8 @@ using OTIS: _bin_kernel!, _make_cache, _streak_eltype
 import ForwardDiff
 using LinearAlgebra.BLAS: get_num_threads
 
-_th_geometry() = ScatteringGeometry(lambda_probe_nm=263.25, theta_deg=60, k_model=:exact)
+_th_probe() = ProbeBeam(lambda_probe_nm=263.25)
+_th_collection() = Collection(theta_deg=60, k_model=:exact)
 
 function _th_epw_problem(; nlambda=128, nt=32)
     template = Plasma(n_e_cm3=5e19,
@@ -17,10 +18,10 @@ function _th_epw_problem(; nlambda=128, nt=32)
     trace = PlasmaTrace(template; t_ns=t_ns,
         leaves=("n_e_cm3" => n_e_vec, "electrons.e.T_eV" => Te_vec, "electrons.e.f.m" => m_vec))
     lambda = collect(range(220e-9, 260e-9; length=nlambda))
-    g = _th_geometry()
-    effects = (SpectralIRF(fwhm_nm=0.5), TemporalIRF(fwhm_ns=0.08), Gain(gain=2.0e-4),
+    probe = _th_probe(); collection = _th_collection()
+    effects = (SpectralIRF(fwhm_nm=0.5), TemporalIRF(fwhm_ns=0.08), Sensitivity(scale=2.0e-4),
         ConstantBackground(level=25.0))
-    return Experiment(trace=trace, geometry=g, lambda_m=lambda, effects=effects)
+    return Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda, effects=effects)
 end
 
 function _th_maxwellian_problem(; nlambda=128, nt=32)
@@ -32,9 +33,9 @@ function _th_maxwellian_problem(; nlambda=128, nt=32)
     n_e_vec = collect(range(3e19, 1e20; length=nt))
     trace = PlasmaTrace(template; t_ns=t_ns, leaves=("n_e_cm3" => n_e_vec,))
     lambda = collect(range(262e-9, 264.5e-9; length=nlambda))
-    g = _th_geometry()
-    return Experiment(trace=trace, geometry=g, lambda_m=lambda,
-        effects=(SpectralIRF(fwhm_nm=0.08), TemporalIRF(fwhm_ns=0.05), Gain(gain=1.0e-6)))
+    probe = _th_probe(); collection = _th_collection()
+    return Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda,
+        effects=(SpectralIRF(fwhm_nm=0.08), TemporalIRF(fwhm_ns=0.05), Sensitivity(scale=1.0e-6)))
 end
 
 @testset "TH1: serial and threaded ideal_streak agree (EPW-like)" begin

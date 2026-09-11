@@ -14,7 +14,7 @@ include("scattering/susceptibility.jl")   # new: needs alpha, xi, cauchy_dfdv
 include("scattering/spectral_density.jl") # new: needs susceptibility, dielectric, f_lab
 include("scattering/geometry.jl")         # new: needs the unit table and Plasma
 include("scattering/spectrum.jl")         # new: needs wavevector and spectral_density
-include("instrument/effects.jl")          # new (2.2): needs ScatteringGeometry, Plasma, LeafRef
+include("instrument/effects.jl")          # new (2.2): needs ProbeBeam, Collection, Plasma, LeafRef
 include("instrument/background.jl")       # new (2.2)
 include("instrument/experiment.jl")       # new (2.2): needs the effects and PlasmaTrace
 include("instrument/measure.jl")          # new (2.2/2.3): needs Experiment and spectrum!
@@ -41,12 +41,12 @@ export PlasmaTrace, LeafPath, plasma, nbins
 # scattering
 export susceptibility, dielectric, spectral_density, spectrum, spectrum!
 
-# geometry
-export ScatteringGeometry, wavevector, polarization_factor
+# geometry (the single-struct geometry type retired at Step 2.3a, spec D40)
+export ProbeBeam, Collection, wavevector, polarization_factor, kdirection, detector_axis
 
-# instrument (2.2, 2.3)
+# instrument (2.2, 2.3, 2.3a)
 export AbstractInstrumentEffect, SpectralIRF, TemporalIRF, KSmearing, GradientSmearing,
-       ProbeOffset, Gain, ConstantBackground, PolynomialBackground, ImageBackground,
+       ProbeOffset, Sensitivity, ConstantBackground, PolynomialBackground, ImageBackground,
        GaussianKernel, TabulatedKernel
 export Experiment, measure, ideal_streak, ideal_streak!, islinear, stage, samples, apply!
 export foreach_bin!, pin_blas_threads

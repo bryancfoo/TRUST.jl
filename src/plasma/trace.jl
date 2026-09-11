@@ -501,27 +501,34 @@ function _redensify(sp::Species{FT,F}, n_e::FT, kind::Symbol) where {FT,F}
     return Species{FT,F}(sp.name, sp.mass, sp.charge, sp.u, sp.T, sp.f, sp.fraction, n)
 end
 
-function _apply_field(sp::Species{FT,F}, ref::LeafRef, v::FT) where {FT,F}
-    if ref.shape
-        pr = parameters(sp.f)
-        newp = merge(pr, NamedTuple{(ref.field,)}((v,)))
-        newf = reconstruct(sp.f, newp)
-        return Species{FT,F}(sp.name, sp.mass, sp.charge, sp.u, sp.T, newf, sp.fraction, sp.n)
-    elseif ref.field === :T
-        return Species{FT,F}(sp.name, sp.mass, sp.charge, sp.u, v, sp.f, sp.fraction, sp.n)
-    elseif ref.field === :u
-        return Species{FT,F}(sp.name, sp.mass, sp.charge, v, sp.T, sp.f, sp.fraction, sp.n)
-    else
-        return Species{FT,F}(sp.name, sp.mass, sp.charge, sp.u, sp.T, sp.f, v, sp.n)
-    end
-end
+"""
+    _species_with_leaf(sp::Species{FT,F}, i, ref::LeafRef, kind::Symbol, v::FT, n_e::FT) where {FT,F}
 
-function _maybe_update_species(sp::Species{FT,F}, i::Int, ref::LeafRef, kind::Symbol,
-                                v::FT, n_e::FT) where {FT,F}
-    if ref.set === kind && ref.index == i
-        return _redensify(_apply_field(sp, ref, v), n_e, kind)
-    end
-    return sp
+`sp` (species `i` of set `kind`) with the one field `ref` names replaced by `v` when `ref` points
+at this species, otherwise `sp` unchanged — the A15 rewrite (`conventions.md` 5.2, roadmap Step
+2.3a): the **field values** (`u`, `T`, `fraction`) are each selected by their own ternary first,
+so every ternary's two branches are plain scalars, and `Species{FT,F}` is constructed **exactly
+once** from them. The naive form this replaced (`_maybe_update_species`/`_apply_field`, returning
+a whole `Species` from each of several branches) forced the compiler to merge several
+1600-plus-byte non-`isbits` struct values at a phi node — one heap allocation per sample per bin
+on a `SuperGaussian`-shaped species, whose cached table slice is what makes `Species` that large.
+Selecting scalars first and constructing once collapses the merge to `isbits` values, and the
+per-bin cost becomes one `Plasma` escaping to the heap rather than one per sample (measured
+2026-09-11: 9040 B -> 1808 B at `NQ = 5`, independent of `NQ` thereafter; GA1, GA2).
+
+**Cannot serve a shape-parameter leaf** — `GradientSmearing` refuses one for exactly this reason
+(spec D10); `plasma(trace, j)` keeps `_snapshot_shape` for the shape case it does support.
+
+Spec D40 (Step 2.3a Build), A15.
+"""
+@inline function _species_with_leaf(sp::Species{FT,F}, i, ref::LeafRef, kind::Symbol,
+                                     v::FT, n_e::FT) where {FT,F}
+    hit      = (ref.set === kind) & (ref.index == i)
+    u        = (hit & (ref.field === :u))        ? v : sp.u
+    T        = (hit & (ref.field === :T))        ? v : sp.T
+    fraction = (hit & (ref.field === :fraction)) ? v : sp.fraction
+    n        = _density(fraction, n_e, kind, sp.charge)
+    return Species{FT,F}(sp.name, sp.mass, sp.charge, u, T, sp.f, fraction, n)
 end
 
 """
@@ -533,15 +540,16 @@ species' density re-resolved from `n_e` and its (possibly just-changed) fraction
 (from a fitted `GradientSmearing` width, say) widens `p` first (`_widen_plasma`, the same
 promotion `PlasmaTrace`'s constructor does), so the widening is a compile-time-resolved no-op
 (and hence allocation-free) whenever `value`'s type already matches `p`'s. Allocation-free in
-that common case by the same argument as `plasma(trace, j)`: `ntuple` over each `SpeciesSet`'s
-tuple, one position of which conditionally rewrites its species while every other position
-passes its species through unchanged — never a shape-type change, so every position's static
-return type is fixed regardless of which branch runs. What `GradientSmearing` calls (spec D10);
-EF9 asserts the zero for the plain (non-widening) pass.
+that common case: `ntuple`/`map` over each `SpeciesSet`'s tuple, `_species_with_leaf` (A15)
+selecting field values before constructing each species once. `ref.shape` is refused (only
+`plasma(trace, j)` rebuilds a shape). What `GradientSmearing` calls (spec D10); EF9 and GA1
+assert the zero for the plain (non-widening) pass.
 
-Spec D8.
+Spec D8, A15.
 """
 function _with_leaf(p::Plasma, ref::LeafRef, value)
+    ref.shape && throw(ArgumentError(
+        "_with_leaf: cannot replace a shape-parameter leaf \"$(ref.field)\""))
     FT = promote_type(typeof(p.n_e), typeof(value))
     p2 = _widen_plasma(p, FT)
     v = FT(value)
@@ -555,12 +563,12 @@ function _with_leaf(p::Plasma, ref::LeafRef, value)
 
     kind = ref.set
     if kind === :electrons
-        new_species = ntuple(i -> _maybe_update_species(p2.electrons.species[i], i, ref, kind, v, p2.n_e),
+        new_species = ntuple(i -> _species_with_leaf(p2.electrons.species[i], i, ref, kind, v, p2.n_e),
                               Val(length(p2.electrons)))
         electron_set = SpeciesSet(p2.electrons.names, new_species)
         return Plasma{FT,typeof(electron_set),typeof(p2.ions)}(p2.n_e, electron_set, p2.ions)
     else
-        new_species = ntuple(i -> _maybe_update_species(p2.ions.species[i], i, ref, kind, v, p2.n_e),
+        new_species = ntuple(i -> _species_with_leaf(p2.ions.species[i], i, ref, kind, v, p2.n_e),
                               Val(length(p2.ions)))
         ion_set = SpeciesSet(p2.ions.names, new_species)
         return Plasma{FT,typeof(p2.electrons),typeof(ion_set)}(p2.n_e, p2.electrons, ion_set)

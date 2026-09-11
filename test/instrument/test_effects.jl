@@ -2,9 +2,11 @@ using Test
 using OTIS
 using OTIS: _resolve_leaf, _leaf_value, _with_leaf, _sigma_from_fwhm, _fwhm_from_sigma,
     _convolution_matrix, GAUSS_LEGENDRE_NODES, GAUSS_LEGENDRE_WEIGHTS,
-    GAUSS_HERMITE_NODES, GAUSS_HERMITE_WEIGHTS
+    GAUSS_HERMITE_NODES, GAUSS_HERMITE_WEIGHTS, _bin_kernel!, _make_cache, _streak_eltype
 import ForwardDiff
 using Random
+
+include(joinpath(@__DIR__, "..", "fixtures", "rf1_reference.jl"))
 
 # TR's reference plasma (test/plasma/test_trace.jl / the D22 template).
 _ef_plasma(; f_electron=Maxwellian()) = Plasma(
@@ -12,7 +14,8 @@ _ef_plasma(; f_electron=Maxwellian()) = Plasma(
     electrons=(electrons(T_eV=500, f=f_electron),),
     ions=(ion(name="D", mass_amu=2.014, charge=1, T_eV=250),))
 
-_ef_geometry() = ScatteringGeometry(lambda_probe_nm=263.25, theta_deg=60, k_model=:exact)
+_ef_probe() = ProbeBeam(lambda_probe_nm=263.25)
+_ef_collection() = Collection(theta_deg=60, k_model=:exact)
 
 const _EF_LAMBDA = collect(range(235e-9, 255e-9; length=128))
 const _EF_T = collect(range(2.0e-9, 3.0e-9; length=16))
@@ -66,32 +69,31 @@ end
 
 @testset "EF4: a one-sample KSmearing is the identity" begin
     template = _ef_plasma()
-    g = _ef_geometry()
+    probe = _ef_probe(); collection = _ef_collection()
     e = KSmearing(half_angle_deg=3.0, nodes=1)
-    P_ref = spectrum(template, g, _EF_LAMBDA)
-    samp = samples(e, template, g)
+    P_ref = spectrum(template, probe, collection, _EF_LAMBDA)
+    samp = samples(e, template, probe, collection)
     @test length(samp) == 1
-    w, p2, g2 = samp[1]
+    w, p2, probe2, collection2 = samp[1]
     @test w == 1.0
-    @test spectrum(p2, g2, _EF_LAMBDA) == P_ref
+    @test spectrum(p2, probe2, collection2, _EF_LAMBDA) == P_ref
 end
 
 @testset "EF5: a five-sample KSmearing equals its own definition" begin
     template = _ef_plasma()
-    g = _ef_geometry()
+    probe = _ef_probe(); collection = _ef_collection()
     e = KSmearing(half_angle_deg=2.0, nodes=5)
     xi, w = GAUSS_LEGENDRE_NODES.n5, GAUSS_LEGENDRE_WEIGHTS.n5
     half_angle = theta_to_si(2.0, :theta_deg)
     wsum = sum(w)
     oracle = zeros(length(_EF_LAMBDA))
     for q in 1:5
-        gq = ScatteringGeometry(lambda_probe_m=g.lambda_probe, theta_rad=g.theta + half_angle * xi[q],
-            k_model=g.k_model)
-        oracle .+= (w[q] / wsum) .* spectrum(template, gq, _EF_LAMBDA)
+        cq = Collection(theta_rad=collection.theta + half_angle * xi[q], k_model=collection.k_model)
+        oracle .+= (w[q] / wsum) .* spectrum(template, probe, cq, _EF_LAMBDA)
     end
     P = zeros(length(_EF_LAMBDA))
-    for (wq, p2, g2) in samples(e, template, g)
-        P .+= wq .* spectrum(p2, g2, _EF_LAMBDA)
+    for (wq, p2, probe2, collection2) in samples(e, template, probe, collection)
+        P .+= wq .* spectrum(p2, probe2, collection2, _EF_LAMBDA)
     end
     @test isapprox(P, oracle; rtol=1e-13)
 end
@@ -123,21 +125,22 @@ end
 
 @testset "EF8: a zero-width GradientSmearing is the identity" begin
     template = _ef_plasma()
-    g = _ef_geometry()
+    probe = _ef_probe(); collection = _ef_collection()
     e1 = GradientSmearing(template; leaf="electrons.e.T", width=0.0, nodes=5)
-    for (w, p2, g2) in samples(e1, template, g)
+    for (w, p2, probe2, collection2) in samples(e1, template, probe, collection)
         @test p2.electrons[1].T === template.electrons[1].T
-        @test g2 === g
+        @test probe2 === probe
+        @test collection2 === collection
     end
     e2 = GradientSmearing(template; leaf="n_e", width=0.0, nodes=5)
-    for (w, p2, g2) in samples(e2, template, g)
+    for (w, p2, probe2, collection2) in samples(e2, template, probe, collection)
         @test p2.n_e === template.n_e
     end
 end
 
 @testset "EF9: allocations in the sample path" begin
     template = _ef_plasma()
-    g = _ef_geometry()
+    probe = _ef_probe(); collection = _ef_collection()
     ref = _resolve_leaf(template, LeafPath("electrons.e.T"))
     v = _leaf_value(template, ref)
     _wl() = _with_leaf(template, ref, v)
@@ -145,30 +148,30 @@ end
     @test (@allocated _wl()) == 0
 
     eK = KSmearing(half_angle_deg=2.0, nodes=5)
-    _sk() = samples(eK, template, g)
+    _sk() = samples(eK, template, probe, collection)
     _sk()
     @test (@allocated _sk()) == 0
 
     eG = GradientSmearing(template; leaf="electrons.e.T", width=60.0 * EV, nodes=5)
-    _sg() = samples(eG, template, g)
+    _sg() = samples(eG, template, probe, collection)
     _sg()
     @test (@allocated _sg()) == 0
 
     eP = ProbeOffset(probe_offset_nm=0.05)
-    _sp() = samples(eP, template, g)
+    _sp() = samples(eP, template, probe, collection)
     _sp()
     @test (@allocated _sp()) == 0
 end
 
 @testset "EF10: AD through the sample construction" begin
     template = _ef_plasma()
-    g = _ef_geometry()
+    probe = _ef_probe(); collection = _ef_collection()
     h = 1e-6
 
     function sum_with_half_angle(x)
         e = KSmearing(half_angle_rad=x, nodes=5)
         trace = PlasmaTrace(template; t_ns=[0.0])
-        expt = Experiment(trace=trace, geometry=g, lambda_m=_EF_LAMBDA, effects=(e,))
+        expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_EF_LAMBDA, effects=(e,))
         return sum(ideal_streak(expt))
     end
     x0 = theta_to_si(2.0, :theta_deg)
@@ -179,7 +182,7 @@ end
     function sum_with_width(x)
         e = GradientSmearing(template; leaf="electrons.e.T", width=x, nodes=5)
         trace = PlasmaTrace(template; t_ns=[0.0])
-        expt = Experiment(trace=trace, geometry=g, lambda_m=_EF_LAMBDA, effects=(e,))
+        expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_EF_LAMBDA, effects=(e,))
         return sum(ideal_streak(expt))
     end
     w0 = 60.0 * EV
@@ -190,7 +193,7 @@ end
     function sum_with_offset(x)
         e = ProbeOffset(probe_offset_m=x)
         trace = PlasmaTrace(template; t_ns=[0.0])
-        expt = Experiment(trace=trace, geometry=g, lambda_m=_EF_LAMBDA, effects=(e,))
+        expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_EF_LAMBDA, effects=(e,))
         return sum(ideal_streak(expt))
     end
     o0 = 0.05e-9
@@ -201,9 +204,9 @@ end
 
 @testset "EF11: a smeared density stays positive" begin
     template = _ef_plasma()
-    g = _ef_geometry()
+    probe = _ef_probe(); collection = _ef_collection()
     e = GradientSmearing(template; leaf="n_e", width=0.5, nodes=7)
-    for (w, p2, g2) in samples(e, template, g)
+    for (w, p2, probe2, collection2) in samples(e, template, probe, collection)
         @test p2.n_e > 0
         @test p2.electrons[1].n > 0
         @test p2.ions[1].n > 0
@@ -212,14 +215,14 @@ end
 
 @testset "EF12: ProbeOffset moves the probe, not the axis" begin
     template = _ef_plasma()
-    g = _ef_geometry()
+    probe = _ef_probe(); collection = _ef_collection()
     trace = PlasmaTrace(template; t_ns=[0.0])
     # A 2 nm probe offset, well over one wavelength bin (~0.157 nm here), so the shifted
     # feature is guaranteed to land in a different bin regardless of the spectrum's shape.
     e = ProbeOffset(probe_offset_nm=2.0)
-    expt = Experiment(trace=trace, geometry=g, lambda_m=_EF_LAMBDA, effects=(e,))
+    expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_EF_LAMBDA, effects=(e,))
     @test expt.lambda === _EF_LAMBDA
-    P0 = spectrum(template, g, _EF_LAMBDA)
+    P0 = spectrum(template, probe, collection, _EF_LAMBDA)
     P1 = ideal_streak(expt)[:, 1]
     i0, i1 = argmax(P0), argmax(P1)
     @test abs(_EF_LAMBDA[i1] - _EF_LAMBDA[i0]) > (_EF_LAMBDA[2] - _EF_LAMBDA[1])
@@ -264,7 +267,7 @@ end
     rhs2 = a .* apply!(similar(P), P, e_temp, op_temp) .+ b .* apply!(similar(P), Q, e_temp, op_temp)
     @test isapprox(lhs2, rhs2; rtol=1e-14)
 
-    e_gain = Gain(gain=3.0)
+    e_gain = Sensitivity(scale=3.0)
     lhs3 = apply!(copy(a .* P .+ b .* Q), a .* P .+ b .* Q, e_gain, nothing)
     rhs3 = a .* apply!(copy(P), P, e_gain, nothing) .+ b .* apply!(copy(Q), Q, e_gain, nothing)
     @test isapprox(lhs3, rhs3; rtol=1e-14)
@@ -353,8 +356,8 @@ end
     e4 = SpectralIRF(fwhm_nm=0.5)
     @test reconstruct(e4, parameters(e4)).kernel.sigma == e4.kernel.sigma
 
-    e5 = Gain(gain=2.0)
-    @test reconstruct(e5, parameters(e5)).gain == e5.gain
+    e5 = Sensitivity(scale=2.0)
+    @test reconstruct(e5, parameters(e5)).scale == e5.scale
 end
 
 @testset "EF19: a dual FWHM gives a dual matrix" begin
@@ -375,6 +378,99 @@ end
     @test occursin("KSmearing", sprint(show, KSmearing(half_angle_deg=2.0)))
     @test occursin("GradientSmearing", sprint(show, GradientSmearing(template; leaf="electrons.e.T", width=60.0)))
     @test occursin("ProbeOffset", sprint(show, ProbeOffset(probe_offset_nm=0.05)))
-    @test occursin("Gain", sprint(show, Gain(gain=2.0e-4)))
+    @test occursin("Sensitivity", sprint(show, Sensitivity(scale=2.0e-4)))
     @test occursin("ConstantBackground", sprint(show, ConstantBackground(level=25.0)))
+end
+
+# --- Step 2.3a: the A15 allocation rewrite and the A17 leaf-key fix (spec Section 6a) ---
+
+_ga_template() = Plasma(n_e_cm3=5e19,
+    electrons=(electrons(T_eV=500, f=SuperGaussian(3.0)),),
+    ions=(ion(mass_amu=2.014, charge=1, T_eV=250),))
+_ga_probe() = ProbeBeam(lambda_probe_nm=263.25)
+_ga_collection() = Collection(theta_deg=60, k_model=:exact)
+const _GA_LAMBDA = collect(range(235e-9, 255e-9; length=512))
+
+@testset "GA1: the A15 allocation is bounded by one plasma, whatever the node count" begin
+    template = _ga_template()
+    probe = _ga_probe(); collection = _ga_collection()
+    trace = PlasmaTrace(template; t_ns=[0.0])
+    allocs = Dict{Int,Int}()
+    for nodes in (1, 5, 7)
+        e = GradientSmearing(template; leaf="electrons.e.T_eV", width=60.0, nodes=nodes)
+        expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_GA_LAMBDA, effects=(e,))
+        FT = _streak_eltype(expt)
+        P = Matrix{FT}(undef, length(_GA_LAMBDA), 1)
+        cache = _make_cache(FT, length(_GA_LAMBDA))
+        _bk!() = _bin_kernel!(P, expt, 1, cache)
+        _bk!()
+        allocs[nodes] = @allocated _bk!()
+    end
+    @info "GA1 allocations by node count" allocs
+    @test allocs[1] == allocs[5] == allocs[7]
+    @test allocs[1] <= 2048
+end
+
+@testset "GA2: the A15 rewrite changes no number" begin
+    template = _ga_template()
+    probe = _ga_probe(); collection = _ga_collection()
+    refs = Dict(1 => GA2_COLUMN_N1, 5 => GA2_COLUMN_N5, 7 => GA2_COLUMN_N7)
+    for nodes in (1, 5, 7)
+        e = GradientSmearing(template; leaf="electrons.e.T_eV", width=60.0, nodes=nodes)
+        col = zeros(512)
+        for (w, p2, probe2, collection2) in samples(e, template, probe, collection)
+            col .+= w .* spectrum(p2, probe2, collection2, _GA_LAMBDA)
+        end
+        @test all(col .=== refs[nodes])
+    end
+end
+
+@testset "GA3: the A17 correction: leaf takes a boundary key and width its unit" begin
+    template = _ef_plasma()
+    e1 = GradientSmearing(template; leaf="electrons.e.T_eV", width=60.0)
+    e2 = GradientSmearing(template; leaf="electrons.e.T", width=60.0 * EV)
+    @test e1.offsets === e2.offsets
+    @test e1.weights === e2.weights
+    @test e1.width === e2.width
+
+    e3 = GradientSmearing(template; leaf="ions.D.u_kms", width=10.0)
+    e4 = GradientSmearing(template; leaf="ions.D.u", width=10.0 * 1e3)
+    @test e3.offsets === e4.offsets
+    @test e3.width === e4.width
+end
+
+@testset "GA4: the density is still the exception" begin
+    template = _ef_plasma()
+    e = GradientSmearing(template; leaf="n_e", width=0.5)
+    @test e.logarithmic
+    @test_throws "smear the density as \"n_e\"" GradientSmearing(template; leaf="n_e_cm3", width=0.5)
+end
+
+@testset "SN1: Sensitivity(scale = g) is today's Gain(gain = g), bitwise" begin
+    # The 128 x 32 EPW chain of D24, built with the new API: Sensitivity(scale = g) with no
+    # curve must give exactly the streak the old Gain(gain = g) gave, pinned at 5e7b059.
+    template = Plasma(n_e_cm3=1.5e19,
+        electrons=(electrons(T_eV=350.0, f=SuperGaussian(2.0)),),
+        ions=(ion(mass_amu=2.014, charge=1, T_eV=250),))
+    t_ns = collect(range(2.0, 5.6; length=32))
+    n_e_of_t(t) = 1.5e19 + 6.3e19 * (1 - exp(-(t - 2.0) / 0.75)) - 0.42e19 * (t - 2.0)
+    Te_of_t(t) = 350 + 1150 * exp(-(t - 2.0) / 1.35)
+    m_of_t(t) = 2.0 + 2.9 * exp(-((t - 4.4) / 1.15)^2)
+    trace = PlasmaTrace(template; t_ns=t_ns,
+        leaves=("n_e_cm3" => n_e_of_t, "electrons.e.T_eV" => Te_of_t, "electrons.e.f.m" => m_of_t))
+    lambda = collect(range(220e-9, 260e-9; length=128))
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60, k_model=:exact)
+    effects = (SpectralIRF(fwhm_nm=0.5), TemporalIRF(fwhm_ns=0.08), Sensitivity(scale=2.0e-4),
+               ConstantBackground(level=25.0))
+    expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda, effects=effects)
+    # measure() applies the IRFs via mul! (BLAS gemm!); pin BLAS to one thread for a
+    # bitwise-reproducible comparison, as TH3 does and as the pinned reference was generated.
+    prev = pin_blas_threads(1)
+    M = try
+        measure(expt)
+    finally
+        pin_blas_threads(prev)
+    end
+    @test all(M .=== EPW_MEASURE)
 end

@@ -14,7 +14,7 @@ order ([OQ-13](../../dev/open_questions.md#oq-13)):
   than acting on the streak — `KSmearing`, `GradientSmearing`, `ProbeOffset`. Any number of
   these may be given; they run in the user's own relative order.
 - **Group 2, after the per-bin loop, in this fixed order**: `SpectralIRF`, `TemporalIRF`,
-  `Gain`, then any number of backgrounds.
+  `Sensitivity`, then any number of backgrounds.
 
 In one line, with `P_kernel` the ideal streak the per-bin kernel produces (group 1 already
 folded in):
@@ -23,7 +23,7 @@ folded in):
 M = B + g · (K_λ · P_kernel · K_tᵀ)
 ```
 
-with `K_λ` the spectral convolution matrix, `K_t` the temporal one, `g` the scalar gain, and `B`
+with `K_λ` the spectral convolution matrix, `K_t` the temporal one, `g` the scalar sensitivity, and `B`
 the sum of the background terms (each additive; `ConstantBackground` and `PolynomialBackground`
 add a term independent of `P_kernel`, `ImageBackground` adds `scale · image`). `Experiment`'s
 constructor **stably sorts** the user's effects into this order (`_chain_order`), so the same
@@ -61,11 +61,11 @@ Both IRFs share one builder, `_convolution_matrix(kernel, axis)` (spec D13):
 
 ## 3. The in-kernel effects
 
-All three are weighted sums over samples of the plasma and/or the geometry, folded by
-`_accumulate!` (spec D16):
+All three are weighted sums over samples of the plasma, the probe and/or the collection, folded
+by `_accumulate!` (spec D16):
 
 ```
-P(λ) = Σ_q w_q · spectrum(p_q, g_q, λ)
+P(λ) = Σ_q w_q · spectrum(p_q, probe_q, collection_q, λ)
 ```
 
 - **`KSmearing`.** The collection aperture is modelled as a uniform spread of angles of
@@ -77,8 +77,9 @@ P(λ) = Σ_q w_q · spectrum(p_q, g_q, λ)
   smeared density stays strictly positive at any width and any node — EF11 is the reason this
   form was chosen over an additive one).
 - **`ProbeOffset`.** `lambda_probe -> lambda_probe + offset`, a single sample of weight one. It
-  enters `wavevector` and `_omega_probe` through `geometry.lambda_probe` alone; the detector
-  axis `expt.lambda` is never touched (EF12, Pitfall 11) — the probe moves, not the detector.
+  enters `wavevector` and `_omega_probe` through `probe.lambda` alone (since Step 2.3a's split,
+  `ProbeBeam` is the only one of the pair rebuilt); the detector axis `expt.lambda` is never
+  touched (EF12, Pitfall 11) — the probe moves, not the detector.
 
 **Both quadrature rules use an odd node count** (`1, 3, 5, 7`) so the nominal (unsmeared) value
 is always one of the nodes, and both normalize their weights to sum to one at construction, so
@@ -91,7 +92,7 @@ this effect be pushed through as a fixed linear operator?*
 
 | Effect | `islinear` | Why |
 |---|---|---|
-| `SpectralIRF`, `TemporalIRF`, `Gain` | `true` | each is a fixed matrix or scalar multiplication of the streak |
+| `SpectralIRF`, `TemporalIRF`, `Sensitivity` | `true` | each is a fixed matrix or scalar multiplication of the streak |
 | `ConstantBackground`, `PolynomialBackground`, `ImageBackground` | `false` | **affine**, not linear: `effect(aP+bQ) - a·effect(P) - b·effect(Q) = (1-a-b)·B`, tested directly (EF15, BG4) |
 | `KSmearing`, `GradientSmearing`, `ProbeOffset` | `false` | these act on the **plasma**, not the streak — `effect(aP+bQ) = a·effect(P)+b·effect(Q)` is not even a meaningful statement about them, since they change what is evaluated rather than post-processing a value that already exists |
 

@@ -42,7 +42,7 @@ element type is decided; every cache and output buffer downstream is typed from 
 Spec D16.
 """
 function _streak_eltype(expt::Experiment)
-    FT = promote_type(eltype(expt.trace), typeof(expt.geometry.lambda_probe),
+    FT = promote_type(eltype(expt.trace), typeof(expt.probe.lambda), typeof(expt.collection.theta),
         eltype(expt.lambda), eltype(expt.t))
     for e in expt.effects
         FT = promote_type(FT, _effect_eltype(e))
@@ -143,7 +143,7 @@ function _bin_kernel!(P::AbstractMatrix, expt::Experiment, j::Integer, cache::Bi
     p = plasma(expt.trace, j)
     col = cache.column
     fill!(col, zero(eltype(col)))
-    _accumulate!(col, p, expt.geometry, expt.lambda, _kernel_effects(expt),
+    _accumulate!(col, p, expt.probe, expt.collection, expt.lambda, _kernel_effects(expt),
         one(eltype(col)), _prefactor_flag(expt.prefactor))
     @inbounds for l in eachindex(col)
         P[l, j] = col[l]
@@ -151,18 +151,18 @@ function _bin_kernel!(P::AbstractMatrix, expt::Experiment, j::Integer, cache::Bi
     return P
 end
 
-function _accumulate!(col, p, g, lambda, ::Tuple{}, w, first_order)
+function _accumulate!(col, p, probe, collection, lambda, ::Tuple{}, w, first_order)
     @inbounds for l in eachindex(lambda)
-        col[l] += w * _spectrum_at(p, g, lambda[l], first_order)
+        col[l] += w * _spectrum_at(p, probe, collection, lambda[l], first_order)
     end
     return col
 end
 
-function _accumulate!(col, p, g, lambda, effects::Tuple, w, first_order)
+function _accumulate!(col, p, probe, collection, lambda, effects::Tuple, w, first_order)
     e = first(effects)
     rest = Base.tail(effects)
-    for (wq, pq, gq) in samples(e, p, g)
-        _accumulate!(col, pq, gq, lambda, rest, w * wq, first_order)
+    for (wq, pq, probeq, collectionq) in samples(e, p, probe, collection)
+        _accumulate!(col, pq, probeq, collectionq, lambda, rest, w * wq, first_order)
     end
     return col
 end
@@ -206,9 +206,9 @@ _needs_destination(::TemporalIRF) = true
 
 apply!(dest, src, ::SpectralIRF, op) = mul!(dest, op, src)
 apply!(dest, src, ::TemporalIRF, op) = mul!(dest, src, transpose(op))
-function apply!(dest, src, e::Gain, op)
+function apply!(dest, src, e::Sensitivity{FT,Nothing}, op) where {FT}
     dest === src || copyto!(dest, src)
-    dest .*= e.gain
+    dest .*= e.scale
     return dest
 end
 function apply!(dest, src, e::ConstantBackground, op)

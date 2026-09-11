@@ -58,7 +58,8 @@ the one `show` methods and result files use.
 addition (spec D4) carrying the same factors as `n`, needed because `Plasma`'s density field is
 named `n_e` (`conventions.md` 11.1) while OQ-5's original table only names `n`. The
 `lambda_probe` and `polarization` rows are a Phase 1 addition (Step 1.3, spec D4), carrying the
-same factors as `lambda` and `theta` respectively, needed because `ScatteringGeometry`'s
+same factors as `lambda` and `theta` respectively, needed because `ProbeBeam`'s (the single
+combined geometry type of Phase 1, split into `ProbeBeam`/`Collection` at Step 2.3a, spec D40)
 constructor keywords are `lambda_probe_nm`/`lambda_probe_m` and
 `polarization_deg`/`polarization_rad`, not `lambda_nm` or `theta_deg`. The `fwhm_lambda`,
 `fwhm_t`, `half_angle` and `probe_offset` rows are a Phase 2 addition (Step 2.2, spec D3):
@@ -86,7 +87,26 @@ const ACCEPTED_UNITS = (
     fwhm_t       = (fwhm_ns = 1e-9,          fwhm_s   = 1.0),
     half_angle   = (half_angle_deg = π/180,  half_angle_rad = 1.0),
     probe_offset = (probe_offset_nm = 1e-9,  probe_offset_m = 1.0),
+    intensity      = (intensity_wcm2 = 1e4,      intensity_wm2 = 1.0),
+    diameter       = (diameter_um = 1e-6,        diameter_m = 1.0),
+    dispersion     = (dispersion_nm_px = 1e-9,   dispersion_m_px = 1.0),
+    lambda_center  = (lambda_center_nm = 1e-9,   lambda_center_m = 1.0),
 )
+
+"""
+    A0_SQ_COEFFICIENT
+
+The coefficient of the probe's normalized vector potential squared,
+`A0_SQ_COEFFICIENT = e²/(2π² ε₀ m_e² c⁵)`, so that `a0_sq = A0_SQ_COEFFICIENT * lambda^2 *
+intensity` is one multiplication (`lambda` in m, `intensity` in W/m², linear polarization). The
+package's first derived constant (`conventions.md` 1.3), checked against the standard
+`a₀ = 0.85 √(I₁₈ λ_µm²)`: `0.731` against `0.7225` at `λ = 1 µm`, `I = 10¹⁸ W/cm²`, the
+difference being the rounding of the quoted `0.85` (spec D40, GS5).
+
+`docs/derivations/gain.md`; `conventions.md` 1.3.
+"""
+const A0_SQ_COEFFICIENT = ELEMENTARY_CHARGE^2 /
+    (2 * π^2 * VACUUM_PERMITTIVITY * ELECTRON_MASS^2 * SPEED_OF_LIGHT^5)
 
 """
     T_to_si(x, key::Symbol = :T_eV) -> Float64

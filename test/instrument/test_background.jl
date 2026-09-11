@@ -5,7 +5,8 @@ using Random
 
 _bg_plasma() = Plasma(n_e_cm3=5e19, electrons=(electrons(T_eV=500),),
     ions=(ion(name="D", mass_amu=2.014, charge=1, T_eV=250),))
-_bg_geometry() = ScatteringGeometry(lambda_probe_nm=263.25, theta_deg=60, k_model=:exact)
+_bg_probe() = ProbeBeam(lambda_probe_nm=263.25)
+_bg_collection() = Collection(theta_deg=60, k_model=:exact)
 
 @testset "BG1: ConstantBackground adds a constant" begin
     rng = Random.Xoshiro(20260913)
@@ -99,23 +100,24 @@ end
 
 @testset "BG6: a dual parameter reaches the streak" begin
     template = _bg_plasma()
-    g = _bg_geometry()
+    probe = _bg_probe(); collection = _bg_collection()
     lambda = collect(range(235e-9, 255e-9; length=16))
     trace = PlasmaTrace(template; t_ns=[0.0, 1.0])
 
     level_dual = ForwardDiff.Dual(25.0, 1.0)
-    expt1 = Experiment(trace=trace, geometry=g, lambda_m=lambda, effects=(ConstantBackground(level=level_dual),))
+    expt1 = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda,
+        effects=(ConstantBackground(level=level_dual),))
     M1 = measure(expt1)
     @test eltype(M1) <: ForwardDiff.Dual
 
     scale_dual = ForwardDiff.Dual(1.0, 1.0)
-    expt2 = Experiment(trace=trace, geometry=g, lambda_m=lambda,
+    expt2 = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda,
         effects=(ImageBackground(image=zeros(16, 2), scale=scale_dual),))
     M2 = measure(expt2)
     @test eltype(M2) <: ForwardDiff.Dual
 
     coef_dual = (ForwardDiff.Dual(1.0, 1.0), 2.0)
-    expt3 = Experiment(trace=trace, geometry=g, lambda_m=lambda,
+    expt3 = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda,
         effects=(PolynomialBackground(coefficients=coef_dual),))
     M3 = measure(expt3)
     @test eltype(M3) <: ForwardDiff.Dual

@@ -1,22 +1,81 @@
 using SafeTestsets
 
-@safetestset "smoke" begin include("test_smoke.jl") end
-@safetestset "constants" begin include("test_constants.jl") end
-@safetestset "plasma dispersion" begin include("test_plasma_dispersion.jl") end
-@safetestset "distribution interface" begin include("distributions/test_distribution.jl") end
-@safetestset "Maxwellian" begin include("distributions/test_maxwellian.jl") end
-@safetestset "SuperGaussian" begin include("distributions/test_supergaussian.jl") end
-@safetestset "SuperGaussian table" begin include("distributions/test_supergaussian_table.jl") end
-@safetestset "species" begin include("plasma/test_species.jl") end
-@safetestset "plasma parameters" begin include("plasma/test_parameters.jl") end
-@safetestset "plasma" begin include("plasma/test_plasma.jl") end
-@safetestset "plasma trace" begin include("plasma/test_trace.jl") end
-@safetestset "susceptibility" begin include("scattering/test_susceptibility.jl") end
-@safetestset "spectral density" begin include("scattering/test_spectral_density.jl") end
-@safetestset "scattering geometry" begin include("scattering/test_geometry.jl") end
-@safetestset "spectrum" begin include("scattering/test_spectrum.jl") end
-@safetestset "super-Gaussian spectrum" begin include("scattering/test_spectrum_supergaussian.jl") end
-@safetestset "instrument effects" begin include("instrument/test_effects.jl") end
-@safetestset "instrument background" begin include("instrument/test_background.jl") end
-@safetestset "instrument experiment" begin include("instrument/test_experiment.jl") end
-@safetestset "instrument measure" begin include("instrument/test_measure.jl") end
+# D47 (the user, 2026-09-11): a comma-separated, case-insensitive OTIS_TESTS filter, matched
+# against each @safetestset's own name, with a plain `if` around each. Unset or empty runs
+# everything, so every existing invocation (and Level 1's own) keeps working unchanged.
+const _OTIS_TESTS_RAW = get(ENV, "OTIS_TESTS", "")
+const _OTIS_TESTS_TOKENS = [lowercase(strip(t)) for t in split(_OTIS_TESTS_RAW, ",") if !isempty(strip(t))]
+_wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
+    any(occursin(tok, lowercase(name)) for tok in _OTIS_TESTS_TOKENS)
+
+if _wanted("smoke")
+    @safetestset "smoke" begin include("test_smoke.jl") end
+end
+if _wanted("constants")
+    @safetestset "constants" begin include("test_constants.jl") end
+end
+if _wanted("plasma dispersion")
+    @safetestset "plasma dispersion" begin include("test_plasma_dispersion.jl") end
+end
+if _wanted("distribution interface")
+    @safetestset "distribution interface" begin include("distributions/test_distribution.jl") end
+end
+if _wanted("Maxwellian")
+    @safetestset "Maxwellian" begin include("distributions/test_maxwellian.jl") end
+end
+if _wanted("SuperGaussian")
+    @safetestset "SuperGaussian" begin include("distributions/test_supergaussian.jl") end
+end
+if _wanted("SuperGaussian table")
+    @safetestset "SuperGaussian table" begin include("distributions/test_supergaussian_table.jl") end
+end
+if _wanted("species")
+    @safetestset "species" begin include("plasma/test_species.jl") end
+end
+if _wanted("plasma parameters")
+    @safetestset "plasma parameters" begin include("plasma/test_parameters.jl") end
+end
+if _wanted("plasma")
+    @safetestset "plasma" begin include("plasma/test_plasma.jl") end
+end
+if _wanted("plasma trace")
+    @safetestset "plasma trace" begin include("plasma/test_trace.jl") end
+end
+if _wanted("susceptibility")
+    @safetestset "susceptibility" begin include("scattering/test_susceptibility.jl") end
+end
+if _wanted("spectral density")
+    @safetestset "spectral density" begin include("scattering/test_spectral_density.jl") end
+end
+if _wanted("scattering geometry")
+    @safetestset "scattering geometry" begin include("scattering/test_geometry.jl") end
+end
+if _wanted("spectrum")
+    @safetestset "spectrum" begin include("scattering/test_spectrum.jl") end
+end
+if _wanted("super-Gaussian spectrum")
+    @safetestset "super-Gaussian spectrum" begin include("scattering/test_spectrum_supergaussian.jl") end
+end
+if _wanted("refactor")
+    @safetestset "refactor (Step 2.3a)" begin include("scattering/test_refactor.jl") end
+end
+if _wanted("instrument effects")
+    @safetestset "instrument effects" begin include("instrument/test_effects.jl") end
+end
+if _wanted("instrument background")
+    @safetestset "instrument background" begin include("instrument/test_background.jl") end
+end
+if _wanted("instrument experiment")
+    @safetestset "instrument experiment" begin include("instrument/test_experiment.jl") end
+end
+if _wanted("instrument measure")
+    @safetestset "instrument measure" begin include("instrument/test_measure.jl") end
+end
+
+# The slow tier (conventions.md 8.6). test/slow/ carries its OWN environment, because its files
+# need CairoMakie, whose precompile has no place in the fast suite's (OQ-15). Nothing in the tier
+# runs in this environment, so the gate prints how to run it rather than including it.
+if get(ENV, "OTIS_SLOW_TESTS", "") != ""
+    @info "OTIS_SLOW_TESTS is set. The slow tier has its own environment; run it with: " *
+          "julia --project=test/slow test/slow/runslow.jl"
+end

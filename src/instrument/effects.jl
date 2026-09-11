@@ -53,10 +53,12 @@ Spec D9, D15.
 function _chain_order end
 
 """
-    samples(effect::AbstractInstrumentEffect, plasma::Plasma, geometry::ScatteringGeometry) -> NTuple
+    samples(effect::AbstractInstrumentEffect, plasma::Plasma, probe::ProbeBeam, collection::Collection) -> NTuple
 
-For a `:kernel` effect: the weighted list of `(weight, plasma, geometry)` samples the per-bin
-kernel folds over. Spec D9, D10.
+For a `:kernel` effect: the weighted list of `(weight, plasma, probe, collection)` samples the
+per-bin kernel folds over; each in-kernel effect rebuilds only the one of `plasma`, `probe` or
+`collection` it modifies (`KSmearing` a `Collection`, `ProbeOffset` a `ProbeBeam`,
+`GradientSmearing` a `Plasma`). Spec D9, D10, D40.
 """
 function samples end
 
@@ -206,20 +208,22 @@ function reconstruct(::KSmearing{NQ}, values::NamedTuple) where {NQ}
 end
 
 """
-    samples(e::KSmearing, p::Plasma, g::ScatteringGeometry) -> NTuple
+    samples(e::KSmearing, p::Plasma, probe::ProbeBeam, collection::Collection) -> NTuple
 
-`θ -> θ + e.offsets[q]`; the plasma is untouched. The geometry is rebuilt through the **inner**
-constructor `ScatteringGeometry{FT}`, never the keyword constructor, so this is allocation-free
-(EF9; Level 2 measured 0 bytes over 1000 samples).
+`θ -> θ + e.offsets[q]`; the plasma and the probe are untouched. Only `Collection` is rebuilt,
+through its **inner** constructor `Collection{FT}`, never the keyword constructor, so this is
+allocation-free (EF9; Level 2 measured 0 bytes over 1000 samples for the whole geometry before
+the split, and the split makes the rebuilt struct smaller still, spec D40).
 
-Spec D10, Pitfall 10.
+Spec D10, D40, Pitfall 10.
 """
-function samples(e::KSmearing{NQ,FTe}, p::Plasma, g::ScatteringGeometry{FTg0}) where {NQ,FTe,FTg0}
-    FTg = promote_type(FTg0, FTe)
+function samples(e::KSmearing{NQ,FTe}, p::Plasma, probe::ProbeBeam, collection::Collection{FTc}) where {NQ,FTe,FTc}
+    FTg = promote_type(FTc, FTe)
     return ntuple(Val(NQ)) do q
-        (e.weights[q], p,
-            ScatteringGeometry{FTg}(FTg(g.lambda_probe), FTg(g.theta) + FTg(e.offsets[q]),
-                FTg(g.polarization), g.k_model))
+        (e.weights[q], p, probe,
+            Collection{FTg}(FTg(collection.theta) + FTg(e.offsets[q]), collection.k_model,
+                FTg(collection.lambda_center), FTg(collection.dispersion), collection.npixels,
+                FTg(collection.reference_pixel)))
     end
 end
 
@@ -232,12 +236,18 @@ multiplicative for `n_e` (`x_q = x·exp(width·√2·ξ_q)`, so the density stay
 width), on Gauss-Hermite nodes `ξ_q`, weights normalized to sum to one.
 
 Built with `GradientSmearing(template::Plasma; leaf::AbstractString, width::Real, nodes::Integer
-= 5)`; `leaf` names a species `T` or `u` (an SI path or a boundary key) or the bare density key
-`"n_e"` — `fraction` and a shape parameter are refused (offsetting a fraction breaks the
-sum-to-one closure with no repair, and a shape parameter's `reconstruct` per sample per bin is a
-cost this phase does not pay).
+= 5)`; `leaf` is a **boundary key** (`"electrons.e.T_eV"`, `"ions.D.u_kms"`, or the bare SI path
+`"electrons.e.T"`), resolved through `_leaf_si_path` exactly as `PlasmaTrace`'s `leaves` are, and
+`width` is in that key's own unit (eV for `T_eV`, km/s for `u_kms`, joules for a bare `T`) —
+**corrected 2026-09-11, item A17**: `leaf` previously had to be an SI path and `width` had to be
+SI (joules), the one public keyword in Phase 2 carrying a temperature in a unit no other keyword
+uses. The density is the one exception: `leaf = "n_e"` (never `"n_e_cm3"`/`"n_e_m3"`, refused
+loudly) takes a **dimensionless** (log) `width`, since it is the σ of the multiplicative
+lognormal offset below, not a unit-bearing quantity. `fraction` and a shape parameter are refused
+(offsetting a fraction breaks the sum-to-one closure with no repair, and a shape parameter's
+`reconstruct` per sample per bin is a cost this phase does not pay).
 
-Spec D10, D11, D28.
+Spec D10, D11, D28, A17.
 """
 struct GradientSmearing{NQ,FT<:Real} <: AbstractInstrumentEffect
     ref::LeafRef
@@ -256,16 +266,18 @@ function GradientSmearing(template::Plasma; leaf::AbstractString, width::Real, n
     (isfinite(width) && width >= 0) || throw(ArgumentError(
         "GradientSmearing: width must be finite and non-negative; got $width"))
     _check_nodes(nodes)
-    path = LeafPath(leaf)
+    si_path, factor = _leaf_si_path(leaf)
+    path = LeafPath(si_path)
     ref = _resolve_leaf(template, path)
     ref.field === :fraction && throw(ArgumentError(
         "GradientSmearing: a fraction cannot be gradient-smeared"))
     ref.shape && throw(ArgumentError(
         "GradientSmearing: a shape parameter cannot be gradient-smeared"))
     logarithmic = ref.set === :n_e
-    offsets, weights = _hermite_offsets_weights(width, nodes)
+    width_si = width * factor
+    offsets, weights = _hermite_offsets_weights(width_si, nodes)
     FT = eltype(offsets)
-    return GradientSmearing{length(offsets),FT}(ref, path, FT(width), logarithmic, offsets, weights)
+    return GradientSmearing{length(offsets),FT}(ref, path, FT(width_si), logarithmic, offsets, weights)
 end
 
 stage(::GradientSmearing) = :kernel
@@ -285,15 +297,16 @@ end
 _offset_value(e::GradientSmearing, x, q) = e.logarithmic ? x * exp(e.offsets[q]) : x + e.offsets[q]
 
 """
-    samples(e::GradientSmearing, p::Plasma, g::ScatteringGeometry) -> NTuple
+    samples(e::GradientSmearing, p::Plasma, probe::ProbeBeam, collection::Collection) -> NTuple
 
 One leaf of `p` offset per sample (`_with_leaf`, allocation-free by the same argument as
-`plasma(trace, j)`); the geometry is untouched.
+`plasma(trace, j)`); the probe and the collection are untouched.
 
-Spec D10, Pitfall 12.
+Spec D10, D40, Pitfall 12.
 """
-function samples(e::GradientSmearing{NQ}, p::Plasma, g::ScatteringGeometry) where {NQ}
-    return ntuple(q -> (e.weights[q], _with_leaf(p, e.ref, _offset_value(e, _leaf_value(p, e.ref), q)), g),
+function samples(e::GradientSmearing{NQ}, p::Plasma, probe::ProbeBeam, collection::Collection) where {NQ}
+    return ntuple(q -> (e.weights[q],
+            _with_leaf(p, e.ref, _offset_value(e, _leaf_value(p, e.ref), q)), probe, collection),
         Val(NQ))
 end
 
@@ -301,12 +314,12 @@ end
     ProbeOffset{FT<:Real} <: AbstractInstrumentEffect
 
 A shift `lambda_probe -> lambda_probe + offset` of the probe wavelength — **not** of the
-detector wavelength axis. It enters `wavevector` and `_omega_probe` through
-`geometry.lambda_probe`; `expt.lambda` is untouched (EF12, Pitfall 11).
+detector wavelength axis. It enters `wavevector` and `_omega_probe` through `probe.lambda`;
+`expt.lambda` is untouched (EF12, Pitfall 11).
 
 Built with `ProbeOffset(; probe_offset_nm | probe_offset_m)`.
 
-Spec D10.
+Spec D10, D40.
 """
 struct ProbeOffset{FT<:Real} <: AbstractInstrumentEffect
     offset::FT
@@ -325,10 +338,20 @@ islinear(::ProbeOffset) = false
 parameters(e::ProbeOffset) = (offset=e.offset,)
 reconstruct(::ProbeOffset, values::NamedTuple) = ProbeOffset(; probe_offset_m=values.offset)
 
-function samples(e::ProbeOffset, p::Plasma, g::ScatteringGeometry{FTg0}) where {FTg0}
-    FTg = promote_type(FTg0, typeof(e.offset))
-    return ((one(FTg), p,
-        ScatteringGeometry{FTg}(FTg(g.lambda_probe) + FTg(e.offset), FTg(g.theta), FTg(g.polarization), g.k_model)),)
+"""
+    samples(e::ProbeOffset, p::Plasma, probe::ProbeBeam, collection::Collection) -> NTuple
+
+`lambda_probe -> lambda_probe + e.offset`; the plasma and the collection are untouched. One
+sample, weight one. Only `ProbeBeam` is rebuilt, through its **inner** constructor.
+
+Spec D10, D40.
+"""
+function samples(e::ProbeOffset, p::Plasma, probe::ProbeBeam{FTp0}, collection::Collection) where {FTp0}
+    FTp = promote_type(FTp0, typeof(e.offset))
+    return ((one(FTp), p,
+        ProbeBeam{FTp}(FTp(probe.lambda) + FTp(e.offset), FTp(probe.polarization), FTp(probe.a0_sq),
+            FTp(probe.diameter)),
+        collection),)
 end
 
 # --- D12: the post-kernel IRFs and Gain ---
@@ -461,28 +484,45 @@ _prepare(e::SpectralIRF, lambda, t) = _convolution_matrix(e.kernel, lambda)
 _prepare(e::TemporalIRF, lambda, t) = _convolution_matrix(e.kernel, t)
 
 """
-    Gain{FT<:Real} <: AbstractInstrumentEffect
+    Sensitivity{FT<:Real,L,R} <: AbstractInstrumentEffect
 
-A scalar multiplier turning `spectrum`'s m⁻¹ into detector counts. Built with `Gain(; gain =
-1.0)`.
+A fitted scalar `scale` turning `spectrum`'s m⁻¹ into detector counts, and, optionally, a fixed
+measured wavelength response curve `lambda`/`response` (`nothing`/`nothing` until Step 2.3b,
+which adds it), normalized to unit maximum at construction (`response_norm` the divisor kept, so
+the supplied curve is recoverable) so that `scale` reads as counts per m⁻¹ at the most sensitive
+wavelength. `Gain` until 2026-09-10 (`conventions.md` 1.8); `Sensitivity(; scale)` with no curve
+is bitwise `Gain(gain = scale)` (SN1).
 
-Spec D12.
+Built with `Sensitivity(; scale = 1.0)`.
+
+Spec D40, D42.
 """
-struct Gain{FT<:Real} <: AbstractInstrumentEffect
-    gain::FT
-    function Gain{FT}(gain::FT) where {FT<:Real}
-        isfinite(gain) || throw(ArgumentError("Gain: gain must be finite; got $gain"))
-        return new{FT}(gain)
+struct Sensitivity{FT<:Real,L,R} <: AbstractInstrumentEffect
+    scale::FT
+    lambda::L
+    response::R
+    response_norm::FT
+    function Sensitivity{FT,L,R}(scale::FT, lambda::L, response::R, response_norm::FT) where {FT,L,R}
+        isfinite(scale) || throw(ArgumentError("Sensitivity: scale must be finite; got $scale"))
+        return new{FT,L,R}(scale, lambda, response, response_norm)
     end
 end
-Gain(gain::Real) = Gain{typeof(gain)}(gain)
-Gain(; gain::Real=1.0) = Gain(float(gain))
 
-stage(::Gain) = :detector
-_chain_order(::Gain) = 4
-islinear(::Gain) = true
-parameters(e::Gain) = (gain=e.gain,)
-reconstruct(::Gain, values::NamedTuple) = Gain(; gain=values.gain)
+function Sensitivity(scale::Real)
+    FT = typeof(float(scale))
+    return Sensitivity{FT,Nothing,Nothing}(FT(scale), nothing, nothing, one(FT))
+end
+Sensitivity(; scale::Real=1.0) = Sensitivity(float(scale))
+
+stage(::Sensitivity) = :detector
+_chain_order(::Sensitivity) = 4
+islinear(::Sensitivity) = true
+parameters(e::Sensitivity) = (scale=e.scale,)
+
+function reconstruct(e::Sensitivity{FT,L,R}, values::NamedTuple) where {FT,L,R}
+    FT2 = typeof(float(values.scale))
+    return Sensitivity{FT2,L,R}(FT2(values.scale), e.lambda, e.response, FT2(e.response_norm))
+end
 
 """
     _convolution_matrix(kernel::AbstractIRFKernel, axis::AbstractVector) -> Matrix
@@ -574,4 +614,5 @@ function Base.show(io::IO, e::GradientSmearing)
     end
 end
 Base.show(io::IO, e::ProbeOffset) = @printf(io, "ProbeOffset(%+.3f nm)", lambda_from_si(e.offset, :lambda_nm))
-Base.show(io::IO, e::Gain) = @printf(io, "Gain(%.1e)", e.gain)
+Base.show(io::IO, e::Sensitivity{FT,Nothing,Nothing}) where {FT} = @printf(io, "Sensitivity(%.1e)", e.scale)
+Base.show(io::IO, e::Sensitivity) = @printf(io, "Sensitivity(%.1e, response curve)", e.scale)

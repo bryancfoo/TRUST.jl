@@ -1,32 +1,36 @@
-# Experiment: a PlasmaTrace, a ScatteringGeometry, the detector axes, and the instrument chain
-# in canonical order. conventions.md Section 4; spec D15.
+# Experiment: a PlasmaTrace, a ProbeBeam, a Collection, the detector axes, and the instrument
+# chain in canonical order. conventions.md Section 4; spec D15, D40, D44.
 
 using Printf: @printf
 
 """
-    Experiment{FT<:Real, T<:PlasmaTrace{FT}, G<:ScatteringGeometry, L<:AbstractVector,
+    Experiment{FT<:Real, T<:PlasmaTrace{FT}, PB<:ProbeBeam, CO<:Collection, L<:AbstractVector,
                A<:AbstractVector, E<:Tuple, O<:Tuple}
 
-A `PlasmaTrace`, a `ScatteringGeometry`, the detector axes (`lambda` in m, `t` in s, both
+A `PlasmaTrace`, a `ProbeBeam`, a `Collection`, the detector axes (`lambda` in m, `t` in s, both
 strictly increasing), and the instrument chain **already sorted into canonical order** —
-kernel effects, `SpectralIRF`, `TemporalIRF`, `Gain`, backgrounds
+kernel effects, `SpectralIRF`, `TemporalIRF`, `Sensitivity`, backgrounds
 ([OQ-13](../../dev/open_questions.md#oq-13)). `operators` is parallel to `effects`: the
 value `_prepare` built for that effect, or `nothing`. `FT` is the trace's own element type;
-the geometry, the axes and the effects may carry a different (possibly dual) type of their own
-— `_streak_eltype` is where all of that is finally reconciled (spec D16).
+the probe, the collection, the axes and the effects may carry a different (possibly dual) type of
+their own — `_streak_eltype` is where all of that is finally reconciled (spec D16).
 
-Built with `Experiment(; trace, geometry, lambda_nm | lambda_m, t_ns | t_s = nothing, effects =
-(), prefactor::Symbol = :first_order)`. The time axis is the trace's: if `t_ns`/`t_s` is
-omitted, `expt.t` is `trace.axis`; if given, it must agree with `trace.axis` to `rtol = 1e-12`
-(else an error naming the first bin that disagrees), and the *stored* axis is still
-`trace.axis` — two sources of truth for one axis is the trap this closes.
+Built with `Experiment(; trace, probe, collection, lambda_nm | lambda_m = nothing,
+t_ns | t_s = nothing, effects = (), prefactor::Symbol = :first_order)`. The time axis is the
+trace's: if `t_ns`/`t_s` is omitted, `expt.t` is `trace.axis`; if given, it must agree with
+`trace.axis` to `rtol = 1e-12` (else an error naming the first bin that disagrees), and the
+*stored* axis is still `trace.axis` — two sources of truth for one axis is the trap this closes
+(Pitfall 23). **The wavelength axis works the same way against `collection`'s dispersion**: if
+`lambda_nm`/`lambda_m` is omitted and `collection` carries a dispersion, `expt.lambda` is
+`detector_axis(collection)`; if both are given, they must agree to `rtol = 1e-12` (spec D44).
 
-Spec D15.
+Spec D15, D40, D44.
 """
-struct Experiment{FT<:Real,T<:PlasmaTrace{FT},G<:ScatteringGeometry,L<:AbstractVector,
+struct Experiment{FT<:Real,T<:PlasmaTrace{FT},PB<:ProbeBeam,CO<:Collection,L<:AbstractVector,
     A<:AbstractVector,E<:Tuple,O<:Tuple}
     trace::T
-    geometry::G
+    probe::PB
+    collection::CO
     lambda::L
     t::A
     effects::E
@@ -72,7 +76,7 @@ function _stable_sort_effects(effects::Tuple)
     return Tuple(v)
 end
 
-const _CHAIN_CLASS_NAME = Dict(2 => "SpectralIRF", 3 => "TemporalIRF", 4 => "Gain")
+const _CHAIN_CLASS_NAME = Dict(2 => "SpectralIRF", 3 => "TemporalIRF", 4 => "Sensitivity")
 
 function _check_unique_chain_classes(effects::Tuple)
     counts = Dict{Int,Int}()
@@ -87,12 +91,45 @@ function _check_unique_chain_classes(effects::Tuple)
     return nothing
 end
 
-function Experiment(; trace::PlasmaTrace, geometry::ScatteringGeometry, effects=(),
+"""
+    _resolve_lambda_axis(collection::Collection, kwargs) -> AbstractVector
+
+The wavelength axis: the given `lambda_nm`/`lambda_m` when present, `detector_axis(collection)`
+when omitted and `collection` carries a dispersion, else the natural "no unit keyword given"
+error of `_si_axis`. When both are present they must agree to `rtol = 1e-12`, else an error
+naming the first disagreeing bin (spec D44, mirroring `t`'s fallback against `trace.axis`).
+"""
+function _resolve_lambda_axis(collection::Collection, kwargs)
+    row = getfield(ACCEPTED_UNITS, :lambda)
+    lambda_given = any(k -> haskey(kwargs, k), keys(row))
+    has_dispersion = !iszero(collection.dispersion)
+
+    if lambda_given
+        lambda = _si_axis(:lambda, kwargs)
+        if has_dispersion
+            axis2 = detector_axis(collection)
+            length(axis2) == length(lambda) || throw(ArgumentError(
+                "Experiment: the given lambda has $(length(lambda)) bins but the collection's " *
+                "dispersion implies $(length(axis2))"))
+            for l in eachindex(lambda)
+                isapprox(lambda[l], axis2[l]; rtol=1e-12) || throw(ArgumentError(
+                    "Experiment: the given lambda disagrees with the collection's dispersion at bin $l"))
+            end
+        end
+        return lambda
+    elseif has_dispersion
+        return detector_axis(collection)
+    else
+        return _si_axis(:lambda, kwargs)   # throws: no unit keyword given for lambda
+    end
+end
+
+function Experiment(; trace::PlasmaTrace, probe::ProbeBeam, collection::Collection, effects=(),
     prefactor::Symbol=:first_order, kwargs...)
     t_row = getfield(ACCEPTED_UNITS, :t)
     t_given = any(k -> haskey(kwargs, k), keys(t_row))
 
-    lambda = _si_axis(:lambda, kwargs)
+    lambda = _resolve_lambda_axis(collection, kwargs)
     _reject_extra_kwargs(kwargs, (:lambda_nm, :lambda_m, :t_ns, :t_s))
     _prefactor_flag(prefactor)
 
@@ -116,9 +153,9 @@ function Experiment(; trace::PlasmaTrace, geometry::ScatteringGeometry, effects=
     operators = map(e -> _prepare(e, lambda, t), sorted_effects)
 
     FT = eltype(trace)
-    return Experiment{FT,typeof(trace),typeof(geometry),typeof(lambda),typeof(t),
+    return Experiment{FT,typeof(trace),typeof(probe),typeof(collection),typeof(lambda),typeof(t),
         typeof(sorted_effects),typeof(operators)}(
-        trace, geometry, lambda, t, sorted_effects, operators, prefactor)
+        trace, probe, collection, lambda, t, sorted_effects, operators, prefactor)
 end
 
 """
@@ -143,8 +180,11 @@ function Base.show(io::IO, ::MIME"text/plain", expt::Experiment)
         lambda_from_si(expt.lambda[end], :lambda_nm), length(expt.lambda))
     @printf(io, "  t:      %e to %e ns (%d bins)\n", t_from_si(expt.t[1], :t_ns),
         t_from_si(expt.t[end], :t_ns), length(expt.t))
-    print(io, "  geometry: ")
-    show(io, expt.geometry)
+    print(io, "  probe:      ")
+    show(io, expt.probe)
+    println(io)
+    print(io, "  collection: ")
+    show(io, expt.collection)
     println(io)
     println(io, "  chain:")
     for e in expt.effects
