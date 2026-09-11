@@ -18,6 +18,8 @@ include("instrument/effects.jl")          # new (2.2): needs ProbeBeam, Collecti
 include("instrument/background.jl")       # new (2.2)
 include("instrument/experiment.jl")       # new (2.2): needs the effects and PlasmaTrace
 include("instrument/measure.jl")          # new (2.2/2.3): needs Experiment and spectrum!
+include("data/streak.jl")                 # new (2.4)
+include("data/io.jl")                     # new (2.4): needs StreakData and PlasmaTrace
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -50,6 +52,13 @@ export AbstractInstrumentEffect, SpectralIRF, TemporalIRF, KSmearing, GradientSm
        RationalBackground, GaussianKernel, TabulatedKernel
 export Experiment, measure, ideal_streak, ideal_streak!, islinear, stage, samples, apply!
 export foreach_bin!, pin_blas_threads
+
+# data (2.4)
+export StreakData, read_streak, write_streak, read_trace, write_trace
+
+# plotting stubs (2.4 declares them, 2.6 gives Makie methods)
+export streakplot, streakplot!, spectrumplot, spectrumplot!,
+       traceplot, traceplot!, lcurveplot, lcurveplot!
 
 # constants
 export ELECTRON_MASS, ELEMENTARY_CHARGE, VACUUM_PERMITTIVITY, SPEED_OF_LIGHT,
