@@ -1,0 +1,6 @@
+# The slow tier's runner (conventions.md 8.6, spec D27): one @safetestset per slow file. This
+# environment carries CairoMakie, which the fast suite (test/Project.toml) must never see
+# (OQ-15), so this file is run by hand, never included from test/runtests.jl.
+using SafeTestsets
+
+@safetestset "Makie extension" begin include("test_makie_ext.jl") end
