@@ -20,6 +20,7 @@ include("instrument/experiment.jl")       # new (2.2): needs the effects and Pla
 include("instrument/measure.jl")          # new (2.2/2.3): needs Experiment and spectrum!
 include("data/streak.jl")                 # new (2.4)
 include("data/io.jl")                     # new (2.4): needs StreakData and PlasmaTrace
+include("instrument/noise.jl")            # new (2.5): needs Experiment and StreakData
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -55,6 +56,9 @@ export foreach_bin!, pin_blas_threads
 
 # data (2.4)
 export StreakData, read_streak, write_streak, read_trace, write_trace
+
+# noise (2.5)
+export AbstractNoiseModel, StreakCameraNoise, GaussianNoise, sigma, synthesize
 
 # plotting stubs (2.4 declares them, 2.6 gives Makie methods)
 export streakplot, streakplot!, spectrumplot, spectrumplot!,

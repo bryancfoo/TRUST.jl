@@ -83,6 +83,12 @@ end
 if _wanted("data io")
     @safetestset "data io" begin include("data/test_io.jl") end
 end
+if _wanted("noise")
+    @safetestset "noise" begin include("instrument/test_noise.jl") end
+end
+if _wanted("examples")
+    @safetestset "examples" begin include("instrument/test_examples.jl") end
+end
 
 # The slow tier (conventions.md 8.6). test/slow/ carries its OWN environment, because its files
 # need CairoMakie, whose precompile has no place in the fast suite's (OQ-15). Nothing in the tier

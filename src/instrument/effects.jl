@@ -584,7 +584,7 @@ extrapolated.
 
 Spec D42, D28.
 """
-_prepare(::Sensitivity{FT,Nothing,Nothing}, lambda, t) where {FT} = nothing
+_prepare(::Sensitivity{FT,Nothing,Nothing}, lambda::AbstractVector, t::AbstractVector) where {FT} = nothing
 function _prepare(e::Sensitivity, lambda::AbstractVector, t::AbstractVector)
     (first(lambda) >= first(e.lambda) && last(lambda) <= last(e.lambda)) || throw(ArgumentError(
         "Sensitivity: the detector window $(first(lambda)) to $(last(lambda)) m is not spanned " *

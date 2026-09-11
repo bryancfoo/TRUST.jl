@@ -23,3 +23,6 @@ lcov.info
 
 # Editor state
 .vscode/
+
+# Fit and example outputs (conventions.md 10.4; examples/figures/ is the one exception, Step 2.7)
+runs/

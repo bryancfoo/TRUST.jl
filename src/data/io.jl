@@ -21,11 +21,19 @@ Spec D20, D45.
 """
 const TRACE_LAYOUT_VERSION = "otis-trace-1"
 
+
+# Keys written explicitly by _write_meta! and _write_probe_collection_meta!: an sd.meta entry
+# under one of these names (e.g. one synthesize() already populated) is superseded, not
+# duplicated -- write_streak's explicit source/probe/collection arguments win.
+const _RESERVED_META_KEYS = ("source", "created_unix", "otis_version",
+    "lambda_probe_nm", "theta_deg", "polarization_deg", "k_model")
+
 function _write_meta!(f, sd::StreakData, source::AbstractString)
     f["meta/source"] = String(source)
     f["meta/created_unix"] = Float64(time())
     f["meta/otis_version"] = string(pkgversion(OTIS))
     for (k, v) in sd.meta
+        k in _RESERVED_META_KEYS && continue
         f["meta/$k"] = v isa AbstractArray ? collect(v) : v
     end
     return nothing

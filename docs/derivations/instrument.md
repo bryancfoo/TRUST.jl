@@ -105,7 +105,48 @@ background satisfies the affine identity instead (EF15, BG4); the three kernel e
 
 ## 5. The noise model
 
-Swadling's model is Part 5 of this document's front matter's plan; written at Step 2.5.
+Swadling et al. (2022, `context/swadling2022.pdf`) Eqs. 22-26, 37, 40, in this package's symbols
+(spec D21-D23; [OQ-14](../../dev/open_questions.md#oq-14)).
+
+**The variance identity, and why `synthesize` uses the `G²` form.** Swadling's Eqs. 33-35 give
+the CCD signal's total variance as the sum of the photon-counting (shot) term and the gain
+(excess noise factor) term:
+
+    σ²_total = S̄·G·F²  (Eq. 37, with n = 1 photoelectron avalanches per read),
+
+decomposing into a Poisson term in photoelectrons, `G²·N_e` (`N_e = S̄/G`, so this is `G·S̄`),
+plus a gain-process term. Differentiating the gain relation `N_C = G·N_e` while `N_e` is fixed
+and `G` fluctuates gives `σ²_{N_C,gain} = (dN_C/dG)²·σ_G² = N_e²·G³(F²-1)/S̄ = S̄·G·(F²-1)` (using
+`σ_G²/G² = (F²-1)/N_e`, the definition of the noise factor), which is `N_e·G²·(F²-1)`. Adding
+the Poisson term `G²·N_e` gives `G²·N_e·F²  =  S̄·G·F²`, exactly Eq. 37. **This is the `G²` form
+of step 4** (`N_C = G·N_e + G·√((F²-1)·N_e)·randn()`), and it is the one that reproduces Eq. 37;
+Swadling's own Eq. 24 as printed in the PDF, `σ_{N_C} = √((F²-1)(N_e·G))` (a single power of
+`G`), does not. `docs/derivations/instrument.md`'s job is to say this once so nobody "corrects"
+step 4 back to the printed form; NZ2 is the test that would catch a `G` instead of `G²`.
+
+**Two departures from Swadling's own simulation, both deliberate.** The counts are **not**
+rounded to integers — a continuous image is what χ² and forward-mode AD need, and quantization
+is not modelled. The point spread (`_point_spread`, step 5) uses the same column-normalized
+`_convolution_matrix` the IRFs use (spec D13), which **conserves counts exactly**
+(`sum(_point_spread(img)) == sum(img)`, NZ5); Swadling's own kernel is normalized over the full
+window and loses flux at the edges instead. The two differ only in the outermost `~8σ_px`
+pixels.
+
+**σ is from the expected signal, never the noisy one.** `sigma(model, expected)` is written
+against `measure(expt)`'s own output (or an externally supplied expectation); passing a
+*realised*, noisy streak gives that realisation's own sample σ, not the χ² weight — the
+docstring says this in one sentence, and it is why `synthesize` computes `sigma(model, Sbar)`
+from `Sbar = measure(expt)` in step 1, before any noise is drawn (step 7 returns it, written
+last for readability, but it is the expected-signal σ throughout).
+
+**Reproducibility.** `synthesize` draws every pixel in fixed **column-major** order (wavelength
+fastest, then time) on a single thread, so one `rng` seed gives the same image regardless of
+`Threads.nthreads()` (NZ7). Threading `synthesize` would change the random stream, not the wall
+time that matters for a one-off synthetic-data generation.
+
+**Sheffield Section 7.3.3** (book p. 193): a streak camera's own temporal dispersion is of order
+100 ps, the sanity check behind the `fwhm_ns` used in the three test problems (Step 2.5, spec
+D24): `0.05` to `0.08` ns, comfortably in that range.
 
 ## 6. `RationalBackground`: a fourth background family
 
