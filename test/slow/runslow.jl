@@ -4,3 +4,4 @@
 using SafeTestsets
 
 @safetestset "Makie extension" begin include("test_makie_ext.jl") end
+@safetestset "figure gallery" begin include("test_figures.jl") end
