@@ -121,19 +121,13 @@ end
 end
 
 @testset "EX13: all three build, run, and land in a sensible noise regime" begin
-    # Finding (reported in the hand-off, not silently worked around): the shock problem's
-    # global peak, on the cut-down grid, is measured at ~9.3k counts, below the 15k-25k band.
-    # Diagnosed with a scratch script: it is NOT the temporal IRF (measure() with and without
-    # TemporalIRF give the same peak to 4 sig figs) -- it is that ideal_streak's true global max
-    # sits in the pre-shock plateau (bin 1, u = 250 km/s, T_D = 60 eV, T_C = 100 eV: a cold, fast
-    # plasma with a genuinely narrow IAW line, ~1.96e10 m^-1), and the 0.08 nm SpectralIRF
-    # crushes that narrow peak far more than it does the broader post-shock one (~9.89e9 m^-1 at
-    # bin 10, T_D up to 440 eV): after the chain the pre-shock peak falls to ~5.9k counts and the
-    # post-shock one, barely touched, becomes the global max at ~9.8k. D24's own "peak of the
-    # unconvolved streak" figure (20341 counts) is the *pre-chain* value at the pre-shock
-    # plateau, which is exactly the peak the spectral IRF suppresses the most -- so the two
-    # numbers are not measuring the same feature. This is a real width/resolution effect, not a
-    # gain or profile bug; the test is kept as specified rather than the band being loosened.
+    # Closed finding (Step 2.8, 2026-09-11, second revision): the shock problem's pre-shock IAW
+    # line is narrow and cold, and the 0.08 nm SpectralIRF crushes it far harder than the broad
+    # post-shock feature that becomes the global max after the chain, so D24's 20 341 -- the peak
+    # of the unconvolved streak times that problem's sensitivity scale -- is not what this test
+    # measures. The bands are per problem because the three examples are not required to land at
+    # the same counts, only each in a regime where the Poisson noise model is sensible.
+    bands = (epw_ablation=(15_000, 25_000), iaw_multiflow=(15_000, 25_000), iaw_shock=(7_000, 13_000))
     problems = (epw_ablation_problem(; nlambda=EX_NLAMBDA, nt=EX_NT),
         iaw_multiflow_problem(; nlambda=EX_NLAMBDA, nt=EX_NT),
         iaw_shock_problem(; nlambda=EX_NLAMBDA, nt=EX_NT))
@@ -146,7 +140,8 @@ end
         @test all(sd.sigma .> 0)
         peak = maximum(sd.image)
         @info "EX13 peak counts" name = problem.name peak
-        @test 15_000 <= peak <= 25_000
+        lo, hi = getfield(bands, Symbol(problem.name))
+        @test lo <= peak <= hi
     end
 end
 

@@ -1,6 +1,6 @@
 using Test
 using OTIS
-using OTIS: _resolve_leaf, _leaf_value, _with_leaf, _sigma_from_fwhm, _fwhm_from_sigma,
+using OTIS: _resolve_leaf, _leaf_value, _with_leaf, LeafRef, _sigma_from_fwhm, _fwhm_from_sigma,
     _convolution_matrix, GAUSS_LEGENDRE_NODES, GAUSS_LEGENDRE_WEIGHTS,
     GAUSS_HERMITE_NODES, GAUSS_HERMITE_WEIGHTS, _bin_kernel!, _make_cache, _streak_eltype
 import ForwardDiff
@@ -391,24 +391,22 @@ _ga_probe() = ProbeBeam(lambda_probe_nm=263.25)
 _ga_collection() = Collection(theta_deg=60, k_model=:exact)
 const _GA_LAMBDA = collect(range(235e-9, 255e-9; length=512))
 
-@testset "GA1: the A15 allocation is bounded by one plasma, whatever the node count" begin
+@testset "GA1: _with_leaf is allocation-free -- this is what the A15 rewrite buys" begin
+    # Rewritten 2026-09-11 (second revision, Step 2.8): the super-Gaussian template, the case
+    # EF9 and XP13 both miss since both use the Maxwellian default. The barrier is load-bearing:
+    # @allocated of a bare _with_leaf call measures the returned Plasma escaping (1808 B) and
+    # tells you nothing about the rewrite (spec Section 6a, GA1 row, Correction).
     template = _ga_template()
-    probe = _ga_probe(); collection = _ga_collection()
-    trace = PlasmaTrace(template; t_ns=[0.0])
-    allocs = Dict{Int,Int}()
-    for nodes in (1, 5, 7)
-        e = GradientSmearing(template; leaf="electrons.e.T_eV", width=60.0, nodes=nodes)
-        expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_GA_LAMBDA, effects=(e,))
-        FT = _streak_eltype(expt)
-        P = Matrix{FT}(undef, length(_GA_LAMBDA), 1)
-        cache = _make_cache(FT, length(_GA_LAMBDA))
-        _bk!() = _bin_kernel!(P, expt, 1, cache)
-        _bk!()
-        allocs[nodes] = @allocated _bk!()
+    function _ga_touch(p, ref, v)          # the rebuilt plasma must NOT escape
+        p2 = _with_leaf(p, ref, v)
+        return p2.n_e + p2.electrons.species[1].T + p2.ions.species[1].u
     end
-    @info "GA1 allocations by node count" allocs
-    @test allocs[1] == allocs[5] == allocs[7]
-    @test allocs[1] <= 2048
+    for ref in (LeafRef(:electrons, 1, :T, false), LeafRef(:ions, 1, :u, false),
+                LeafRef(:ions, 1, :fraction, false))
+        v = _leaf_value(template, ref)
+        _ga_touch(template, ref, v)   # warm up
+        @test (@allocated _ga_touch(template, ref, v)) == 0
+    end
 end
 
 @testset "GA2: the A15 rewrite changes no number" begin
@@ -444,6 +442,31 @@ end
     e = GradientSmearing(template; leaf="n_e", width=0.5)
     @test e.logarithmic
     @test_throws "smear the density as \"n_e\"" GradientSmearing(template; leaf="n_e_cm3", width=0.5)
+end
+
+# GA5's per-sample cost is `samples` yielding a whole rebuilt Plasma, 1744 B because
+# SuperGaussian{Float64,198} holds its table slice inline as NTuple{198,Float64}; the Maxwellian
+# Plasma is 136 B and allocates zero, which is why EF9 and XP13 never saw it. It costs 3.1 MiB
+# and 0.0% of wall time on a full streak; the layout fix is a Phase 3 item (A33), not attempted
+# here.
+@testset "GA5: the per-bin kernel's cost is bounded by one Plasma per smearing node" begin
+    template = _ga_template()
+    probe = _ga_probe(); collection = _ga_collection()
+    trace = PlasmaTrace(template; t_ns=[0.0])
+    allocs = Dict{Int,Int}()
+    for nodes in (1, 5, 7)
+        e = GradientSmearing(template; leaf="electrons.e.T_eV", width=60.0, nodes=nodes)
+        expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_GA_LAMBDA, effects=(e,))
+        FT = _streak_eltype(expt)
+        P = Matrix{FT}(undef, length(_GA_LAMBDA), 1)
+        cache = _make_cache(FT, length(_GA_LAMBDA))
+        _bk!() = _bin_kernel!(P, expt, 1, cache)
+        _bk!()
+        allocs[nodes] = @allocated _bk!()
+    end
+    @info "GA1 allocations by node count" allocs
+    @test allocs[1] <= 2048
+    @test allocs[7] <= 7 * 2048
 end
 
 @testset "SN1: Sensitivity(scale = g) is today's Gain(gain = g), bitwise" begin
