@@ -35,6 +35,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("SuperGaussian table")
         @safetestset "SuperGaussian table" begin include("distributions/test_supergaussian_table.jl") end
     end
+    if _wanted("SuperGaussian widening")
+        @safetestset "SuperGaussian widening" begin include("distributions/test_supergaussian_widening.jl") end
+    end
     if _wanted("species")
         @safetestset "species" begin include("plasma/test_species.jl") end
     end

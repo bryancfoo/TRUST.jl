@@ -270,6 +270,24 @@ function cauchy_dfdv(f::SuperGaussian, xi::Number)
 end
 
 """
+    _widen_shape(f::SuperGaussian{FT0,L}, ::Type{FT}) where {FT0,L,FT} -> SuperGaussian{FT,L}
+
+Widens by **copying** the cached fields, never re-deriving them: widening is a type promotion,
+not a value change, so `FT(x)` on a `Float64` `x` into a `Dual` is exact and the partials it
+carries are genuinely zero. Specializes the generic `_widen_shape(f::AbstractVelocityDistribution,
+::Type{FT})` (`src/plasma/trace.jl`), which instead calls `reconstruct` and so re-derives `x0(m)`,
+`C(m)` and every one of the 198 slice entries in dual arithmetic for partials that are identically
+zero (measured, spec D14: 12.8 µs per call, about 11% of an 18.5 ms `ForwardDiff.derivative` pass
+on a 128 × 32 streak with five `GradientSmearing` nodes). `L = 0` (the slice-free form
+`_sg_uncached` builds) widens through the same line with no special case: `NTuple{0,FT}(())` is
+the empty tuple.
+
+Spec D14 (roadmap Step 3.1a, carried from [OQ-31](../../dev/open_questions.md#oq-31) item 6).
+"""
+_widen_shape(f::SuperGaussian{FT0,L}, ::Type{FT}) where {FT0,L,FT} =
+    SuperGaussian{FT,L}(FT(f.m), FT(f.x0), FT(f.C), NTuple{L,FT}(FT.(f.slice)))
+
+"""
     parameters(f::SuperGaussian) -> NamedTuple
 
 `(m = f.m,)`: the exponent alone, the shape's one fittable parameter. The cached `x0`, `C` and
