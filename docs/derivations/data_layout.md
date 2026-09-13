@@ -61,9 +61,9 @@ on write and back on read is one division and one multiplication by the same `Fl
 `mask` carry no unit conversion and round-trip exactly; IO1 compares `lambda`/`t` at `rtol =
 1e-15` and the arrays bitwise.
 
-**A dual streak cannot be written.** `write_streak` requires `eltype(sd.lambda) === Float64` and
-throws naming the actual element type otherwise (IO10) — a dual streak is a computation, not
-data.
+**A dual streak cannot be written.** `write_streak` requires `eltype(sd.lambda) <: AbstractFloat`
+(any plain float — IO10 tests `Float32`) and throws naming the actual element type otherwise — a
+dual streak is a computation, not data.
 
 ### An untested h5py snippet
 

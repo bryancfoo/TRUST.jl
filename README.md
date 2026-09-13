@@ -45,6 +45,11 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
+Set `OTIS_TESTS` to a comma-separated, case-insensitive list of substrings to run only the
+`@safetestset`s whose name matches one of them (unset or empty runs everything). The slow tier
+(sweeps and anything needing CairoMakie) is not part of `Pkg.test()`; run it by hand with
+`julia --project=test/slow test/slow/runslow.jl`, which uses its own environment.
+
 ## Running
 
 ```

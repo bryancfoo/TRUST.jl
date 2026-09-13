@@ -1,5 +1,5 @@
 # AbstractInstrumentEffect and its concrete effects: the three in-kernel effects (KSmearing,
-# GradientSmearing, ProbeOffset), the two post-kernel IRF convolutions and Gain, and the
+# GradientSmearing, ProbeOffset), the two post-kernel IRF convolutions and Sensitivity, and the
 # convolution-matrix builder they and the noise model's point spread share.
 # docs/derivations/instrument.md; conventions.md Section 4; spec D9-D13.
 
@@ -31,7 +31,7 @@ function stage end
     islinear(effect::AbstractInstrumentEffect) -> Bool
 
 `true` only when `effect`'s action on the streak is a fixed linear operator
-(`effect(aP+bQ) = a·effect(P) + b·effect(Q)` to round-off): the two IRFs and `Gain`. The three
+(`effect(aP+bQ) = a·effect(P) + b·effect(Q)` to round-off): the two IRFs and `Sensitivity`. The three
 `:kernel` effects act on the plasma, not the streak, so linearity is not even a meaningful
 question for them, and `islinear` is `false`; the backgrounds are affine, not linear, and are
 also `false`. `islinear` answers exactly the question Step 3.2 asks: may this effect be pushed
@@ -46,7 +46,7 @@ function islinear end
 
 The effect's canonical position in the chain, `1` (kernel) to `5` (backgrounds); `Experiment`'s
 constructor stably sorts effects by this so the chain always runs kernel -> `SpectralIRF` ->
-`TemporalIRF` -> `Gain` -> backgrounds ([OQ-13](../../dev/open_questions.md#oq-13)).
+`TemporalIRF` -> `Sensitivity` -> backgrounds ([OQ-13](../../dev/open_questions.md#oq-13)).
 
 Spec D9, D15.
 """
@@ -354,7 +354,7 @@ function samples(e::ProbeOffset, p::Plasma, probe::ProbeBeam{FTp0}, collection::
         collection),)
 end
 
-# --- D12: the post-kernel IRFs and Gain ---
+# --- D12: the post-kernel IRFs and Sensitivity ---
 
 """
     AbstractIRFKernel
@@ -448,6 +448,7 @@ end
 struct TemporalIRF{K<:AbstractIRFKernel} <: AbstractInstrumentEffect
     kernel::K
 end
+@doc (@doc SpectralIRF) TemporalIRF
 
 function SpectralIRF(; kwargs...)
     fwhm_raw = _si_value(:fwhm_lambda, kwargs)

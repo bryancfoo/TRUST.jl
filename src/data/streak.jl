@@ -103,6 +103,7 @@ Spec D26.
 """
 function streakplot end
 function streakplot! end
+@doc (@doc streakplot) streakplot!
 
 """
     spectrumplot(lambda, P; kwargs...)
@@ -115,6 +116,7 @@ Spec D26.
 """
 function spectrumplot end
 function spectrumplot! end
+@doc (@doc spectrumplot) spectrumplot!
 
 """
     traceplot(trace::PlasmaTrace, path::AbstractString; sigma = nothing, kwargs...)
@@ -127,6 +129,7 @@ Spec D26.
 """
 function traceplot end
 function traceplot! end
+@doc (@doc traceplot) traceplot!
 
 """
     lcurveplot(chi2::AbstractVector, R::AbstractVector; weights = nothing, kwargs...)
@@ -139,6 +142,7 @@ Spec D26.
 """
 function lcurveplot end
 function lcurveplot! end
+@doc (@doc lcurveplot) lcurveplot!
 
 # --- show (spec D29) ---
 

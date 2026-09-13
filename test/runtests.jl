@@ -13,7 +13,7 @@ const _OTIS_TESTS_TOKENS = [lowercase(strip(t)) for t in split(_OTIS_TESTS_RAW, 
 _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     any(occursin(tok, lowercase(name)) for tok in _OTIS_TESTS_TOKENS)
 
-@testset "OTIS" begin
+@testset "OTIS" verbose = true begin
     if _wanted("smoke")
         @safetestset "smoke" begin include("test_smoke.jl") end
     end
