@@ -53,6 +53,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("expressions")
         @safetestset "expressions" begin include("inversion/test_expressions.jl") end
     end
+    if _wanted("fit parameters")
+        @safetestset "fit parameters" begin include("inversion/test_parameters.jl") end
+    end
     if _wanted("susceptibility")
         @safetestset "susceptibility" begin include("scattering/test_susceptibility.jl") end
     end

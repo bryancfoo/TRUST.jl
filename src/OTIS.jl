@@ -22,6 +22,7 @@ include("data/streak.jl")                 # new (2.4)
 include("data/io.jl")                     # new (2.4): needs StreakData and PlasmaTrace
 include("instrument/noise.jl")            # new (2.5): needs Experiment and StreakData
 include("inversion/expressions.jl")       # new (3.1b): the dependent-expression layer; no exports yet
+include("inversion/parameters.jl")        # new (3.1c): ParameterSpec, the transform, the index map
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -60,6 +61,9 @@ export StreakData, read_streak, write_streak, read_trace, write_trace
 
 # noise (2.5)
 export AbstractNoiseModel, StreakCameraNoise, GaussianNoise, sigma, synthesize
+
+# inversion (3.1)
+export FittedVariable, FitInterval, ParameterSpec, flatten, unflatten
 
 # plotting stubs (2.4 declares them, 2.6 gives Makie methods)
 export streakplot, streakplot!, spectrumplot, spectrumplot!,

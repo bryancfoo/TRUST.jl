@@ -261,14 +261,26 @@ end
 """
     _probe_construction(node, names, text, context)
 
-D7 item 4's read-time probe, at this chunk's scope: evaluate `node` once against a synthetic
-value vector (every slot at `1.0`, `t = 0.0`) and require a finite `Real`. This is what turns an
-arity error or another structurally broken call (`"exp(a, b)"`, XR14) into a loud failure the
-moment the dependent's tree is built, rather than a surprise the first time it is actually
-evaluated, deep in the Jacobian's hot path. It does **not** substitute for `ParameterSpec`'s own
-probe over the real initial values at every bin of a variable's interval (D8, Step 3.1c), which
-is needed anyway for the `initial` regularizer normalization and which catches a genuine
-`DomainError` that only a real value triggers; this check only guarantees the call is
+D7 item 4's **structural** half, revised 2026-09-13: evaluate `node` once against a synthetic
+value vector (every slot at `1.0`, `t = 1.0`) and convert **only a `MethodError`** — a wrong
+arity, or a name that resolved to something not callable on numbers, `"exp(a, b)"` (XR14) — into
+a loud failure now, at the moment the dependent's tree is built, rather than a surprise deep in
+the Jacobian's hot path.
+
+**This probe does not, and must not, claim anything about finiteness or domain validity.** Any
+exception other than `MethodError`, and any non-finite result, is silently ignored: a synthetic
+placeholder cannot tell a broken expression from a perfectly good one evaluated at the wrong
+point. `"log(t)"`, `"1/t"`, `"1/(x - 1)"`, `"sqrt(t - 1)"` and `"exp(x*1000)"` are all legitimate
+dependents that are `Inf`, `-Inf` or a `DomainError` at this probe's placeholder values, and the
+first cut of this check (which also required a finite result) refused all five — a read-time
+check that refuses `log(t)` is worse than no check. The placeholder for `t` is `1.0`, not `0.0`,
+so that the canonical `t < X` idiom and `log(t)` alike are unlikely to trip even the `MethodError`
+pass by accident; it is otherwise free, since nothing here depends on it.
+
+The **value** half — evaluating every dependent at its real `init` values, at every bin of its
+interval, and requiring a finite `Real` there — is `ParameterSpec`'s own probe (D8, D10, Step
+3.1c, PM26), built once real values and bins exist. That is the check a genuine `DomainError` or
+a typo that parses to something meaningless is caught by; this one only guarantees the call is
 *structurally* callable at all, with synthetic values chosen so a conditional guarding a domain
 restriction is not itself what trips it (D6's lazy `IfElseNode` already keeps an untaken branch
 from being probed).
@@ -278,9 +290,9 @@ function _probe_construction(node::AbstractExprNode, names::Dict{String,Int},
     nslots = isempty(names) ? 0 : maximum(values(names))
     vals = ones(Float64, nslots)
     try
-        v = _eval(node, vals, 0.0)
-        isfinite(v) || throw(DomainError(v, "not finite"))
+        _eval(node, vals, 1.0)
     catch e
+        e isa MethodError || return nothing
         throw(ArgumentError(
             "dependent \"$context\" could not be evaluated at its initial values: " *
             "$(sprint(showerror, e)) (\"$text\")"))
