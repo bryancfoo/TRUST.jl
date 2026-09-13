@@ -21,6 +21,7 @@ include("instrument/measure.jl")          # new (2.2/2.3): needs Experiment and 
 include("data/streak.jl")                 # new (2.4)
 include("data/io.jl")                     # new (2.4): needs StreakData and PlasmaTrace
 include("instrument/noise.jl")            # new (2.5): needs Experiment and StreakData
+include("inversion/expressions.jl")       # new (3.1b): the dependent-expression layer; no exports yet
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
