@@ -458,3 +458,32 @@ end
         bindings=["logt" => "electrons.e.T_eV"])
     @test pspec_logt isa ParameterSpec
 end
+
+# PM27 (Step 3.1c remediation, 2026-09-13): ParameterSpec's `trace` field was declared
+# `::PlasmaTrace{FT}`, a parametric type with only one of six parameters given, hence not
+# concrete (`isconcretetype(PlasmaTrace{Float64}) == false`) -- an abstract field, boxing every
+# write through it. Fixed by giving ParameterSpec a third type parameter `TR<:PlasmaTrace{FT}`
+# and storing `trace::TR`, inferred at the construction site.
+_pm_unflatten_allocated(expt, pspec, theta) = @allocated unflatten(expt, pspec, theta)
+
+@testset "PM27: ParameterSpec is concretely typed" begin
+    expt = _pm_p1()
+    v = FittedVariable("T_e"; bounds=(50.0, 1500.0), init=400.0)
+    pspec = ParameterSpec(expt; variables=[v], bindings=["T_e" => "electrons.e.T_eV"])
+    for f in fieldnames(typeof(pspec))
+        @test isconcretetype(fieldtype(typeof(pspec), f))
+    end
+
+    trace32 = PlasmaTrace(_pm_template(); t_ns=collect(range(0.0, 3.0; length=32)))
+    expt32 = _pm_wrap(trace32)
+    v1 = FittedVariable("T_e"; bounds=(50.0, 1500.0), init=400.0, time_varying=true)
+    v2 = FittedVariable("u_D"; bounds=(-300.0, 300.0), init=20.0, time_varying=true)
+    pspec32 = ParameterSpec(expt32; variables=[v1, v2],
+        bindings=["T_e" => "electrons.e.T_eV", "u_D" => "ions.D.u_kms"])
+    working32 = _pm_working(expt32, pspec32)
+    theta32 = flatten(pspec32)
+
+    _pm_unflatten_allocated(working32, pspec32, theta32)  # warm up
+    bytes = _pm_unflatten_allocated(working32, pspec32, theta32)
+    @test bytes < 4096
+end

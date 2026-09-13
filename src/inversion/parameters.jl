@@ -438,7 +438,7 @@ end
 # ------------------------------------------------------------------------------------------
 
 """
-    ParameterSpec{FT<:Real,D<:Tuple}
+    ParameterSpec{FT<:Real,D<:Tuple,TR<:PlasmaTrace{FT}}
 
 The parameter layer over one `Experiment`: the fitted variables, the dependents (a `Tuple`, in
 topological order, so the per-bin evaluation loop unrolls and stays type-stable -- the same style
@@ -451,7 +451,7 @@ constant value until the first `unflatten`.
 
 Spec D10, D11.
 """
-struct ParameterSpec{FT<:Real,D<:Tuple}
+struct ParameterSpec{FT<:Real,D<:Tuple,TR<:PlasmaTrace{FT}}
     variables::Vector{FittedVariable}
     dependents::D
     intervals::Vector{FitInterval}
@@ -468,7 +468,7 @@ struct ParameterSpec{FT<:Real,D<:Tuple}
     global_entries::Vector{Int}
     global_slots::Vector{Int}
     ntheta::Int
-    trace::PlasmaTrace{FT}
+    trace::TR
 end
 
 const _AXIS_UNIT_KEYS = (ns=:t_ns, s=:t_s)
@@ -702,7 +702,7 @@ function ParameterSpec(expt::Experiment; variables, dependents=(), intervals=(),
     _probe_initial_values(vars, dep_tuple, axis_boundary, nt)
 
     FT = eltype(trace)
-    return ParameterSpec{FT,typeof(dep_tuple)}(vars, dep_tuple, ivals, resolved_bindings, names,
+    return ParameterSpec(vars, dep_tuple, ivals, resolved_bindings, names,
         nvar + ndep, Vector{FT}(trace.axis), axis_boundary, String(axis_unit), offsets, widths,
         bin_entries, bin_slots, global_entries, global_slots, ntheta, trace)
 end
