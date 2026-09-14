@@ -62,6 +62,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("fit jacobian")
         @safetestset "fit jacobian" begin include("inversion/test_jacobian.jl") end
     end
+    if _wanted("regularizer")
+        @safetestset "regularizer" begin include("inversion/test_regularizer.jl") end
+    end
     if _wanted("susceptibility")
         @safetestset "susceptibility" begin include("scattering/test_susceptibility.jl") end
     end

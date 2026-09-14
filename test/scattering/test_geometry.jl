@@ -212,6 +212,55 @@ end
     @test isapprox(ad2, fd2; rtol = 1e-8)
 end
 
+@testset "GE16: wavevector is type-stable and AD-complete under a promoted plasma" begin
+    # Phase 3 chunk 7 (carried item 1): the chunk 6 fix used oftype(k_i, ...) in the
+    # :approximate branch, which converts TO k_i's type instead of promoting k_i, k_s,
+    # collection.theta and lambda_i together. k_i never sees collection.theta, so a dual theta
+    # with a Float64 k_i (plain probe, plain plasma) threw MethodError converting a Dual to
+    # Float64. This row pins the fixed, promoting form: concrete return types under a dual
+    # plasma and under a dual probe (tight), and AD against a central difference through
+    # theta -- the exact scenario the chunk 6 fix broke -- and dk/dn_e == 0 under :approximate
+    # (loose on the derivative comparison, tight on everything else).
+    probe = ProbeBeam(lambda_probe_nm = 526.5)
+    lam0 = lambda_to_si(500.0, :lambda_nm)
+    p = Plasma(n_e_cm3 = 1e19, electrons = (electrons(T_eV = 500),))
+    p_dual = OTIS._widen_plasma(p, typeof(ForwardDiff.Dual(1.0, 1.0)))
+    probe_dual = ProbeBeam(lambda_probe_m = ForwardDiff.Dual(probe.lambda, 1.0))
+
+    for k_model in (:exact, :approximate)
+        collection = Collection(theta_deg = 90, k_model = k_model)
+        rt_a = Base.infer_return_type(wavevector,
+            Tuple{typeof(probe), typeof(collection), typeof(lam0), typeof(p)})
+        @test isconcretetype(rt_a)
+        rt_b = Base.infer_return_type(wavevector,
+            Tuple{typeof(probe), typeof(collection), typeof(lam0), typeof(p_dual)})
+        @test isconcretetype(rt_b)
+        rt_c = Base.infer_return_type(wavevector,
+            Tuple{typeof(probe_dual), typeof(collection), typeof(lam0), typeof(p)})
+        @test isconcretetype(rt_c)
+    end
+
+    theta0 = pi / 2
+    for k_model in (:exact, :approximate)
+        f_theta = function (th)
+            collection = Collection(theta_rad = th, k_model = k_model)
+            return first(wavevector(probe, collection, lam0, p))
+        end
+        ad = ForwardDiff.derivative(f_theta, theta0)
+        h = 1e-7
+        fd = (f_theta(theta0 + h) - f_theta(theta0 - h)) / (2h)
+        @test isapprox(ad, fd; rtol = 1e-5)
+    end
+
+    collection_approx = Collection(theta_deg = 90, k_model = :approximate)
+    f_ne = function (n_e_cm3)
+        pp = Plasma(n_e_cm3 = n_e_cm3, electrons = (electrons(T_eV = 500),))
+        return first(wavevector(probe, collection_approx, lam0, pp))
+    end
+    dk_dne = ForwardDiff.derivative(f_ne, 1e19)
+    @test dk_dne == 0.0
+end
+
 # --- Step 2.3a: the geometry split (spec Section 6a) ---
 
 @testset "GS1: Collection from directions equals Collection from theta" begin

@@ -55,7 +55,15 @@ A variable may be both a kernel global and a chain global (D11); its column is t
 two lists separately contribute in `jvp!`/`jtvp!` (JT8) -- no special-casing is written for it,
 which is deliberate (Pitfall 7).
 
-Spec D17.
+`reg_rows`/`reg_cols`/`reg_coeffs` are the regularizer's own closed-form Jacobian entries (Step
+3.3, D25), as parallel sparse-triple vectors: `∂rho_row/∂theta_col = coeff`, `row` already in the
+combined `npixels + reg.nrows` numbering (`row` is `problem.npixels` less than the row's own
+index into `r_full`, i.e. `jvp!`/`jtvp!` add `problem.npixels` when indexing `out`/`w`). Empty
+when `problem.regularizer === nothing`. Not part of D17's original sketch (written before the
+regularizer existed); added here the same way `kernel_global_idx`/`chain_global_idx` were,
+flagged in the chunk 7 report.
+
+Spec D17, D25.
 """
 struct FitJacobian{FT<:Real}
     blocks::Vector{Matrix{FT}}
@@ -66,6 +74,9 @@ struct FitJacobian{FT<:Real}
     response::Vector{FT}
     Klambda::Union{Nothing,Matrix{FT}}
     Kt::Union{Nothing,Matrix{FT}}
+    reg_rows::Vector{Int}
+    reg_cols::Vector{Int}
+    reg_coeffs::Vector{FT}
 end
 
 # ------------------------------------------------------------------------------------------
@@ -499,8 +510,15 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
     chain_globals, chain_global_idx = _build_chain_globals(problem, expt, theta, P, Q, response,
         curve0, Klambda, Kt)
 
+    if problem.regularizer === nothing
+        reg_rows, reg_cols, reg_coeffs = Int[], Int[], FT[]
+    else
+        _, reg_rows, reg_cols, reg_coeffs_f64 = _regularizer_closed_form(problem.regularizer, pspec, theta)
+        reg_coeffs = FT.(reg_coeffs_f64)
+    end
+
     return FitJacobian{FT}(blocks, kernel_globals, chain_globals, kernel_global_idx,
-        chain_global_idx, response, Klambda, Kt)
+        chain_global_idx, response, Klambda, Kt, reg_rows, reg_cols, reg_coeffs)
 end
 
 # ------------------------------------------------------------------------------------------
@@ -510,13 +528,16 @@ end
 """
     jvp!(out, problem::FitProblem, Jac::FitJacobian, v::AbstractVector) -> out
 
-`out = J * v`, `out` of length `problem.npixels` (D20). Takes `problem` as well as `Jac` (not
-given an explicit signature by D20's abbreviated header; `bin_entries`, `pixel_index` and
-`sigma` all live on `problem`/`problem.pspec`, not on `FitJacobian` -- Level 3's choice, flagged
-under rule 11 zero in the chunk 6 report, the same gap D15's `FitProblem` box had for
-`pixel_index`).
+`out = J_full * v`, `out` of length `problem.npixels` when `problem.regularizer === nothing`,
+`problem.npixels + problem.regularizer.nrows` when it is not (Step 3.3, D25: the regularizer's
+rows are extra rows appended after the data rows, `out[npixels+row] = sum over the row's nonzero
+columns of Jac.reg_coeffs[.] * v[Jac.reg_cols[.]]`, `Jac`'s own closed-form entries). Takes
+`problem` as well as `Jac` (not given an explicit signature by D20's abbreviated header;
+`bin_entries`, `pixel_index` and `sigma` all live on `problem`/`problem.pspec`, not on
+`FitJacobian` -- Level 3's choice, flagged under rule 11 zero in the chunk 6 report, the same gap
+D15's `FitProblem` box had for `pixel_index`).
 
-Spec D20.
+Spec D20, D25.
 """
 function jvp!(out::AbstractVector, problem::FitProblem, Jac::FitJacobian{FT}, v::AbstractVector) where {FT}
     pspec = problem.pspec
@@ -546,18 +567,31 @@ function jvp!(out::AbstractVector, problem::FitProblem, Jac::FitJacobian{FT}, v:
         i = idx[k]
         out[k] = W[i] / sig[i]
     end
+
+    if problem.regularizer !== nothing
+        nrows = problem.regularizer.nrows
+        fill!(view(out, (problem.npixels+1):(problem.npixels+nrows)), zero(FT))
+        @inbounds for m in eachindex(Jac.reg_rows)
+            out[problem.npixels+Jac.reg_rows[m]] += Jac.reg_coeffs[m] * v[Jac.reg_cols[m]]
+        end
+    end
     return out
 end
 
 """
     jtvp!(out, problem::FitProblem, Jac::FitJacobian, w::AbstractVector) -> out
 
-`out = transpose(J) * w`, `out` of length `problem.pspec.ntheta` (D20). Step 4 is `transpose(K_lambda)`
+`out = transpose(J_full) * w`, `out` of length `problem.pspec.ntheta` (D20). `w` is
+`problem.npixels` long with no regularizer, `problem.npixels + problem.regularizer.nrows` long
+with one -- the data half reads only `w[1:npixels]` (via `problem.pixel_index`, unaffected by the
+extra length) and the regularizer half (Step 3.3, D25) adds
+`out[col] += Jac.reg_coeffs[.] * w[npixels + Jac.reg_rows[.]]` over `Jac`'s closed-form entries.
+Step 4 is `transpose(K_lambda)`
 on the **left**, `K_t` **not** transposed on the right -- both change side relative to the
 forward direction (`jvp!`'s step 4), and getting one wrong produces a `Jtw` that is plausible and
 fails only where the kernels are asymmetric (Pitfall 5, JT3).
 
-Spec D20.
+Spec D20, D25.
 """
 function jtvp!(out::AbstractVector, problem::FitProblem, Jac::FitJacobian{FT}, w::AbstractVector) where {FT}
     pspec = problem.pspec
@@ -587,20 +621,28 @@ function jtvp!(out::AbstractVector, problem::FitProblem, Jac::FitJacobian{FT}, w
         isempty(bj) && continue
         @views out[bj] .+= transpose(Jac.blocks[j]) * U[:, j]
     end
+
+    if problem.regularizer !== nothing
+        @inbounds for m in eachindex(Jac.reg_rows)
+            out[Jac.reg_cols[m]] += Jac.reg_coeffs[m] * w[problem.npixels+Jac.reg_rows[m]]
+        end
+    end
     return out
 end
 
 """
     gradient!(g, problem::FitProblem, theta::AbstractVector) -> g
 
-`grad_theta O = 2 * transpose(J_full) * r_full` (D26). At this step `problem.regularizer` is
-always `nothing` (Step 3.3 adds it), so `r_full = r` and this is exactly `2 * jtvp!(g, problem,
-jacobian(problem, theta), residuals(problem, theta))`. Never forms `J` densely to do it (JT10).
+`grad_theta O = 2 * transpose(J_full) * r_full` (D26): `r_full` is `_full_residuals(problem,
+theta)` (`residuals.jl`), the data residuals with the regularizer's rows appended when
+`problem.regularizer !== nothing` (Step 3.3, D25) or `residuals(problem, theta)` unchanged when
+it is `nothing`; `Jac`'s extended `jtvp!` (above) then contracts both halves in one call. Never
+forms `J` densely to do it (JT10).
 
-Spec D20, D26.
+Spec D20, D25, D26.
 """
 function gradient!(g::AbstractVector, problem::FitProblem, theta::AbstractVector)
-    r = residuals(problem, theta)
+    r = _full_residuals(problem, theta)
     Jac = jacobian(problem, theta)
     jtvp!(g, problem, Jac, r)
     g .*= 2

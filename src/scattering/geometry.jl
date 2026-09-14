@@ -207,8 +207,18 @@ function wavevector(probe::ProbeBeam, collection::Collection, lambda_s, plasma::
     k_i = sqrt(omega_probe^2 - omega_pe_sq) / SPEED_OF_LIGHT
     k_s = sqrt(omega_s^2 - omega_pe_sq) / SPEED_OF_LIGHT
 
+    # FTk promotes over every input EITHER arm reads, not just k_i and k_s: k_i is built from
+    # probe.lambda and plasma.n_e and never sees collection.theta, which the :approximate arm
+    # reads through s = sin(theta/2). oftype(k_i, ...) (Level 3, chunk 6) converted the
+    # :approximate arm TO k_i's type instead of promoting the two, so a dual theta with a
+    # Float64 plasma threw MethodError converting a Dual to Float64 -- k_i is Float64 there and
+    # oftype forces the dual result down to it. Both arms are converted to the same FTk so the
+    # branch's static return type is concrete for both k_model values under every combination of
+    # dual inputs (found by Level 2 reviewing the chunk 6 fix, GE16, chunk 7).
+    FTk = promote_type(typeof(k_i), typeof(k_s), typeof(collection.theta), typeof(lambda_i))
+
     if collection.k_model === :exact
-        k = sqrt(k_i^2 + k_s^2 - 2 * k_i * k_s * cos(collection.theta))
+        k = FTk(sqrt(k_i^2 + k_s^2 - 2 * k_i * k_s * cos(collection.theta)))
         if iszero(k)
             throw(ArgumentError("wavevector: k = 0 at theta = $(collection.theta) rad with lambda_s " *
                 "equal to the probe wavelength; this geometry probes no wavevector"))
@@ -219,16 +229,7 @@ function wavevector(probe::ProbeBeam, collection::Collection, lambda_s, plasma::
             throw(ArgumentError("wavevector: k = 0 at theta = $(collection.theta) rad with lambda_s " *
                 "equal to the probe wavelength; this geometry probes no wavevector"))
         end
-        # oftype(k_i, ...), not a bare 4π*s/lambda_i: k_i already carries whatever (possibly dual)
-        # type plasma.n_e promoted omega_pe_sq to, even when n_e's own partials are all zero (every
-        # field of a widened Plasma is promoted together, spec D12). Without this, the two branches
-        # of this if/else return different concrete types for k depending on the runtime value of
-        # collection.k_model, which Julia cannot discharge statically -- k's inferred type becomes a
-        # non-bits Union and every call boxes its return. Found chasing Step 3.2b's JT10/JT11 (the
-        # per-bin dual pass was allocating ~224 B per wavelength bin with k_model = :exact, which
-        # both P2 and P3 use); fixed here since it is invisible in the plain pass (n_e is always
-        # Float64 there) and would otherwise recur for every future AD path through this function.
-        k = oftype(k_i, 4π * s / lambda_i)
+        k = FTk(4π * s / lambda_i)
     end
 
     return k, omega, k_s

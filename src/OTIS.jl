@@ -25,6 +25,7 @@ include("inversion/expressions.jl")       # new (3.1b): the dependent-expression
 include("inversion/parameters.jl")        # new (3.1c): ParameterSpec, the transform, the index map
 include("inversion/residuals.jl")         # new (3.2a): FitProblem, residuals, residuals!, chi2
 include("inversion/jacobian.jl")          # new (3.2b): FitJacobian, jacobian, jvp!, jtvp!, gradient!
+include("inversion/regularizer.jl")       # new (3.3): AbstractRegularizerTerm, RegularizerTerm, Regularizer
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -72,6 +73,9 @@ export FitProblem, residuals, residuals!, chi2
 
 # inversion (3.2b)
 export jacobian, gradient!
+
+# inversion (3.3)
+export AbstractRegularizerTerm, RegularizerTerm, Regularizer
 
 # plotting stubs (2.4 declares them, 2.6 gives Makie methods)
 export streakplot, streakplot!, spectrumplot, spectrumplot!,
