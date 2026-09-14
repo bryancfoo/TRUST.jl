@@ -206,7 +206,7 @@ end
 # RG7: the four normalizations, and relative's degeneracy at the default reference
 # ------------------------------------------------------------------------------------------
 
-@testset "RG7: the four normalizations" begin
+@testset "RG7: the four normalizations, and the anchor-bin rule" begin
     expt = _rg_expt()
     pspec = _rg_pspec(expt)
     # a genuine quadratic: linear would make D2 ~ 0, turning a relative-error comparison into a
@@ -217,36 +217,53 @@ end
     t = Float64.(_RG_T_NS)
     _relerr(a, b) = maximum(abs.(a .- b) ./ max.(abs.(b), 1e-13 * maximum(abs, b)))
 
-    # absolute, explicit scale
+    # absolute, explicit scale -- a constant divisor commutes exactly with a linear operator, so
+    # this number is expected to be the same whether the divisor is applied before or after D2
+    # (both the withdrawn design and the current one agree here; not a special case in the code).
     term_abs = RegularizerTerm(pspec; select=["u1"], operator=:D2, normalization=:absolute,
         scale=20.0)
     raw_abs = _regularizer_raw_rows(Regularizer([term_abs]), pspec, theta)
     expected_abs = _operator_rows(:D2, xvalues ./ 20.0, t)
+    @info "RG7 absolute (explicit scale) worst relative error, normalize-after vs. normalize-before" worst = _relerr(raw_abs, expected_abs)
     @test _relerr(raw_abs, expected_abs) <= 1e-13
 
     # absolute, default scale (the bound width, 200.0 for u1's (-100, 100))
     term_def = RegularizerTerm(pspec; select=["u1"], operator=:D2, normalization=:absolute)
     raw_def = _regularizer_raw_rows(Regularizer([term_def]), pspec, theta)
     expected_def = _operator_rows(:D2, xvalues ./ 200.0, t)
+    @info "RG7 absolute (default scale) worst relative error, normalize-after vs. normalize-before" worst = _relerr(raw_def, expected_def)
     @test _relerr(raw_def, expected_def) <= 1e-13
 
-    # initial (u1's own init is 5.0, constant over the whole axis)
+    # initial (u1's own init is 5.0, constant over the whole axis -- a flat divisor, same
+    # commuting argument as absolute's)
     term_init = RegularizerTerm(pspec; select=["u1"], operator=:D2, normalization=:initial)
     raw_init = _regularizer_raw_rows(Regularizer([term_init]), pspec, theta)
     expected_init = _operator_rows(:D2, xvalues ./ 5.0, t)
+    @info "RG7 initial (flat u0) worst relative error, normalize-after vs. normalize-before" worst = _relerr(raw_init, expected_init)
     @test _relerr(raw_init, expected_init) <= 1e-13
 
     # unit
     term_unit = RegularizerTerm(pspec; select=["u1"], operator=:D2, normalization=:unit)
     raw_unit = _regularizer_raw_rows(Regularizer([term_unit]), pspec, theta)
     expected_unit = _operator_rows(:D2, xvalues, t)
+    @info "RG7 unit worst relative error, normalize-after vs. normalize-before" worst = _relerr(raw_unit, expected_unit)
     @test _relerr(raw_unit, expected_unit) <= 1e-13
 
-    # relative, default (zero) reference: N(x) = (x - 0)/x == 1 identically -- D25's finding,
-    # pinned here so it is documented rather than rediscovered. Do NOT "fix" this.
-    term_rel = RegularizerTerm(pspec; select=["u1"], operator=:D2, normalization=:relative)
-    raw_rel = _regularizer_raw_rows(Regularizer([term_rel]), pspec, theta)
-    @test all(==(0.0), raw_rel)
+    # relative, default (zero) reference: normalization is applied AFTER the operator now (D24/D25
+    # revised 2026-09-13), at each row's own anchor bin a(r) -- D2's centred-stencil middle
+    # (r + 1), D1's and I's own base bin (r). N_r = x_{a(r)}, the trace's OWN current value, so
+    # with ref = 0 a zero row here would mean the divisor is still being applied to the trace
+    # before the operator (the old, withdrawn design), not this one -- a zero must NOT appear.
+    # Each expected row is written out by hand from _operator_rows and the anchor rule, not from
+    # any function under test.
+    for (op, anchor) in ((:D2, r -> r + 1), (:D1, r -> r), (:I, r -> r))
+        term_rel = RegularizerTerm(pspec; select=["u1"], operator=op, normalization=:relative)
+        raw_rel = _regularizer_raw_rows(Regularizer([term_rel]), pspec, theta)
+        g = _operator_rows(op, xvalues, t)
+        expected_rel = [g[r] / xvalues[anchor(r)] for r in eachindex(g)]
+        @info "RG7 relative/$op worst relative error against the hand-written anchor formula" worst = _relerr(raw_rel, expected_rel)
+        @test _relerr(raw_rel, expected_rel) <= 1e-13
+    end
 end
 
 # ------------------------------------------------------------------------------------------
@@ -361,11 +378,11 @@ end
         J_reg_cf[r, c] += v
     end
 
-    function _worst_relerr(rowrange)
+    function _worst_relerr(J_ad, J_cf, rowrange, nθ)
         worst = 0.0
-        for k in 1:ntheta
-            colref = @view J_reg_ad[rowrange, k]
-            colcf = @view J_reg_cf[rowrange, k]
+        for k in 1:nθ
+            colref = @view J_ad[rowrange, k]
+            colcf = @view J_cf[rowrange, k]
             floor_k = 1e-10 * maximum(abs, colref; init=0.0)
             relerr = maximum(abs.(colcf .- colref) ./ max.(abs.(colref), floor_k, 1e-300))
             worst = max(worst, relerr)
@@ -373,18 +390,42 @@ end
         return worst
     end
 
-    worst_all = _worst_relerr(1:reg.nrows)
+    worst_all = _worst_relerr(J_reg_ad, J_reg_cf, 1:reg.nrows, ntheta)
     @info "RG12 worst relative error, all regularizer rows" worst_all
     @test worst_all <= 1e-10
 
     term_abs, term_rel, term_dep = reg.terms
-    worst_rel = _worst_relerr(term_rel.rows)
+    worst_rel = _worst_relerr(J_reg_ad, J_reg_cf, term_rel.rows, ntheta)
     @info "RG13 worst relative error, the nonzero-reference relative term" worst_rel
     @test worst_rel <= 1e-10
 
-    worst_dep = _worst_relerr(term_dep.rows)
+    worst_dep = _worst_relerr(J_reg_ad, J_reg_cf, term_dep.rows, ntheta)
     @info "RG19 worst relative error, the dependent-selecting term" worst_dep
     @test worst_dep <= 1e-10
+
+    # RG13's other half: relative at the DEFAULT (zero) reference. Under the withdrawn design
+    # (normalize-before-operator) this Jacobian was trivially zero everywhere -- relative was
+    # degenerate there, D25's own finding. Under the current one (normalize-after-operator,
+    # D24/D25 revised 2026-09-13) it is not, and this is exactly the row that fails if the
+    # quotient-rule term (`-g_r / N_r^2`, fired only on the anchor column) is dropped: every
+    # off-anchor column stays right even without it, so only this oracle comparison catches it.
+    term_rel0 = RegularizerTerm(pspec; select=["u1"], operator=:D2, normalization=:relative)
+    reg0 = Regularizer([term_rel0])
+    problem0 = FitProblem(problem.experiment, pspec, problem.data; regularizer=reg0)
+    np0 = problem0.npixels
+
+    J_dense0 = ForwardDiff.jacobian(th -> _full_residuals(problem0, th), theta)
+    J_reg_ad0 = J_dense0[(np0+1):end, :]
+
+    raw_all0, rows0, cols0, coeffs0 = _regularizer_closed_form(reg0, pspec, theta)
+    J_reg_cf0 = zeros(reg0.nrows, ntheta)
+    for (r, c, v) in zip(rows0, cols0, coeffs0)
+        J_reg_cf0[r, c] += v
+    end
+
+    worst_rel0 = _worst_relerr(J_reg_ad0, J_reg_cf0, 1:reg0.nrows, ntheta)
+    @info "RG13 worst relative error, the DEFAULT (zero-reference) relative term" worst_rel0
+    @test worst_rel0 <= 1e-10
 end
 
 # ------------------------------------------------------------------------------------------
@@ -517,4 +558,41 @@ end
 
     ml = sprint((io, x) -> show(io, MIME("text/plain"), x), reg)
     @test occursin("u1", ml)
+end
+
+# ------------------------------------------------------------------------------------------
+# RG22: initial on a dependent whose starting trace varies with t
+# ------------------------------------------------------------------------------------------
+
+@testset "RG22: initial on a dependent whose starting trace varies with t" begin
+    # "decay" is a function of t alone (no fitted variable), so its value at any theta equals its
+    # value at flatten(pspec)'s start vector -- unlike u1's own `init`, which is a scalar and so
+    # flat across bins (RG7's "initial selecting a plain fitted variable"), decay's starting trace
+    # u0_j varies with t. This is the case D24/D25's revision (2026-09-13) treats differently from
+    # the withdrawn design: dividing by u0 before the operator does not commute with dividing by
+    # u0_{a(r)} after it when u0 itself is not flat.
+    expt = _rg_expt()
+    v_u1 = FittedVariable("u1"; bounds=(-100.0, 100.0), init=5.0, time_varying=true)
+    pspec = ParameterSpec(expt; variables=[v_u1],
+        dependents=["decay" => "5.0 + 2.0 * exp(-t / 2.0)"],
+        bindings=["u1" => "ions.D.u_kms"])
+    theta0 = flatten(pspec)
+    theta = theta0 .+ 0.05 .* (1:length(theta0))
+    t = Float64.(_RG_T_NS)
+    u0 = [5.0 + 2.0 * exp(-tj / 2.0) for tj in t]
+
+    for (op, anchor) in ((:D2, r -> r + 1), (:D1, r -> r))
+        term = RegularizerTerm(pspec; select=["decay"], operator=op, normalization=:initial)
+        raw = _regularizer_raw_rows(Regularizer([term]), pspec, theta)
+
+        # decay does not depend on theta, so its own trace equals u0 at every theta, including the
+        # perturbed one above; expected rows are (op(u0 - 0))_r / u0_{a(r)}, written out by hand
+        # from _operator_rows and u0's own per-bin values -- not op((u0 - ref)/u0)_r, the withdrawn
+        # design, and not computed via _term_raw/_regularizer_raw_rows, the code under test.
+        g = _operator_rows(op, u0, t)
+        expected = [g[r] / u0[anchor(r)] for r in eachindex(g)]
+        worst = maximum(abs.(raw .- expected) ./ max.(abs.(expected), 1e-13 * maximum(abs, expected)))
+        @info "RG22 worst relative error, initial on a t-varying dependent" op worst
+        @test worst <= 1e-13
+    end
 end

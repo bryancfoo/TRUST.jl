@@ -1,13 +1,17 @@
 # The regularizer: composable terms along the trace axis, each a divided-difference operator
-# applied to a normalized, reference-subtracted trace, contributing extra residual rows with a
-# closed-form Jacobian (Step 3.3, chunk 7 of Phase 3). Spec D22-D25, OQ-19.
+# applied to a reference-subtracted trace and THEN normalized row by row, contributing extra
+# residual rows with a closed-form Jacobian (Step 3.3, chunk 7 of Phase 3; normalization-after-
+# operator revision, chunk 7 remediation, 2026-09-13). Spec D22-D25, OQ-19.
 #
 # Three things this file must get right, each with its own trap in the chunk prompt: the
 # operators differentiate with respect to TIME (pspec.axis_boundary), never bin index (D23); the
 # rows are extra data for the residual vector, not a separate Hessian, so R excludes the global
 # weight Lambda and the rows' Jacobian is written closed-form rather than autodifferentiated
-# (D25); and `relative` normalization is degenerate at its own default reference (D24/D25) --
-# that is the spec as written, not a bug to fix here.
+# (D25); and each row's normalization divisor N_r is evaluated at that row's own ANCHOR bin --
+# `D2`'s centred-stencil middle, `D1`'s and `I`'s own base bin, exactly the bin `_operator_coeffs`
+# calls `k` -- not at every bin of the term's window (D24/D25 revised 2026-09-13: `relative` is no
+# longer degenerate at the default zero reference, since the divisor is the trace's own value, not
+# `(x-ref)/x`).
 
 import ForwardDiff
 
@@ -263,30 +267,41 @@ function _operator_rows(op::Symbol, u::AbstractVector, t::AbstractVector)
 end
 
 """
+    _operator_anchor(op::Symbol, r::Int) -> Int
+
+The **anchor bin** `a(r)` of row `r` (1-based within one selected name's block), the single local
+bin a row's normalization divisor `N_r` is evaluated at (D24 revised 2026-09-13): `D2`'s centred
+three-point stencil `r, r+1, r+2` anchors on its middle, `r + 1`; `D1`'s two-point stencil `r,
+r+1` anchors on its base point, `r`; `I`'s one-bin row anchors on itself, `r`. This is the same
+`k`/`r` `_operator_coeffs` uses to build its own coefficient table, factored out so the two never
+drift apart -- there is exactly one indexing convention, not two.
+"""
+_operator_anchor(op::Symbol, r::Int) = op === :D2 ? r + 1 : r
+
+"""
     _operator_coeffs(op::Symbol, r::Int, t::AbstractVector) -> Tuple
 
 The operator's own **linear** coefficients for its `r`-th row (1-based within one selected
 name's block), as `(local_bin_index, coefficient)` pairs of `∂row_r/∂u[local_bin_index]` --
 D23's formulas differentiated by hand, independent of `u` itself (the operator is linear in the
-normalized trace). This is the analytic half of D25's closed-form row Jacobian; it is never
-autodifferentiated, and it is written independently of `_operator_rows`'s value formula so that
-RG12's ForwardDiff oracle (which differentiates `_operator_rows` through `_term_raw`) is a
+reference-subtracted trace). This is the analytic half of D25's closed-form row Jacobian; it is
+never autodifferentiated, and it is written independently of `_operator_rows`'s value formula so
+that RG12's ForwardDiff oracle (which differentiates `_operator_rows` through `_term_raw`) is a
 genuine check of this table, not a comparison of one formula against itself (`conventions.md`
-8.2).
+8.2). `k = _operator_anchor(op, r)` is the row's own anchor bin (D24/D25).
 """
 function _operator_coeffs(op::Symbol, r::Int, t::AbstractVector)
+    k = _operator_anchor(op, r)
     if op === :D2
-        k = r + 1
         d1 = t[k] - t[k-1]
         d2 = t[k+1] - t[k]
         d3 = t[k+1] - t[k-1]
         return ((k - 1, 2 / (d1 * d3)), (k, -2 * (1 / d2 + 1 / d1) / d3), (k + 1, 2 / (d2 * d3)))
     elseif op === :D1
-        k = r
         d = t[k+1] - t[k]
         return ((k, -1 / d), (k + 1, 1 / d))
     else
-        return ((r, 1.0),)
+        return ((k, 1.0),)
     end
 end
 
@@ -359,25 +374,27 @@ function _term_raw(term::RegularizerTerm, pspec::ParameterSpec, vtable::Abstract
         u = Vector{T}(undef, n)
         for k in 1:n
             j = bins[k]
-            x = vtable[slot, j]
-            ref = term.reference[k]
+            u[k] = vtable[slot, j] - term.reference[k]
+        end
+        rows = _operator_rows(term.operator, u, t)
+        nr = length(rows)
+        for r in 1:nr
+            a = _operator_anchor(term.operator, r)
+            j = bins[a]
             if term.normalization === :absolute
-                u[k] = (x - ref) / scale
+                rows[r] = rows[r] / scale
             elseif term.normalization === :initial
                 x0 = x0table[slot, j]
                 x0 == 0 && throw(ArgumentError(
                     "\"$(term.select[ni])\" has a starting value of zero at bin $j"))
-                u[k] = (x - ref) / x0
+                rows[r] = rows[r] / x0
             elseif term.normalization === :relative
-                _primal_value(x) == 0 && throw(ArgumentError(
+                xa = vtable[slot, j]
+                _primal_value(xa) == 0 && throw(ArgumentError(
                     "\"$(term.select[ni])\" has a value of zero at bin $j"))
-                u[k] = (x - ref) / x
-            else
-                u[k] = x - ref
+                rows[r] = rows[r] / xa
             end
         end
-        rows = _operator_rows(term.operator, u, t)
-        nr = length(rows)
         out[pos+1:pos+nr] .= rows
         pos += nr
     end
@@ -393,10 +410,11 @@ end
 """
     _regularizer_raw_rows(reg::Regularizer, pspec::ParameterSpec, theta::AbstractVector) -> Vector
 
-Every term's raw `op(N(u - ref))` rows (D23/D24), **unweighted** (no `sqrt(Lambda * w_term)`),
-stacked in `reg`'s row order. Generic in `eltype(theta)`: this is the function RG12's
-`ForwardDiff.jacobian` oracle differentiates by way of `_regularizer_residual_rows`/
-`_full_residuals`, never the closed-form path (`conventions.md` 8.2).
+Every term's raw `op(u - ref) / N` rows, `N` the row's own anchor-bin divisor (D23/D24, revised
+2026-09-13), **unweighted** (no `sqrt(Lambda * w_term)`), stacked in `reg`'s row order. Generic in
+`eltype(theta)`: this is the function RG12's `ForwardDiff.jacobian` oracle differentiates by way
+of `_regularizer_residual_rows`/`_full_residuals`, never the closed-form path (`conventions.md`
+8.2).
 """
 function _regularizer_raw_rows(reg::Regularizer, pspec::ParameterSpec, theta::AbstractVector{T}) where {T<:Real}
     vtable = _value_table(pspec, theta)
@@ -429,9 +447,9 @@ end
 """
     _regularizer_value(reg::Regularizer, pspec::ParameterSpec, theta::AbstractVector) -> Real
 
-`R = sum_terms w_term * ||op(N(u - ref))||^2` (D25), **Lambda-free**. Built from the same
-AD-generic raw-row path `_regularizer_residual_rows` stacks (evaluating a value needs no closed
-form; only the row *Jacobian* is required to be closed-form, D25).
+`R = sum_terms w_term * ||op(u - ref) / N||^2` (D25, revised 2026-09-13), **Lambda-free**. Built
+from the same AD-generic raw-row path `_regularizer_residual_rows` stacks (evaluating a value
+needs no closed form; only the row *Jacobian* is required to be closed-form, D25).
 """
 function _regularizer_value(reg::Regularizer, pspec::ParameterSpec, theta::AbstractVector{T}) where {T<:Real}
     raw = _regularizer_raw_rows(reg, pspec, theta)
@@ -523,10 +541,16 @@ end
     _term_closed_form(term, pspec, theta, vtable, x0table, cache) -> (raw::Vector{Float64}, entries)
 
 One term's raw row values and the **unweighted** closed-form Jacobian entries
-`(local_row, theta_index, ∂raw_row/∂theta_index)` (D25): for each row, the operator's own linear
-coefficients (`_operator_coeffs`, D23) times the normalization's derivative `N'` (D24's table)
-times the chain to theta (`_slot_value_and_grad`). `cache` memoizes `_slot_value_and_grad` by
-`(slot, bin)` across every row and every term of one `Regularizer` evaluation, since neighbouring
+`(local_row, theta_index, ∂raw_row/∂theta_index)` (D25, revised 2026-09-13): each row is
+`raw_row = g_r / N_r`, `g_r` the operator applied to the reference-subtracted trace
+(`_operator_rows`, D23) and `N_r` the row's normalization divisor evaluated at its own anchor bin
+`a(r)` (`_operator_anchor`, D24's table -- `s` for `absolute`, the starting trace `x0` at `a(r)`
+for `initial`, the current trace `x` at `a(r)` for `relative`, `1` for `unit`). Its derivative with
+respect to `x_j` (bin `j`'s raw trace value) is `∂g_r/∂x_j / N_r`, from `_operator_coeffs`'s linear
+coefficient at bin `j`, **plus**, for `relative` alone and only when `j` is the row's own anchor
+`a(r)`, the quotient-rule term `-g_r / N_r^2` (`N_r` depends on `x_j` only there). Each is then
+chained to theta by `_slot_value_and_grad`. `cache` memoizes `_slot_value_and_grad` by `(slot,
+bin)` across every row and every term of one `Regularizer` evaluation, since neighbouring
 `D2`/`D1` rows and overlapping terms reuse the same bins (D25: "cache it rather than running a
 second one").
 """
@@ -542,34 +566,31 @@ function _term_closed_form(term::RegularizerTerm, pspec::ParameterSpec, theta::A
     for (ni, slot) in enumerate(term.slots)
         scale = term.normalization === :absolute ? _effective_scale(term, pspec, slot) : 0.0
         u = Vector{Float64}(undef, n)
-        dNdx = Vector{Float64}(undef, n)
         for k in 1:n
             j = bins[k]
-            x = vtable[slot, j]
-            ref = term.reference[k]
-            if term.normalization === :absolute
-                u[k] = (x - ref) / scale
-                dNdx[k] = 1 / scale
-            elseif term.normalization === :initial
-                x0 = x0table[slot, j]
-                x0 == 0 && throw(ArgumentError(
-                    "\"$(term.select[ni])\" has a starting value of zero at bin $j"))
-                u[k] = (x - ref) / x0
-                dNdx[k] = 1 / x0
-            elseif term.normalization === :relative
-                x == 0 && throw(ArgumentError(
-                    "\"$(term.select[ni])\" has a value of zero at bin $j"))
-                u[k] = (x - ref) / x
-                dNdx[k] = ref / x^2
-            else
-                u[k] = x - ref
-                dNdx[k] = 1.0
-            end
+            u[k] = vtable[slot, j] - term.reference[k]
         end
         rows_here = _operator_rows(term.operator, u, t)
         nr = length(rows_here)
-        raw[pos+1:pos+nr] .= rows_here
         for r in 1:nr
+            a = _operator_anchor(term.operator, r)
+            j_anchor = bins[a]
+            g = rows_here[r]
+            if term.normalization === :absolute
+                Nr = scale
+            elseif term.normalization === :initial
+                Nr = x0table[slot, j_anchor]
+                Nr == 0 && throw(ArgumentError(
+                    "\"$(term.select[ni])\" has a starting value of zero at bin $j_anchor"))
+            elseif term.normalization === :relative
+                Nr = vtable[slot, j_anchor]
+                Nr == 0 && throw(ArgumentError(
+                    "\"$(term.select[ni])\" has a value of zero at bin $j_anchor"))
+            else
+                Nr = 1.0
+            end
+            raw[pos+r] = g / Nr
+
             for (klocal, opcoeff) in _operator_coeffs(term.operator, r, t)
                 j = bins[klocal]
                 key = (slot, j)
@@ -580,9 +601,12 @@ function _term_closed_form(term::RegularizerTerm, pspec::ParameterSpec, theta::A
                 else
                     val, active, grad = sv
                 end
-                dudx = dNdx[klocal]
+                c = opcoeff / Nr
+                if term.normalization === :relative && klocal == a
+                    c -= g / Nr^2
+                end
                 for (m, aidx) in enumerate(active)
-                    push!(entries, (pos + r, aidx, opcoeff * dudx * grad[m]))
+                    push!(entries, (pos + r, aidx, c * grad[m]))
                 end
             end
         end
