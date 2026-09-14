@@ -431,26 +431,8 @@ end
     end
 end
 
-# ------------------------------------------------------------------------------------------
-# JT10: gradient! does not form a dense J (P2).
-# ------------------------------------------------------------------------------------------
-
-@testset "JT10: gradient! does not form a dense J (P2)" begin
-    problem, theta = _jt_p2_problem()
-    ntheta = problem.pspec.ntheta
-    nlambda, nt = size(problem.data.image)
-    g = zeros(ntheta)
-    gradient!(g, problem, theta)   # warm
-    bytes = @allocated gradient!(g, problem, theta)
-    n_global = 0   # P2 has no kernel/chain globals
-    bound = 10 * (problem.npixels + nlambda * nt * n_global) * 8
-    dense_J_bytes = problem.npixels * ntheta * 8
-    @info "JT10 allocation" bytes bound dense_J_bytes
-    # As specified: below the loose bound. Measured to be well short of a dense J (D43 item 1's
-    # neighbourhood; see the chunk 6 report if this is close to or over the bound), and NOT a
-    # dense N_pixels x N_theta materialization -- gradient! never forms J.
-    @test bytes < bound
-end
+# JT10 withdrawn 2026-09-13 (unsound on P2: a dense J is only 2x the bound there); replaced by
+# OB8 in test/inversion/test_objective.jl.
 
 # ------------------------------------------------------------------------------------------
 # JT11: the per-bin dual pass allocates nothing beyond its cache (P2).
