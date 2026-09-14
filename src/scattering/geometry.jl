@@ -219,7 +219,16 @@ function wavevector(probe::ProbeBeam, collection::Collection, lambda_s, plasma::
             throw(ArgumentError("wavevector: k = 0 at theta = $(collection.theta) rad with lambda_s " *
                 "equal to the probe wavelength; this geometry probes no wavevector"))
         end
-        k = 4π * s / lambda_i
+        # oftype(k_i, ...), not a bare 4π*s/lambda_i: k_i already carries whatever (possibly dual)
+        # type plasma.n_e promoted omega_pe_sq to, even when n_e's own partials are all zero (every
+        # field of a widened Plasma is promoted together, spec D12). Without this, the two branches
+        # of this if/else return different concrete types for k depending on the runtime value of
+        # collection.k_model, which Julia cannot discharge statically -- k's inferred type becomes a
+        # non-bits Union and every call boxes its return. Found chasing Step 3.2b's JT10/JT11 (the
+        # per-bin dual pass was allocating ~224 B per wavelength bin with k_model = :exact, which
+        # both P2 and P3 use); fixed here since it is invisible in the plain pass (n_e is always
+        # Float64 there) and would otherwise recur for every future AD path through this function.
+        k = oftype(k_i, 4π * s / lambda_i)
     end
 
     return k, omega, k_s

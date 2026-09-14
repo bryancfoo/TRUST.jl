@@ -264,6 +264,27 @@ end
 # RS9: an all-false mask
 # ------------------------------------------------------------------------------------------
 
+@testset "RS10: a mis-paired experiment/pspec trace is refused" begin
+    expt = _rs_p2()
+    pspec = _rs_pspec_p2(expt)
+    working = _rs_working(expt, pspec)
+    theta0 = flatten(pspec)
+    data = _rs_data(working, pspec, theta0)
+
+    # experiment.trace === pspec.trace holds for `working`, but not for the original `expt`
+    # (unflatten's precondition, D12; the carried item from chunk 5's review).
+    @test working.trace === pspec.trace
+    @test expt.trace !== pspec.trace
+    @test_throws r"the experiment's trace is not this ParameterSpec's own rebuilt trace" FitProblem(expt, pspec, data)
+
+    # and the correctly-paired problem does respond to theta (the positive half of the finding)
+    problem = FitProblem(working, pspec, data)
+    chi2_0 = chi2(problem, theta0)
+    chi2_1 = chi2(problem, theta0 .+ 2.0)
+    @test chi2_0 < 1e-20
+    @test chi2_1 > 1.0
+end
+
 @testset "RS9: an all-false mask" begin
     expt = _rs_p2()
     pspec = _rs_pspec_p2(expt)

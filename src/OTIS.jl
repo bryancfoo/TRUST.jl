@@ -24,6 +24,7 @@ include("instrument/noise.jl")            # new (2.5): needs Experiment and Stre
 include("inversion/expressions.jl")       # new (3.1b): the dependent-expression layer; no exports yet
 include("inversion/parameters.jl")        # new (3.1c): ParameterSpec, the transform, the index map
 include("inversion/residuals.jl")         # new (3.2a): FitProblem, residuals, residuals!, chi2
+include("inversion/jacobian.jl")          # new (3.2b): FitJacobian, jacobian, jvp!, jtvp!, gradient!
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -68,6 +69,9 @@ export FittedVariable, FitInterval, ParameterSpec, flatten, unflatten
 
 # inversion (3.2a)
 export FitProblem, residuals, residuals!, chi2
+
+# inversion (3.2b)
+export jacobian, gradient!
 
 # plotting stubs (2.4 declares them, 2.6 gives Makie methods)
 export streakplot, streakplot!, spectrumplot, spectrumplot!,

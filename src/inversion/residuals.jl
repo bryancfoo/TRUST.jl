@@ -66,6 +66,11 @@ function FitProblem(experiment::Experiment, pspec::ParameterSpec, data::StreakDa
     data.sigma === nothing && throw(ArgumentError(
         "FitProblem: data has no sigma; make one with sigma(model, streak)"))
 
+    experiment.trace === pspec.trace || throw(ArgumentError(
+        "FitProblem: the experiment's trace is not this ParameterSpec's own rebuilt trace " *
+        "(unflatten writes into pspec.trace, so experiment.trace must be === pspec.trace; " *
+        "build the experiment from pspec.trace once, e.g. Experiment(; trace = pspec.trace, ...))"))
+
     mask = data.mask === nothing ? trues(size(data.image)) : data.mask
     npixels = count(mask)
     npixels == 0 && throw(ArgumentError("FitProblem: the mask excludes every pixel"))
