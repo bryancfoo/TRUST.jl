@@ -1,6 +1,7 @@
 using Test
 using OTIS
-using OTIS: _full_residuals, _objective_and_gradient!, _regularizer_value, _value_table, _near_bound
+using OTIS: _full_residuals, _objective_and_gradient!, _regularizer_value, _value_table,
+            _near_bound, jtvp!
 using REPL: REPL  # gives Base.Docs.doc its methods (empty otherwise); see OB7 below
 
 # OB1 to OB8 against dev/phase3_instructions.md Section 7's OB table (spec D26), gated
@@ -323,8 +324,21 @@ end
 end
 
 # ------------------------------------------------------------------------------------------
-# OB8 (carried item 2, JT10's replacement): _objective_and_gradient! does not form a dense J,
-# on an EPW-scale problem where a dense J actually dominates (npixels >= 4000, ntheta >= 20).
+# OB8 (carried item, rewritten 2026-09-14, JT10's replacement): _objective_and_gradient! adds
+# nothing over its pieces, and forms no dense J, on an EPW-scale problem (npixels >= 4000,
+# ntheta >= 60).
+#
+# The original single bound, 0.25 * npixels * ntheta * 8, was wrong in *shape*: it grows like
+# ntheta^2 (npixels and ntheta both scale with nt for per-bin variables) while the allocation
+# grows like ntheta, so whether the row passed depended on the problem's shape rather than on
+# the property it claims to test (the same class of error as JT10's). Two shape-independent
+# halves replace it: (a) the combined evaluator costs no more than the sum of its three pieces
+# computed separately (measured at 0.9997 to 1.0001 across six problem shapes, so 1.05 is
+# generous); (b) a loose guard that no dense J is formed (measured at 0.384 of a dense J at this
+# size, a 2.6x margin, which falls to 1.36x at ntheta = 32 -- hence the ntheta >= 60 floor).
+# Neither half alone is enough: (a) would still pass if `jacobian` itself went dense, since
+# `pieces` would rise right along with it; (b) alone cannot see a hidden fourth allocation
+# inside the combined evaluator.
 # ------------------------------------------------------------------------------------------
 
 function _ob8_problem()
@@ -338,18 +352,26 @@ function _ob8_problem()
     return problem, theta
 end
 
-@testset "OB8: _objective_and_gradient! does not form a dense J (EPW-scale)" begin
+@testset "OB8: _objective_and_gradient! adds nothing over its pieces, and forms no dense J (EPW-scale)" begin
     problem, theta = _ob8_problem()
     npixels = problem.npixels
     ntheta = problem.pspec.ntheta
     @test npixels >= 4000
-    @test ntheta >= 20
+    @test ntheta >= 60
 
     g = zeros(ntheta)
     _objective_and_gradient!(g, problem, theta)   # warm
     bytes = @allocated _objective_and_gradient!(g, problem, theta)
-    bound = 0.25 * npixels * ntheta * 8
+
+    r = _full_residuals(problem, theta)           # warm
+    Jac = jacobian(problem, theta)                # warm
+    jtvp!(g, problem, Jac, r)                     # warm
+    pieces = (@allocated _full_residuals(problem, theta)) +
+             (@allocated jacobian(problem, theta)) +
+             (@allocated jtvp!(g, problem, Jac, r))
+
     dense_J_bytes = npixels * ntheta * 8
-    @info "OB8 allocation" bytes bound npixels ntheta dense_J_bytes
-    @test bytes < bound
+    @info "OB8 allocation" bytes pieces (bytes / pieces) dense_J_bytes (bytes / dense_J_bytes)
+    @test bytes <= 1.05 * pieces
+    @test bytes < dense_J_bytes
 end

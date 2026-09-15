@@ -27,6 +27,7 @@ include("inversion/residuals.jl")         # new (3.2a): FitProblem, residuals, r
 include("inversion/jacobian.jl")          # new (3.2b): FitJacobian, jacobian, jvp!, jtvp!, gradient!
 include("inversion/regularizer.jl")       # new (3.3): AbstractRegularizerTerm, RegularizerTerm, Regularizer
 include("inversion/objective.jl")         # new (3.4a): objective, FitResult
+include("inversion/optimizers.jl")        # new (3.4b): AbstractOptimizer, the four optimizers, solve
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -80,6 +81,9 @@ export AbstractRegularizerTerm, RegularizerTerm, Regularizer
 
 # inversion (3.4a)
 export objective, FitResult
+
+# inversion (3.4b)
+export AbstractOptimizer, LBFGS, LevenbergMarquardt, NoisyGradientDescent, OptimizerSequence, solve
 
 # plotting stubs (2.4 declares them, 2.6 gives Makie methods)
 export streakplot, streakplot!, spectrumplot, spectrumplot!,
