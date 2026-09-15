@@ -115,6 +115,61 @@ component registry of `conventions.md` 7.2, built at Step 3.6. `read_trace` ther
 plain `Dict`/array data (spec D20's `NamedTuple`), and IO6's round-trip test compares `axis`,
 `values` and `paths` bit for bit against what was written, not against a reconstructed trace.
 
-**Only the ground-truth trace is written in Phase 2** (`examples/`, Step 2.5) — there is no
-result writer yet: that needs the effective TOML deck and a `FitResult`, neither of which exists
-before Step 3.6 (roadmap Step 2.4, amended; `dev/phase2_overall_summary.md` A7).
+**Only the ground-truth trace is written in Phase 2** (`examples/`, Step 2.5); Step 3.6 built the
+result writer below (roadmap Step 2.4, amended; `dev/phase2_overall_summary.md` A7).
+
+## 3. The result layout, `otis-result-1`
+
+| Dataset | Type | Shape | Required |
+|---|---|---|---|
+| `layout_version` | `String` | scalar, `"otis-result-1"` | yes |
+| `meta/source` | `String` | free text | yes |
+| `meta/created` | `String` | ISO-8601 UTC, e.g. `"2026-09-15T12:00:00.000Z"` | yes |
+| `meta/created_unix` | `Float64` | seconds since the Unix epoch | yes |
+| `meta/otis_version` | `String` | `string(pkgversion(OTIS))` | yes |
+| `deck` | `String` | the effective TOML deck (spec D33) | yes |
+| `axis_name` | `String` | scalar, e.g. `"t"` | yes |
+| `axis` | `Float64` | `(N_t)`, SI | yes |
+| `axis_unit` | `String` | scalar, `"s"` for `:t`, else `"SI"` | yes |
+| `axis_boundary_unit` | `String` | `"ns"` or `"s"`: the unit `t` and the regularizer's operators used | yes |
+| `variables/<name>/values` | `Float64` | `(N_t)` or `(1)` for a scalar, in the variable's own unit | yes, one group per fitted variable |
+| `variables/<name>/unit` | `String` | the boundary keyword it was bound through, `""` if none | yes |
+| `variables/<name>/bounds` | `Float64` | `(2)` | yes |
+| `variables/<name>/bins` | `Int64` | `(2)`: first and last bin of its interval | yes |
+| `variables/<name>/time_varying` | `UInt8` | | yes |
+| `variables/<name>/vary` | `UInt8` | | yes |
+| `variables/<name>/near_bound` | `UInt8` | `(N_t)` or `(1)` | yes |
+| `dependents/<name>/values` | `Float64` | `(N_t)` | yes, one group per dependent |
+| `dependents/<name>/expression` | `String` | the deck text, verbatim | yes |
+| `leaves/<si_path>/values` | `Float64` | `(N_t)`, SI | yes, one group per row of the fitted trace |
+| `fit/theta` | `Float64` | `(ntheta)`, the minimizer in `y` | yes |
+| `fit/chi2`, `fit/R`, `fit/objective`, `fit/weight` | `Float64` | scalar | yes |
+| `fit/term_values` | `Float64` | `(n_terms)` | yes |
+| `fit/npixels`, `fit/iterations`, `fit/f_calls`, `fit/g_calls` | `Int64` | scalar | yes |
+| `fit/converged` | `UInt8` | scalar | yes |
+| `fit/status`, `fit/optimizer` | `String` | scalar | yes |
+| `fit/elapsed` | `Float64` | scalar, seconds | yes |
+| `trajectory/iteration` | `Int64` | `(n_iter)` | yes |
+| `trajectory/objective`, `trajectory/chi2`, `trajectory/R` | `Float64` | `(n_iter)` | yes |
+| `scan/weights` | `Float64` | `(K)` | only when a scan was written |
+| `scan/chi2`, `scan/R`, `scan/chi2_normalized`, `scan/R_normalized` | `Float64` | `(K)` | with a scan |
+| `scan/chi2_unreg`, `scan/R_unreg` | `Float64` | scalar | with a scan |
+| `scan/rss/<variable>`, `scan/rss_normalized/<variable>` | `Float64` | `(K)` | only with a known ground truth |
+
+`fit/chi2`, `fit/npixels` and `meta/source` stay scalars: Phase 3 fits one dataset at a time, and
+a later joint EPW/IAW fit that needs per-dataset values turns this into a version bump
+(`layout_version` grows a `datasets/<name>/` group carrying its own `chi2`/`npixels`), not a
+silent break — the version string is what makes that possible, and it is why it is written even
+though nothing in Phase 3 reads it back for dispatch.
+
+`scan/rss_unreg` is not written: it is exactly recoverable from any weight's row,
+`scan/rss/<variable>[k] / scan/rss_normalized/<variable>[k]`, unlike `chi2_unreg`/`R_unreg`,
+which are not decomposed per variable and so are written as their own scalars.
+
+**`read_trace` gains an `as` keyword** (`:arrays`, unchanged and default, or `:trace`, spec D35),
+once the component registry (`conventions.md` 7.2) exists to look shape names up in; the trace
+layout itself, `TRACE_LAYOUT_VERSION` and `read_streak`/`write_streak`/`write_trace` are
+untouched.
+
+`write_result`/`read_result` (`src/data/result.jl`) are this layout's readers and writers, on the
+same footing as `write_streak`/`read_streak` and `write_trace`/`read_trace` above.

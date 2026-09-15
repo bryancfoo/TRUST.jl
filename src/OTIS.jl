@@ -29,6 +29,9 @@ include("inversion/regularizer.jl")       # new (3.3): AbstractRegularizerTerm, 
 include("inversion/objective.jl")         # new (3.4a): objective, FitResult
 include("inversion/optimizers.jl")        # new (3.4b): AbstractOptimizer, the four optimizers, solve
 include("inversion/weight_scan.jl")       # new (3.5): weight_scan, WeightScanResult
+include("config/options.jl")              # new (3.6a): option structs, spec D32
+include("config/registry.jl")             # new (3.6a): component registries, spec D32
+include("data/result.jl")                 # new (3.6a): write_result/read_result, spec D34
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -64,6 +67,9 @@ export foreach_bin!, pin_blas_threads
 
 # data (2.4)
 export StreakData, read_streak, write_streak, read_trace, write_trace
+
+# data (3.6a)
+export write_result, read_result
 
 # noise (2.5)
 export AbstractNoiseModel, StreakCameraNoise, GaussianNoise, sigma, synthesize
