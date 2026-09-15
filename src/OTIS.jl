@@ -28,6 +28,7 @@ include("inversion/jacobian.jl")          # new (3.2b): FitJacobian, jacobian, j
 include("inversion/regularizer.jl")       # new (3.3): AbstractRegularizerTerm, RegularizerTerm, Regularizer
 include("inversion/objective.jl")         # new (3.4a): objective, FitResult
 include("inversion/optimizers.jl")        # new (3.4b): AbstractOptimizer, the four optimizers, solve
+include("inversion/weight_scan.jl")       # new (3.5): weight_scan, WeightScanResult
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -84,6 +85,9 @@ export objective, FitResult
 
 # inversion (3.4b)
 export AbstractOptimizer, LBFGS, LevenbergMarquardt, NoisyGradientDescent, OptimizerSequence, solve
+
+# inversion (3.5)
+export weight_scan, WeightScanResult
 
 # plotting stubs (2.4 declares them, 2.6 gives Makie methods)
 export streakplot, streakplot!, spectrumplot, spectrumplot!,

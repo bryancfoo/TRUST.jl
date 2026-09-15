@@ -158,6 +158,16 @@ Optim 2.3.1, 2026-09-12, D27): `m` is Optim's LBFGS memory; `g_abstol` is Optim'
 `1e-8`; `x_reltol`/`f_reltol` default to `0.0` (off, Optim's own defaults); `iterations` caps the
 outer loop; `time_limit` in seconds, `NaN` (off) by default.
 
+**The saturation trap.** When the starting gradient is large in some direction, Optim's default
+line search can accept a **first step that lands the logit fully in its saturated region**
+(`_logistic(y)` is exactly `1.0` for `y ≳ 37`, D13). There `dx/dy`, and so the true gradient with
+respect to every saturated coordinate, is **exactly zero**, the Wolfe curvature condition is
+satisfied trivially by `0 >= (a negative number)`, and `Optim.g_converged` then reports
+`status = :gradient_norm` truthfully on a fit that is garbage. **`status = :gradient_norm`
+together with a `near_bound` entry in the result (D13) is the signature of this trap, not of a
+converged fit** -- the one combination to distrust. No guard is added to `solve` for this: the
+flag already exists, and the judgement belongs to whoever reads the result.
+
 Spec D27.
 """
 Base.@kwdef struct LBFGS <: AbstractOptimizer
@@ -430,7 +440,7 @@ Base.show(io::IO, opt::LevenbergMarquardt) = print(io, "LevenbergMarquardt(itera
 # ------------------------------------------------------------------------------------------
 
 """
-    NoisyGradientDescent(; steps = 2000, step_size = 1.0e-2, noise = 0.1, noise_decay = 500.0,
+    NoisyGradientDescent(; steps = 2000, step_size = 1.0e-8, noise = 0.1, noise_decay = 500.0,
                           seed = 1)
 
 Plain gradient descent on `𝒪` in the unconstrained `y` of the logit transform, bumped by Gaussian
@@ -447,22 +457,31 @@ at sampling the posterior, and makes no sampling claim. Writing `s_k^2 = 2 alpha
 temperature `T_k` decaying to zero; that is a remark for the reader, not a mechanism the code
 implements.
 
-**All five defaults are [OQ-22](../../dev/open_questions.md#oq-22)'s deck sketch, verbatim, and
-all five are provisional** ([OQ-20](../../dev/open_questions.md#oq-20)): D43 item 3's measurement
-is what would change them.
+**`steps`, `noise`, `noise_decay` and `seed` are [OQ-22](../../dev/open_questions.md#oq-22)'s
+deck sketch, verbatim, and stay provisional** ([OQ-20](../../dev/open_questions.md#oq-20)).
+**`step_size` was `1.0e-2` and is `1.0e-8`, measured 2026-09-14 (D29, D43 item 3), and is no
+longer provisional.** The old default never improved `𝒪` on P1 (D46) -- the ratio
+`𝒪(best)/𝒪(start)` was exactly `1.0` over a 2000-step budget -- and that is not an artefact of
+P1's unit `sigma`: on a realistically weighted problem (weights from `GaussianNoise(a=1.0,
+b=0.02)`) `|grad_y O|` is still of order `1e6`, because `d(chi2)/dy = d(chi2)/dx * dx/dy` and
+`dx/dy` carries the **bound width** (750 eV for a `T_D` on `(50, 800)`), which is the normal
+scale of a `y`-space gradient here, not a symptom of one problem's weighting. `1e-8` is the
+smallest value tested that explores on both fixtures; OP19 is the row that checks the shipped
+default still does.
 
 Spec D29.
 """
 Base.@kwdef struct NoisyGradientDescent <: AbstractOptimizer
-    steps::Int = 2000
-    step_size::Float64 = 1.0e-2
-    noise::Float64 = 0.1
-    noise_decay::Float64 = 500.0
-    seed::Int = 1
+    steps::Int = 2000              # provisional
+    step_size::Float64 = 1.0e-8    # alpha -- measured 2026-09-14, no longer provisional
+    noise::Float64 = 0.1           # provisional: s0
+    noise_decay::Float64 = 500.0   # provisional: tau, in steps
+    seed::Int = 1                  # provisional
 end
 
 """
-    solve(problem::FitProblem, opt::NoisyGradientDescent; start = flatten(problem.pspec)) -> FitResult
+    solve(problem::FitProblem, opt::NoisyGradientDescent; start = flatten(problem.pspec),
+          y_trace::Union{Nothing,Vector} = nothing) -> FitResult
 
 Runs `opt.steps` steps of the update in `NoisyGradientDescent`'s own docstring, seeded from
 `Xoshiro(opt.seed)` so two runs are bitwise identical (OP6). **Returns the best iterate seen,
@@ -473,10 +492,19 @@ added to `y`, never to `x`**, so no iterate can leave its bounds and the optimiz
 projection (Pitfall 4/13, OP9); with `opt.noise == 0.0` this is plain gradient descent and
 decreases `𝒪` at every step for a small enough `opt.step_size` (OP5).
 
+`y_trace`, given a `Vector`, has one entry per step pushed onto it -- `y` **after** that step's
+update, so `opt.steps` entries in all -- on the same footing as `LevenbergMarquardt`'s `mu_trace`
+and `jacobian`'s `chunk`: a test hook that changes nothing about the default call shape (D29).
+It exists because `FitResult.trajectory` deliberately carries only `(iteration, 𝒪, chi2, R)` and
+never `y` or `x`, so without it there is no way to see the optimizer's own iterates from outside
+-- OP9 reads this to check that every iterate the optimizer actually takes stays inside its
+bounds, which replaying the update formula in a test can't do (Pitfall 13).
+
 Spec D29.
 """
 function solve(problem::FitProblem, opt::NoisyGradientDescent;
-    start::AbstractVector=flatten(problem.pspec))
+    start::AbstractVector=flatten(problem.pspec),
+    y_trace::Union{Nothing,Vector}=nothing)
     t0 = time()
     ntheta = problem.pspec.ntheta
     y = Vector{Float64}(start)
@@ -495,6 +523,7 @@ function solve(problem::FitProblem, opt::NoisyGradientDescent;
         randn!(rng, xi)
         sk = opt.noise * exp(-(k - 1) / opt.noise_decay)
         y = y .- opt.step_size .* g .+ sk .* xi
+        y_trace === nothing || push!(y_trace, copy(y))
 
         Ov, chi2v, Rval = _eval_all!(g, problem, y)
         trajectory[k+1] = (iteration=Float64(k), objective=Ov, chi2=chi2v, R=Rval)

@@ -1,15 +1,14 @@
 using Test
 using OTIS
-using OTIS: _cgls, _build_procedure, _PROCEDURE_NAMES, _eval_all!, _from_unconstrained,
+using OTIS: _cgls, _build_procedure, _PROCEDURE_NAMES, _from_unconstrained,
     jtvp!, jvp!, jacobian, _full_residuals
 using LinearAlgebra: norm
-import Random
 import ForwardDiff
 
-# OP1 to OP18 against dev/phase3_instructions.md Section 7's OP table (spec D27-D30), gated
-# "optimizers". D46's P1 (one bin, 24 wavelengths, noise-free) is the reference problem for
-# OP1-OP9: the minimum sits exactly at the generating parameters, so 1e-6 recovery is a statement
-# about the optimizer, not about noise.
+# OP1 to OP19 against dev/phase3_instructions.md Section 7's OP table (spec D27-D30) and Section
+# 8's carried item 1 (OP19, spec D29), gated "optimizers". D46's P1 (one bin, 24 wavelengths,
+# noise-free) is the reference problem for OP1-OP9: the minimum sits exactly at the generating
+# parameters, so 1e-6 recovery is a statement about the optimizer, not about noise.
 #
 # P1's plasma recipe fixes T_D = 200 eV, u_D = 0 km/s at the template level (D46), but a zero
 # truth makes "1e-6 relative on the recovered x" undefined for u_D (dividing by zero) -- so this
@@ -21,20 +20,15 @@ import ForwardDiff
 const _OP_T_TRUTH = 250.0
 const _OP_U_TRUTH = 40.0
 
-# **Deviation, approved by the user 2026-09-14** (OP5/OP7/OP8/OP9): P1's `sigma = ones(...)`
-# (D46) makes `chi2`'s gradient in y-space enormous -- `|grad O|` is already ~2.6e5 at a mere 2%
-# deviation in T_D from the truth, and stays huge (1e5 to 1e7) essentially everywhere in the
-# domain, not just near an edge (confirmed by sweeping the start from the bounds' centre to their
-# edges: at every point tested, `NoisyGradientDescent`'s own defaults, step_size = 1e-2, and
-# OP5's stated 1e-3, overshoot the very first step into the logit's saturated region and never
-# improve the objective again -- not a gradient bug, since chunk 8's OB4 already validates the
-# same gradient against finite differences). D29's step_size is explicitly marked provisional
-# for exactly this reason (D43 item 3). `_OP_NGD_STEP_SIZE` below is tuned empirically so these
-# four rows exercise genuinely meaningful exploration on P1's actual scale instead of vacuously
-# passing (or failing) on a saturated first step; LBFGS and LM are unaffected (adaptive line
-# search / damping) and OP1-OP4 use no override. **[propagate]**: D29's provisional defaults
-# should be revisited against this measurement before Phase 3 closes.
-const _OP_NGD_STEP_SIZE = 1e-8
+# **Chunk 10 carried item 1** (D29, D43 item 3): chunk 9 found P1's `sigma = ones(...)` (D46)
+# makes chi2's gradient in y-space enormous -- `|grad O|` is already ~2.6e5 at a mere 2% deviation
+# in T_D from the truth -- and D29's shipped `step_size` default overshot the very first step into
+# the logit's saturated region on it. Chunk 9 worked around that here with a tuned
+# `_OP_NGD_STEP_SIZE` override on OP5/OP7/OP8/OP9. Level 2 then measured that the enormous
+# gradient is not a P1 artefact of unit sigma -- it is `dx/dy` carrying the bound width, present on
+# any realistically weighted problem too -- and revised D29's own default to `1.0e-8`. With the
+# default fixed, OP5/OP7/OP8/OP9 use `NoisyGradientDescent`'s own default rather than overriding
+# it; OP19 is the row that would catch a regression to a default that saturates on its first step.
 
 # ------------------------------------------------------------------------------------------
 # P1 (D46): the one-bin problem, noise-free
@@ -196,7 +190,7 @@ end
 @testset "OP5: zero noise is plain gradient descent (P1)" begin
     problem = _op_p1_problem()
     start = _op_p1_start(; t_frac=1.05, u_frac=0.9)(problem)
-    opt = NoisyGradientDescent(noise=0.0, step_size=_OP_NGD_STEP_SIZE, steps=200)
+    opt = NoisyGradientDescent(noise=0.0, steps=200)
     result = solve(problem, opt; start=start)
     objs = [t.objective for t in result.trajectory]
     @test all(diff(objs) .< 0)
@@ -217,8 +211,7 @@ end
 @testset "OP7: the returned point is the best seen, not the last (P1)" begin
     problem = _op_p1_problem()
     start = _op_p1_start()(problem)
-    opt = NoisyGradientDescent(noise=5.0, noise_decay=5.0, steps=100, seed=20260907,
-        step_size=_OP_NGD_STEP_SIZE)
+    opt = NoisyGradientDescent(noise=5.0, noise_decay=5.0, steps=100, seed=20260907)
     result = solve(problem, opt; start=start)
     best = minimum(t.objective for t in result.trajectory)
     @test result.objective === best
@@ -232,7 +225,7 @@ end
     start = flatten(pspec, ["T_D" => v_T.lower + 1e-3 * (v_T.upper - v_T.lower),
         "u_D" => v_u.upper - 1e-3 * (v_u.upper - v_u.lower)])
     chi2_start = chi2(problem, start)
-    opt = NoisyGradientDescent(seed=20260907, step_size=_OP_NGD_STEP_SIZE)
+    opt = NoisyGradientDescent(seed=20260907)
     result = solve(problem, opt; start=start)
     @info "OP8" chi2_start result.chi2 (result.chi2 / chi2_start)
     @test result.chi2 <= 1e-2 * chi2_start
@@ -245,22 +238,46 @@ end
     start = flatten(pspec, ["T_D" => v_T.lower + 1e-3 * (v_T.upper - v_T.lower),
         "u_D" => v_u.upper - 1e-3 * (v_u.upper - v_u.lower)])
 
-    opt = NoisyGradientDescent(noise=5.0, noise_decay=20.0, steps=300, seed=20260907,
-        step_size=_OP_NGD_STEP_SIZE)
-    y = Vector{Float64}(start)
-    g = zeros(length(y))
-    xi = zeros(length(y))
-    rng = Random.Xoshiro(opt.seed)
-    for k in 1:opt.steps
-        _eval_all!(g, problem, y)
-        Random.randn!(rng, xi)
-        sk = opt.noise * exp(-(k - 1) / opt.noise_decay)
-        y = y .- opt.step_size .* g .+ sk .* xi
+    opt = NoisyGradientDescent(noise=5.0, noise_decay=20.0, steps=300, seed=20260907)
+    y_trace = Vector{Float64}[]
+    solve(problem, opt; start=start, y_trace=y_trace)
+
+    @test length(y_trace) == opt.steps
+    for y in y_trace
         xT = _from_unconstrained(y[1], v_T.lower, v_T.upper)
         xu = _from_unconstrained(y[2], v_u.lower, v_u.upper)
         @test v_T.lower < xT < v_T.upper
         @test v_u.lower < xu < v_u.upper
     end
+end
+
+# ------------------------------------------------------------------------------------------
+# OP19: the shipped default actually explores (chunk 10 carried item 1)
+# ------------------------------------------------------------------------------------------
+
+# P1's own build (D46), but with sigma from a realistic noise model instead of D46's unit sigma:
+# this is D29's "realistic, 1 bin" fixture, the one that showed the old 1e-2 default never moves
+# either weighting while 1e-8 does.
+function _op_p1_realistic_problem()
+    expt = _op_p1_expt()
+    pspec = _op_p1_pspec(expt)
+    working = _op_working(expt, pspec)
+    theta_truth = flatten(pspec, ["T_D" => _OP_T_TRUTH, "u_D" => _OP_U_TRUTH])
+    truth = unflatten(working, pspec, theta_truth)
+    image = measure(truth)
+    sig = sigma(GaussianNoise(a=1.0, b=0.02), image)
+    data = StreakData(lambda_m=working.lambda, t_s=working.t, image=image, sigma=sig)
+    return FitProblem(working, pspec, data)
+end
+
+@testset "OP19: the shipped default actually explores (realistic sigma, no override)" begin
+    problem = _op_p1_realistic_problem()
+    start = _op_p1_start()(problem)
+    chi2_start = chi2(problem, start)
+    opt = NoisyGradientDescent()   # no step_size override: this is the shipped default
+    result = solve(problem, opt; start=start)
+    @info "OP19" chi2_start result.chi2 (result.chi2 / chi2_start)
+    @test result.chi2 <= 1e-2 * chi2_start
 end
 
 # ------------------------------------------------------------------------------------------
