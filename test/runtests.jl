@@ -119,6 +119,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("result file")
         @safetestset "result file" begin include("data/test_result.jl") end
     end
+    if _wanted("deck")
+        @safetestset "deck" begin include("config/test_deck.jl") end
+    end
     if _wanted("noise")
         @safetestset "noise" begin include("instrument/test_noise.jl") end
     end

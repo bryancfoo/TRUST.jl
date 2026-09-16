@@ -1,0 +1,65 @@
+# foo2026 Section III.A / Table I: EPW ablation. Spec D38. Run examples/epw_ablation.jl once
+# first (`julia --project=. examples/epw_ablation.jl`) to write runs/epw_ablation_streak.jld2,
+# the synthetic streak this deck fits -- its sigma is already frozen at synthesis (OQ-14).
+# The [regularizer] normalizations (logn, T_e: initial; m_e: unit) and the weight follow spec
+# D38's table verbatim.
+
+deck_version = "otis-deck-1"
+
+[data]
+file = "runs/epw_ablation_streak.jld2"
+lambda_range_nm = [220.0, 260.0]
+t_range_ns = [2.0, 5.6]
+
+[geometry]
+lambda_probe_nm = 263.25
+theta_deg = 60.0
+k_model = "exact"
+
+[fit.variables]
+# logn is the idiom for a quantity spanning decades (Pitfall 9): fitted as its own log10 through
+# the ne_cm3 dependent below, not as n_e directly on [3e18, 3e20].
+logn = { bounds = [18.5, 20.5], init = 19.176, time_varying = true }
+T_e  = { bounds = [100.0, 2000.0], init = 350.0, time_varying = true }
+m_e  = { bounds = [2.0, 5.5], init = 2.5, time_varying = true }
+
+[fit.dependent]
+ne_cm3 = "10^logn"
+
+[plasma]
+n_e_cm3 = "ne_cm3"
+
+[plasma.electrons.e]
+fraction = 1.0
+T_eV = "T_e"
+u_kms = 0.0
+shape = { type = "SuperGaussian", m = "m_e" }
+
+[plasma.ions.D]
+mass_amu = 2.014
+charge = 1
+fraction = 1.0
+T_eV = 250.0
+u_kms = 0.0
+
+[instrument]
+spectral_irf = { fwhm_nm = 0.5 }
+temporal_irf = { fwhm_ns = 0.08 }
+sensitivity = { scale = 2.0e-4 }
+background = [{ type = "Constant", level = 25.0 }]
+
+[fit]
+sigma = "supplied"
+
+[regularizer]
+weight = 2.0e-4
+terms = [
+  { select = ["logn", "T_e"], operator = "D2", normalization = "initial" },
+  { select = ["m_e"], operator = "D2", normalization = "unit" },
+]
+
+[optimizer]
+procedure = "noisy_descent_lbfgs"
+
+[output]
+dir = "runs/epw_ablation"

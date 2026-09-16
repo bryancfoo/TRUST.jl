@@ -32,6 +32,7 @@ include("inversion/weight_scan.jl")       # new (3.5): weight_scan, WeightScanRe
 include("config/options.jl")              # new (3.6a): option structs, spec D32
 include("config/registry.jl")             # new (3.6a): component registries, spec D32
 include("data/result.jl")                 # new (3.6a): write_result/read_result, spec D34
+include("config/deck.jl")                 # new (3.6b): read_deck, build_problem, effective_deck, fit
 
 # types
 export AbstractVelocityDistribution, Maxwellian, SuperGaussian, SpeciesSpec, Species, SpeciesSet, Plasma
@@ -70,6 +71,10 @@ export StreakData, read_streak, write_streak, read_trace, write_trace
 
 # data (3.6a)
 export write_result, read_result
+
+# config (3.6b): build_problem, Deck and DECK_VERSION are deliberately not exported (the chunk 12
+# prompt names exactly these three); tests reach the others through OTIS.build_problem etc.
+export read_deck, effective_deck, fit
 
 # noise (2.5)
 export AbstractNoiseModel, StreakCameraNoise, GaussianNoise, sigma, synthesize

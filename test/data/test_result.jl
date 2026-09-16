@@ -209,6 +209,9 @@ end
         for (name, v) in _RE_SCAN.rss_normalized
             @test r.scan.rss_normalized[name] == v
         end
+        for (name, v) in _RE_SCAN.rss_unreg
+            @test r.scan.rss_unreg[name] == v
+        end
     end
 end
 
@@ -288,8 +291,8 @@ end
             for name in ("T_D", "u_D")
                 @test f["scan/rss/$name"] == _RE_SCAN.rss[name]
                 @test f["scan/rss_normalized/$name"] == _RE_SCAN.rss_normalized[name]
+                @test f["scan/rss_unreg/$name"] == _RE_SCAN.rss_unreg[name]
             end
-            @test !haskey(f, "scan/rss_unreg")
         end
 
         without_scan = joinpath(dir, "without_scan.jld2")

@@ -155,16 +155,13 @@ result writer below (roadmap Step 2.4, amended; `dev/phase2_overall_summary.md` 
 | `scan/chi2`, `scan/R`, `scan/chi2_normalized`, `scan/R_normalized` | `Float64` | `(K)` | with a scan |
 | `scan/chi2_unreg`, `scan/R_unreg` | `Float64` | scalar | with a scan |
 | `scan/rss/<variable>`, `scan/rss_normalized/<variable>` | `Float64` | `(K)` | only with a known ground truth |
+| `scan/rss_unreg/<variable>` | `Float64` | scalar | only with a known ground truth |
 
 `fit/chi2`, `fit/npixels` and `meta/source` stay scalars: Phase 3 fits one dataset at a time, and
 a later joint EPW/IAW fit that needs per-dataset values turns this into a version bump
 (`layout_version` grows a `datasets/<name>/` group carrying its own `chi2`/`npixels`), not a
 silent break — the version string is what makes that possible, and it is why it is written even
 though nothing in Phase 3 reads it back for dispatch.
-
-`scan/rss_unreg` is not written: it is exactly recoverable from any weight's row,
-`scan/rss/<variable>[k] / scan/rss_normalized/<variable>[k]`, unlike `chi2_unreg`/`R_unreg`,
-which are not decomposed per variable and so are written as their own scalars.
 
 **`read_trace` gains an `as` keyword** (`:arrays`, unchanged and default, or `:trace`, spec D35),
 once the component registry (`conventions.md` 7.2) exists to look shape names up in; the trace

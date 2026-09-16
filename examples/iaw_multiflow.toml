@@ -1,0 +1,77 @@
+# foo2026 Section III.B / Table I: IAW multi-flow, interpenetrating D and C flows. Spec D38.
+# Run examples/iaw_multiflow.jl once first (`julia --project=. examples/iaw_multiflow.jl`) to
+# write runs/iaw_multiflow_streak.jld2, the synthetic streak this deck fits.
+#
+# n_e and the electron temperature are not in Table I's fitted list for this problem (only f_D,
+# T_D, T_C, u_D and u_C are); both are fixed here at their ground-truth t=0 values
+# (examples/problems.jl, iaw_multiflow_problem).
+#
+# Pitfall 12 / D24: u_D and u_C use `absolute` normalization with `scale = 100.0` written
+# explicitly (Table I's own 100 km/s) -- the default would silently use each variable's own
+# 900 km/s bound width instead.
+
+deck_version = "otis-deck-1"
+
+[data]
+file = "runs/iaw_multiflow_streak.jld2"
+lambda_range_nm = [262.0, 264.5]
+t_range_ns = [0.0, 3.0]
+
+[geometry]
+lambda_probe_nm = 263.25
+theta_deg = 60.0
+k_model = "exact"
+
+[fit.variables]
+f_D = { bounds = [0.3, 1.0], init = 0.95, time_varying = true }
+T_D = { bounds = [50.0, 3000.0], init = 200.0, time_varying = true }
+T_C = { bounds = [50.0, 3000.0], init = 200.0, time_varying = true }
+u_D = { bounds = [-200.0, 700.0], init = 0.0, time_varying = true }
+u_C = { bounds = [-200.0, 700.0], init = 500.0, time_varying = true }
+
+[fit.dependent]
+f_C = "1 - f_D"
+
+[plasma]
+n_e_cm3 = 3.0e19
+
+[plasma.electrons.e]
+fraction = 1.0
+T_eV = 400.0
+u_kms = 0.0
+
+[plasma.ions.D]
+mass_amu = 2.014
+charge = 1
+fraction = "f_D"
+T_eV = "T_D"
+u_kms = "u_D"
+
+[plasma.ions.C]
+mass_amu = 12.011
+charge = 6
+fraction = "f_C"
+T_eV = "T_C"
+u_kms = "u_C"
+
+[instrument]
+spectral_irf = { fwhm_nm = 0.08 }
+temporal_irf = { fwhm_ns = 0.05 }
+sensitivity = { scale = 1.0e-6 }
+
+[fit]
+sigma = "supplied"
+
+[regularizer]
+weight = 5.0e-3
+terms = [
+  { select = ["f_D"], operator = "D2", normalization = "unit" },
+  { select = ["T_D", "T_C"], operator = "D2", normalization = "initial" },
+  { select = ["u_D", "u_C"], operator = "D2", normalization = "absolute", scale = 100.0 },
+]
+
+[optimizer]
+procedure = "noisy_descent_lbfgs"
+
+[output]
+dir = "runs/iaw_multiflow"

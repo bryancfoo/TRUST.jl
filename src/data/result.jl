@@ -60,11 +60,8 @@ Writes `result` (and, if given, `scan`) to `path` as a JLD2 file of plain numeri
 strings (`docs/derivations/data_layout.md` Section 3, spec D34): `layout_version`, a `meta`
 group, the effective `deck` text, the axis, one group per fitted variable and per dependent, one
 group per leaf of the fitted trace, the `fit/*` scalars and vectors, the `trajectory/*` arrays,
-and, only when `scan !== nothing`, the `scan/*` arrays and per-variable `scan/rss*` groups.
-
-`scan/rss_unreg` is not written: it is exactly recoverable from any weight's row,
-`scan.rss[name][k] / scan.rss_normalized[name][k]`, unlike `chi2_unreg`/`R_unreg`, which are not
-decomposed per variable and so have no such row to recover them from.
+and, only when `scan !== nothing`, the `scan/*` arrays and per-variable `scan/rss*` groups,
+including `scan/rss_unreg/<variable>`.
 
 Spec D34.
 """
@@ -144,6 +141,9 @@ function write_result(path::AbstractString, result::FitResult; deck::AbstractStr
             for (name, v) in scan.rss_normalized
                 f["scan/rss_normalized/$name"] = Vector{Float64}(v)
             end
+            for (name, v) in scan.rss_unreg
+                f["scan/rss_unreg/$name"] = Float64(v)
+            end
         end
     end
     return path
@@ -163,9 +163,9 @@ axis_boundary_unit, variables, dependents, leaves, fit, trajectory, scan)`. `var
 `dependents` are `Dict{String,<:NamedTuple}` keyed by name; `leaves` is `Dict{String,Vector{Float64}}`
 keyed by SI leaf path; `fit` and `trajectory` are `NamedTuple`s of the file's own `fit/*` and
 `trajectory/*` datasets; `scan` is `nothing` when the file carries no `scan/*` group, else a
-`NamedTuple` (`rss`/`rss_normalized` themselves `Dict{String,Vector{Float64}}`, empty when the
-file carries no ground truth). Throws, naming the version found and expected, if
-`layout_version` does not match `RESULT_LAYOUT_VERSION`.
+`NamedTuple` (`rss`/`rss_normalized` themselves `Dict{String,Vector{Float64}}` and `rss_unreg`
+`Dict{String,Float64}`, empty when the file carries no ground truth). Throws, naming the version
+found and expected, if `layout_version` does not match `RESULT_LAYOUT_VERSION`.
 
 Spec D34.
 """
@@ -225,11 +225,13 @@ function read_result(path::AbstractString)
             rss = Dict{String,Vector{Float64}}(nm => f["scan/rss/$nm"] for nm in _read_group(f, "scan/rss"))
             rss_normalized = Dict{String,Vector{Float64}}(
                 nm => f["scan/rss_normalized/$nm"] for nm in _read_group(f, "scan/rss_normalized"))
+            rss_unreg = Dict{String,Float64}(
+                nm => f["scan/rss_unreg/$nm"] for nm in _read_group(f, "scan/rss_unreg"))
             scan = (
                 weights=f["scan/weights"], chi2=f["scan/chi2"], R=f["scan/R"],
                 chi2_normalized=f["scan/chi2_normalized"], R_normalized=f["scan/R_normalized"],
                 chi2_unreg=f["scan/chi2_unreg"], R_unreg=f["scan/R_unreg"],
-                rss=rss, rss_normalized=rss_normalized,
+                rss=rss, rss_normalized=rss_normalized, rss_unreg=rss_unreg,
             )
         end
 
