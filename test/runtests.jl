@@ -128,6 +128,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("examples")
         @safetestset "examples" begin include("instrument/test_examples.jl") end
     end
+    if _wanted("reproduce")
+        @safetestset "reproduce" begin include("inversion/test_reproduce.jl") end
+    end
 end
 
 # The slow tier (conventions.md 8.6). test/slow/ carries its OWN environment, because its files

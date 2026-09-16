@@ -681,3 +681,77 @@ end
         @test read_deck(effpath) == deck
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# DK17: the five unsafe instrument keys refuse a variable reference (carried from chunk 12,
+# dev/phase3_prompt_13.md's carried item)
+# ------------------------------------------------------------------------------------------
+#
+# Chunk 12's `_resolve_bindings` (src/inversion/parameters.jl, D9) hardcodes `factor = 1.0` for
+# every `:effect` binding -- correct for the four instrument keys whose deck name already equals
+# `parameters(effect)`'s own key, and silently wrong for five others (deck.jl's box above
+# `_fill_option_fields`). Chunk 12's `_INSTRUMENT_REF_OK` therefore fills those five with
+# `refs_allowed = false`, so a deck naming a variable there is refused at `read_deck` time with
+# D39's "takes a string, not a variable reference" fragment rather than silently mishandled.
+# Nothing tested that containment before this chunk (a grep of this file's own history found no
+# row putting a string in any of the five); DK17 is that test. Each string below names a
+# *declared* fitted variable ("x"), not a nonexistent name, so a passing row is the "takes a
+# string" error and not DK6's "which is not a declared variable or dependent" -- the row must
+# fail for the right reason, or it would pass a version of `_fill_option_fields` that checked
+# `refs_allowed` after the name lookup instead of before it.
+
+function _dk17_deck(datafile::AbstractString, instrument_line::AbstractString)
+    return """
+    deck_version = "otis-deck-1"
+
+    [data]
+    file = "$(replace(datafile, "\\" => "/"))"
+
+    [geometry]
+    lambda_probe_nm = 263.25
+    theta_deg = 60.0
+
+    [fit.variables]
+    x = { bounds = [0.0, 1.0], init = 0.5 }
+
+    [plasma]
+    n_e_cm3 = 3.0e19
+
+    [plasma.electrons.e]
+    fraction = 1.0
+    T_eV = 400.0
+
+    [plasma.ions.D]
+    mass_amu = 2.014
+    charge = 1
+    fraction = 1.0
+    T_eV = 200.0
+    u_kms = 0.0
+
+    [instrument]
+    $instrument_line
+
+    [fit]
+    sigma = "supplied"
+    """
+end
+
+@testset "DK17: the five unsafe instrument keys refuse a variable reference" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "data.jld2")
+        _dk_write_streak(datafile)
+
+        rows = (
+            "spectral_irf" => "spectral_irf = { fwhm_nm = \"x\" }",
+            "temporal_irf" => "temporal_irf = { fwhm_ns = \"x\" }",
+            "probe_offset" => "probe_offset = { probe_offset_nm = \"x\" }",
+            "k_smearing" => "k_smearing = { half_angle_deg = \"x\" }",
+            "gradient_smearing" => "gradient_smearing = { leaf = \"plasma.electrons.e.T_eV\", width = \"x\" }",
+        )
+        for (label, instrument_line) in rows
+            deckpath = joinpath(dir, "dk17_$label.toml")
+            write(deckpath, _dk17_deck(datafile, instrument_line))
+            @test_throws "takes a string, not a variable reference" read_deck(deckpath)
+        end
+    end
+end
