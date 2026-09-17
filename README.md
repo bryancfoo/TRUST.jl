@@ -35,8 +35,39 @@ super-Gaussian exponent, and two ion-acoustic problems, one with interpenetratin
 with a shock — are in `examples/`, and plotting methods load with Makie.
 **[`examples/figures/`](examples/figures/) shows what the package produces**: the three test
 problems' streaks and parameter traces, what each instrument effect does to one spectrum, and
-the noise model against its own σ. Phase 3, the inversion, is next. The roadmap is kept outside
-this tree.
+the noise model against its own σ.
+
+Phase 3 is complete: the inversion. Any numeric leaf of the model — a plasma parameter at every
+time bin, a shape exponent, an instrument width, a background level — is fitted by declaring a
+**bounded variable** and writing its name where the deck expects a number; quantities that span
+decades, sums that must close, orderings and functional forms in time are written as
+**dependent expressions** in ordinary Julia syntax, parsed and interpreted rather than
+evaluated, and a **named time interval** lets a parameter take different values either side of
+a shock. Every fitted variable passes through one logit onto its bounds, so the optimizer works
+in unconstrained, order-one coordinates and no iterate can leave its range. The Jacobian is
+assembled per time bin by forward-mode automatic differentiation and never formed densely — on
+a 512 × 256 streak that is a few megabytes of blocks instead of the eight hundred a dense matrix
+would be — and L-BFGS, Levenberg–Marquardt and a noisy gradient-descent explorer all consume the
+same two matrix-free products. A **Tikhonov regularizer** composable along the time axis
+penalizes the second time derivative of whichever parameters are named, in the axis's own unit
+so that a rebinned dataset fits the same way, with per-interval terms that leave a
+discontinuity unpenalized; **a scan over the weight reports the trade-off and chooses nothing**.
+`fit("deck.toml")` runs the whole of it and writes a result file from which the fit can be
+reproduced.
+
+The three foo2026 reproductions (Step 3.7) are tested cut down to a 128 × 32 grid
+(`test/slow/test_reproduce.jl`, run by hand); full resolution (512 × 256) is `examples/`.
+**The full-resolution EPW reproduction is deferred to Phase 3.SG**, a phase to be designed
+separately with Level 1 — fitting the super-Gaussian exponent spends about 93% of the Jacobian
+in an adaptive quadrature, which makes it too slow for this phase's decks as they stand; it is
+not done, and it did not fail, it was not attempted at full resolution. A full-resolution run of
+the two Maxwellian problems was attempted and found impractical in one sitting: even with plain
+`lbfgs` in place of the paper's own two-phase procedure, a single fit did not converge inside
+1000 iterations, so a seven-point scan is many times a fifteen-minute budget
+(`dev/reports/phase3_report.md`, Chunk 14). Step 3.8 adds `WarpMap` and `dewarp`, the OMEGA
+streak's geometric correction, built and tested against a synthetic warp; no real OMEGA streak
+was available this chunk, so a first fit of one has not been run. Phase 3.SG, then Phase 4, the
+extensions, are next. The roadmap is kept outside this tree.
 
 ## Installing and testing
 
@@ -48,7 +79,9 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 Set `OTIS_TESTS` to a comma-separated, case-insensitive list of substrings to run only the
 `@safetestset`s whose name matches one of them (unset or empty runs everything). The slow tier
 (sweeps and anything needing CairoMakie) is not part of `Pkg.test()`; run it by hand with
-`julia --project=test/slow test/slow/runslow.jl`, which uses its own environment.
+`julia --project=test/slow test/slow/runslow.jl`, which uses its own environment and includes
+`test/slow/test_reproduce.jl`, the cut-down (128 × 32) reproduction of the three foo2026 test
+problems.
 
 ## Running
 
@@ -58,4 +91,11 @@ julia --project -t auto
 
 launches Julia with all available threads. Call `pin_blas_threads()` before a large evaluation:
 OTIS threads over time bins itself, and BLAS on many threads oversubscribes the machine against
-it.
+it. **Thread a real fit**: the Jacobian's cost is the per-bin dual pass, which `foreach_bin!`
+parallelizes, measured at 3.4× from `-t 8` (`docs/real_data.md`); start one with
+
+```
+julia --project=. -t 8 -e 'using OTIS; fit("shot12345.toml")'
+```
+
+not a bare `julia --project=.`.

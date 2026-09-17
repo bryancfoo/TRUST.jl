@@ -71,7 +71,7 @@ terms = [
 ]
 
 [optimizer]
-procedure = "noisy_descent_lbfgs"
+procedure = "lbfgs"
 
 [output]
 dir = "runs/iaw_multiflow"
