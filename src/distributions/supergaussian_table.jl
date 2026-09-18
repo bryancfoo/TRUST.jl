@@ -5,25 +5,31 @@
 
 """
     SG_PANEL_EDGES, SG_XI_MAX, SG_M_LO, SG_M_HI, SG_DEGREE_START, SG_DEGREE_CAP_XI,
-    SG_DEGREE_CAP_M, SG_BISECT_MAX, SG_FIT_TOL
+    SG_DEGREE_CAP_M, SG_BISECT_MAX, SG_FIT_TOL, SG_DM_FIT_TOL
 
-The table build's constants (spec D10, D12): the default panel edges before bisection; the
-domain `|ξ| ∈ [0, SG_XI_MAX]`, `m ∈ [SG_M_LO, SG_M_HI]`; the starting degree in each direction;
-the per-panel ξ-degree cap and the single global m-degree cap; the maximum number of times any
-one original panel may be bisected; and `τ`, the trailing-coefficient fit target (D12, revised
-2026-09-08 round 1: starts at `1e-9`, the value target with one order of margin, and — driven
-**only** by the derivative certification TB7/TB8, never by a single-point test — may be lowered by
-one factor of ten, to a floor of `1e-10`, if TB7/TB8 does not pass at `1e-9`. The floor is `1e-10`,
-not lower, because the generator itself (`CAUCHY_RTOL = 1e-10`) measures only ~1e-11 relative
-against a BigFloat oracle: τ below `1e-10` fits the generator's own quadrature noise rather than
-the true interpolation error, which is exactly what drove the degrees up without the accuracy
-improving in round 1's `τ = 1e-12` build. Pinned and reported — never asserted at runtime).
+The table build's constants (spec D10, D12; `SG_DM_FIT_TOL` added at Phase 3.C spec D4): the
+default panel edges before bisection; the domain `|ξ| ∈ [0, SG_XI_MAX]`, `m ∈ [SG_M_LO, SG_M_HI]`,
+shared by both tables built from them; the starting degree in each direction; the per-panel
+ξ-degree cap and the single global m-degree cap; the maximum number of times any one original
+panel may be bisected; `τ` for the Cauchy table (`SG_FIT_TOL`), the trailing-coefficient fit
+target (D12, revised 2026-09-08 round 1: starts at `1e-9`, the value target with one order of
+margin, and — driven **only** by the derivative certification TB7/TB8, never by a single-point
+test — may be lowered by one factor of ten, to a floor of `1e-10`, if TB7/TB8 does not pass at
+`1e-9`. The floor is `1e-10`, not lower, because the generator itself (`CAUCHY_RTOL = 1e-10`)
+measures only ~1e-11 relative against a BigFloat oracle: τ below `1e-10` fits the generator's own
+quadrature noise rather than the true interpolation error, which is exactly what drove the degrees
+up without the accuracy improving in round 1's `τ = 1e-12` build. Pinned and reported — never
+asserted at runtime); and `τ` for the m-partial table (`SG_DM_FIT_TOL`, D4), starting at `1e-10`
+(the 1e-9 accuracy target with one order of margin) and lowerable **once**, to a floor of `1e-11`,
+driven only by DM3 or DM5 failing at `1e-9`, never by a single point — the floor sits one order
+below the Cauchy table's because the m-partial generator `_dgamma_da` itself runs at
+`rtol = 1e-12`, one order tighter than `_cauchy_real`'s `CAUCHY_RTOL = 1e-10`.
 
 These are `Float64` and `Int` constants of the *build*, not quantities that follow an argument's
 element type (`conventions.md` 5.1's clarification of 2026-09-08 covers this exactly): they are
 never read after `_sg_build_table` runs. Every domain check in `src/` and `test/` reads
-`SG_TABLE.xi_max`, `SG_TABLE.m_lo`, `SG_TABLE.m_hi` instead of these constants
-([OQ-31](../../dev/open_questions.md#oq-31) item 3).
+`SG_TABLE.xi_max`, `SG_TABLE.m_lo`, `SG_TABLE.m_hi` (or `SG_DM_TABLE`'s, which are the same values)
+instead of these constants ([OQ-31](../../dev/open_questions.md#oq-31) item 3).
 """
 const SG_PANEL_EDGES = (0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 10.0)
 const SG_XI_MAX = 10.0
@@ -34,6 +40,7 @@ const SG_DEGREE_CAP_XI = 64
 const SG_DEGREE_CAP_M = 48
 const SG_BISECT_MAX = 4
 const SG_FIT_TOL = 1e-9
+const SG_DM_FIT_TOL = 1e-10
 
 """
     SuperGaussianTable{L,FT<:AbstractFloat}
@@ -56,10 +63,14 @@ there is a fine panel; `xi_converged[p]` or `m_converged` being `false` means a 
 [OQ-31](../../dev/open_questions.md#oq-31) item 2 asks for, and TB3 asserts on these flags rather
 than on `nxi[p] < SG_DEGREE_CAP_XI`.
 
-Built once, by `_sg_build_table()`, into the module `const` `SG_TABLE`
-(`conventions.md` 5.6, the second named exception to "no global mutable state").
+Built once, by `_sg_build_table(sampler, edges, tau, m_lo, m_hi, xi_max)`, into the module
+`const`s `SG_TABLE` and, at Phase 3.C spec D4, `SG_DM_TABLE`
+(`conventions.md` 5.6, the second named exception to "no global mutable state"). `SG_DM_TABLE` is
+the same type, reused, not a new one (D4): it tabulates `∂φ/∂m` on the identical `(|x|, m)` domain
+and panels, at its own tolerance `SG_DM_FIT_TOL`, from the m-derivative sampler
+`_sg_dphi_dm_reference` in place of `_sg_principal_value`.
 
-Spec D10; `docs/derivations/supergaussian.md` Section 7.
+Spec D10; Phase 3.C spec D4, D9; `docs/derivations/supergaussian.md` Section 7.
 """
 struct SuperGaussianTable{L,FT<:AbstractFloat}
     edges::Vector{FT}
@@ -204,28 +215,32 @@ function _trailing_ok(C::AbstractMatrix{<:Real}, dim::Integer, tau)
 end
 
 """
-    _sg_sample_grid!(memo, a, b, nxi, nm) -> Matrix{Float64}
+    _sg_sample_grid!(memo, sampler, a, b, nxi, nm, m_lo, m_hi) -> Matrix{Float64}
 
-Samples `R(ξ, m)` on the `(nxi+1) × (nm+1)` Lobatto grid of panel `[a, b] × [m_lo, m_hi]`,
-memoized by the exact `(ξ, m)` floating-point coordinate: a Lobatto node shared between degree
+Samples `sampler(m, x)` on the `(nxi+1) × (nm+1)` Lobatto grid of panel `[a, b] × [m_lo, m_hi]`,
+memoized by the exact `(x, m)` floating-point coordinate: a Lobatto node shared between degree
 `n` and degree `2n` (`t_k` at degree `n` is `t_{2k}` at degree `2n`, spec D9) maps to the
 identical `Float64` value under `_cheb_unmap` (division by exactly-representable integers, so
 IEEE division of the mathematically equal ratio rounds identically), so doubling a degree only
 pays for the new nodes. `memo` is build-time scratch, thrown away with the panel
-(`conventions.md` Section 7's "no cache beyond the table const").
+(`conventions.md` Section 7's "no cache beyond the table const"). `sampler` and the domain
+(`m_lo`, `m_hi`) are parameters, not hard-coded (Phase 3.C spec D9): `_sg_principal_value` builds
+`SG_TABLE`, `_sg_dphi_dm_reference` builds `SG_DM_TABLE`, both on the same domain today, and the
+sampler's own argument order is `sampler(m, x)`, matching `_sg_principal_value(m, xi)`.
 """
-function _sg_sample_grid!(memo::Dict{Tuple{Float64,Float64},Float64}, a, b, nxi, nm)
+function _sg_sample_grid!(memo::Dict{Tuple{Float64,Float64},Float64}, sampler, a, b, nxi, nm,
+                           m_lo, m_hi)
     xi_vals = [_cheb_unmap(t, a, b) for t in _cheb_nodes(nxi)]
-    m_vals = [_cheb_unmap(t, SG_M_LO, SG_M_HI) for t in _cheb_nodes(nm)]
+    m_vals = [_cheb_unmap(t, m_lo, m_hi) for t in _cheb_nodes(nm)]
     F = Matrix{Float64}(undef, nxi + 1, nm + 1)
     for (kk, xi) in enumerate(xi_vals), (ll, mm) in enumerate(m_vals)
-        F[kk, ll] = get!(() -> _sg_principal_value(mm, xi), memo, (xi, mm))
+        F[kk, ll] = get!(() -> sampler(mm, xi), memo, (xi, mm))
     end
     return F
 end
 
 """
-    _sg_adapt_panel!(final::Vector, a, b, depth::Integer, tau)
+    _sg_adapt_panel!(final::Vector, sampler, a, b, depth::Integer, tau, m_lo, m_hi)
 
 Fits one ξ-panel `[a, b]` adaptively in both directions (spec D9): starting at
 `SG_DEGREE_START` in ξ and in m, doubling whichever direction's trailing-coefficient test
@@ -235,15 +250,18 @@ the *original* panel (Pitfall 19; the build must terminate); an m degree that wo
 exceed its cap is simply capped, accepted, and left for TB3 to report as a finding
 ([OQ-31](../../dev/open_questions.md#oq-31) item 2) — never bisected, since there is one global
 m-degree for the whole table. Pushes `(a, b, nxi, nm, C, memo)` NamedTuples for the finished
-panel(s), in ascending ξ order, onto `final`.
+panel(s), in ascending ξ order, onto `final`. `sampler`, `tau` and the domain (`m_lo`, `m_hi`) are
+threaded through (Phase 3.C spec D9); the degree constants stay module constants shared by both
+tables' builds.
 """
-function _sg_adapt_panel!(final::Vector, a::Float64, b::Float64, depth::Integer, tau)
+function _sg_adapt_panel!(final::Vector, sampler, a::Float64, b::Float64, depth::Integer, tau,
+                           m_lo, m_hi)
     memo = Dict{Tuple{Float64,Float64},Float64}()
     nxi = SG_DEGREE_START
     nm = SG_DEGREE_START
     local C
     while true
-        F = _sg_sample_grid!(memo, a, b, nxi, nm)
+        F = _sg_sample_grid!(memo, sampler, a, b, nxi, nm, m_lo, m_hi)
         C = _tensor_coeffs(F)
         xi_ok = _trailing_ok(C, 1, tau)
         m_ok = _trailing_ok(C, 2, tau)
@@ -253,8 +271,8 @@ function _sg_adapt_panel!(final::Vector, a::Float64, b::Float64, depth::Integer,
         end
         if !xi_ok && nxi >= SG_DEGREE_CAP_XI && depth < SG_BISECT_MAX
             mid = (a + b) / 2
-            _sg_adapt_panel!(final, a, mid, depth + 1, tau)
-            _sg_adapt_panel!(final, mid, b, depth + 1, tau)
+            _sg_adapt_panel!(final, sampler, a, mid, depth + 1, tau, m_lo, m_hi)
+            _sg_adapt_panel!(final, sampler, mid, b, depth + 1, tau, m_lo, m_hi)
             return
         end
         next_nxi = (!xi_ok && nxi < SG_DEGREE_CAP_XI) ? min(2nxi, SG_DEGREE_CAP_XI) : nxi
@@ -268,10 +286,11 @@ function _sg_adapt_panel!(final::Vector, a::Float64, b::Float64, depth::Integer,
 end
 
 """
-    _sg_build_table() -> SuperGaussianTable
+    _sg_build_table(sampler, edges, tau, m_lo, m_hi, xi_max) -> SuperGaussianTable
 
-The whole build (spec D9–D12), run once at include time: **Pass 1** adapts every panel of
-`SG_PANEL_EDGES` independently in both directions (`_sg_adapt_panel!`, with bisection), yielding
+The whole build (spec D9–D12; parameterized on its sampler and domain at Phase 3.C spec D9), run
+once at include time for each of `SG_TABLE` and `SG_DM_TABLE`: **Pass 1** adapts every panel of
+`edges` independently in both directions (`_sg_adapt_panel!`, with bisection), yielding
 the final panel edges, each panel's own `nxi` and its own *required* `nm`. **Pass 2** sets
 `nm = max` over every panel's required `nm` (one global m-degree,
 [OQ-31](../../dev/open_questions.md#oq-31) item 2) and rebuilds any panel whose own `nm` fell
@@ -285,29 +304,36 @@ AND of the m recheck over every panel, since one global `nm` either serves the w
 does not. Assembles the flat `coeffs` array in slice order (spec D10's Layout) and returns the
 `SuperGaussianTable`.
 
+`sampler(m, x)` is `_sg_principal_value` for `SG_TABLE` and `_sg_dphi_dm_reference` for
+`SG_DM_TABLE`; both go through `_sg_uncached`, `SuperGaussian{FT,0,0}`, so **neither build needs
+the other and neither needs a table to build** (Phase 3.C spec D9, Pitfall 7). `SG_TABLE` is
+still bound first in `SG_TABLE`/`SG_DM_TABLE`'s declaration order below for an unrelated reason:
+`SuperGaussian(m::Real)`'s promotion reads `eltype(SG_TABLE.coeffs)`.
+
 Deterministic, machine-independent, silent, `Float64` throughout, never `BigFloat`, and bounded
 by construction (`SG_BISECT_MAX`, `SG_DEGREE_CAP_XI`, `SG_DEGREE_CAP_M`) — the build runs at
 every precompile and must terminate there (Pitfall 4, Pitfall 19).
 """
-function _sg_build_table()
-    tau = SG_FIT_TOL
-    edges0 = collect(Float64, SG_PANEL_EDGES)
+function _sg_build_table(sampler, edges, tau, m_lo, m_hi, xi_max)
+    edges0 = collect(Float64, edges)
     panels = NamedTuple[]
     for p in 1:length(edges0)-1
-        _sg_adapt_panel!(panels, edges0[p], edges0[p+1], 0, tau)
+        _sg_adapt_panel!(panels, sampler, edges0[p], edges0[p+1], 0, tau, m_lo, m_hi)
     end
     nm_global = maximum(p.nm for p in panels)
     final = NamedTuple[]
     for p in panels
-        C = p.nm < nm_global ? _tensor_coeffs(_sg_sample_grid!(p.memo, p.a, p.b, p.nxi, nm_global)) : p.C
+        C = p.nm < nm_global ?
+            _tensor_coeffs(_sg_sample_grid!(p.memo, sampler, p.a, p.b, p.nxi, nm_global, m_lo, m_hi)) :
+            p.C
         xi_converged = _trailing_ok(C, 1, tau)
         m_converged = _trailing_ok(C, 2, tau)
         push!(final, (a = p.a, b = p.b, nxi = p.nxi, C = C,
                       xi_converged = xi_converged, m_converged = m_converged))
     end
-    edges = Float64[final[1].a]
+    edges_out = Float64[final[1].a]
     for p in final
-        push!(edges, p.b)
+        push!(edges_out, p.b)
     end
     nxi_vec = Int[p.nxi for p in final]
     xi_converged_vec = Bool[p.xi_converged for p in final]
@@ -326,9 +352,9 @@ function _sg_build_table()
             coeffs[slice_idx*(nm_global+1)+1:(slice_idx+1)*(nm_global+1)] .= view(p.C, j + 1, :)
         end
     end
-    return SuperGaussianTable{L,Float64}(edges, nxi_vec, offset, nm_global, coeffs,
+    return SuperGaussianTable{L,Float64}(edges_out, nxi_vec, offset, nm_global, coeffs,
                                           xi_converged_vec, m_converged,
-                                          SG_M_LO, SG_M_HI, SG_XI_MAX, tau)
+                                          m_lo, m_hi, xi_max, tau)
 end
 
 """
@@ -376,9 +402,19 @@ end
 
 """
     SG_TABLE::SuperGaussianTable
+    SG_DM_TABLE::SuperGaussianTable
 
-The module-level table `const` (`conventions.md` 5.6), built once by `_sg_build_table()` at
-include time and read-only afterwards. `SuperGaussian(m)`'s public constructor computes its
-`slice` from it; `_sg_uncached(m)`, used only by the generator above, never touches it.
+The module-level table `const`s (`conventions.md` 5.6), each built once by `_sg_build_table` at
+include time and read-only afterwards. `SG_TABLE` tabulates `R(ξ; m)`, the Cauchy-integral
+principal value, from `_sg_principal_value`; `SG_DM_TABLE` tabulates `∂φ/∂m` on the same
+`(|x|, m)` domain and panels, from `_sg_dphi_dm_reference` (Phase 3.C spec D4, D9).
+`SuperGaussian(m)`'s public constructor computes its `slice` from `SG_TABLE`, and, when `m`
+carries a dual, its `dm_slice` from `SG_DM_TABLE`; `_sg_uncached(m)`, used only by the two
+generators above, never touches either table. **`SG_TABLE` is bound first**: `SuperGaussian
+(m::Real)`'s promotion reads `eltype(SG_TABLE.coeffs)`, so `SG_DM_TABLE`'s declaration must not
+be swapped ahead of it (Phase 3.C spec D9).
 """
-const SG_TABLE = _sg_build_table()
+const SG_TABLE = _sg_build_table(_sg_principal_value, SG_PANEL_EDGES, SG_FIT_TOL,
+                                  SG_M_LO, SG_M_HI, SG_XI_MAX)
+const SG_DM_TABLE = _sg_build_table(_sg_dphi_dm_reference, SG_PANEL_EDGES, SG_DM_FIT_TOL,
+                                     SG_M_LO, SG_M_HI, SG_XI_MAX)

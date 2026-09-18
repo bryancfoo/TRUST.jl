@@ -77,6 +77,22 @@ the odd first moment `∫xφ dx = 0` holds by symmetry for any `x₀ > 0`):
 `v₀ (foo2026 Eq. 12) = v_p (PACM Eq. 19) = x₀(m)·v_th`: both papers' widths are the package's
 `x₀(m)` scaled by the package's own thermal speed.
 
+**Independent confirmation (Turnbull et al., PRL 136, 135101 (2026), `context/turnbull2026.pdf`
+Eq. 4), added at Phase 3.C Step 3.C.4** ([OQ-32](../../dev/open_questions.md#oq-32)). Turnbull
+Eq. 4 writes the same isotropic 3-D super-Gaussian, in full 3-D form rather than the package's
+1-D marginal: `f_e(v) = C_m exp[−(v/v_m)^m]`, with `v_m² = (3T_e/M_e)[Γ(3/m)/Γ(5/m)]` and
+`C_m = (n_e/4π)·[m/(Γ(3/m) v_m³)]`. **The width agrees exactly**: substituting the package's
+`x₀(m)² = (3/2)Γ(3/m)/Γ(5/m)` and `v_th² = 2T/m_s` gives
+`(x₀ v_th)² = (3/2)(Γ(3/m)/Γ(5/m))·(2T/m_s) = (3T/m_s)Γ(3/m)/Γ(5/m)`, identical to Turnbull's
+`v_m²` with `M_e = m_s`, `T_e = T` — so Turnbull's `v_m` is exactly the package's `x₀(m)·v_th`,
+independently of PACM. `C_m` is the *3-D* normalization (`∫F(v) d³v = n_e`, the `4π` and `v_m³`
+being the solid-angle and volume factors the package's dimensionless 1-D `C(m)` has already
+integrated out) rather than a value directly comparable to `C(m)`; it is self-consistent with
+`v_m` under the standard 3-D generalized-Gaussian normalization
+`∫₀^∞ v² exp[−(v/v_m)^m] dv = (v_m³/m)Γ(3/m)`, the same integral PACM's own marginalization
+starts from. The two sources therefore agree on the shape and its width from independent
+derivations, three years apart.
+
 ## 3. `φ′`, the moments, and `𝒞φ(0)`
 
 Differentiating `Γ(2/m, |x/x₀|^m)` with respect to `x` through the elementary rule
@@ -193,6 +209,14 @@ forcing the power term `|x/x₀|^m` to an exact zero of the promoted type whenev
 `x = 0` when `m` is plain (needed for the second-derivative removable-singularity subtraction
 inside `_cauchy_real`, Section 8) while never evaluating `0^{dual\ m}`.
 
+**Added at Phase 3.C Step 3.C.4.** `_dgamma_da`'s quadrature — the a-partial rule above — is now
+**both** the reference and the generator for a second table, Section 7a's `SG_DM_TABLE`, exactly
+as `_cauchy_real`'s quadrature is the reference and generator for `SG_TABLE` (Section 7): it is
+not deleted and it is not sped up. Inside `SG_DM_TABLE`'s domain, a dual `m` is served from that
+table by one Clenshaw evaluation in `|x|` instead of by this quadrature (`SuperGaussian`'s
+`_sg_call`); outside it, or for a nested dual in `m`, this method still runs, unchanged, as the
+documented slow fallback.
+
 ## 7. The table (Step 1.SG.2)
 
 **The domain.** `R(ξ; m) = P∫ φ'(x; m)/(x−ξ) dx`, the real (principal-value) part of `𝒞φ` on the
@@ -297,6 +321,138 @@ recurrence, the dual-number paths, the adaptive-fit machinery) rather than by th
 size or the cost of running `_sg_build_table()` at precompile time (0.2–0.3 s of the 3.0 s).
 Shrinking the table further would not be expected to move this number appreciably. See the
 hand-off report for the go/no-go judgement this is input to.
+
+## 7a. The m-partial table, `SG_DM_TABLE` (Phase 3.C Step 3.C.4)
+
+**Why a second table, in this section's own form.** `∂Γ(a, t)/∂a` has no closed form, and
+`t = |x/x₀(m)|^m` depends on `x`, so the a-partial quadrature `_dgamma_da` (Section 6) cannot be
+hoisted out of the wavelength loop the way a per-species constant can: it ran once per
+(bin, wavelength, species) whenever `m` carried partials, 93% of the EPW Jacobian at Phase 3's
+close. The fix is the same one Section 7 already uses for the *value* path: tabulate, at include
+time, by the same Chebyshev machinery, with the quadrature demoted to reference and generator.
+
+**The domain and panels — the same as `SG_TABLE`'s, by decision (spec D4).** `|x| ∈ [0, 10]`
+(`SG_XI_MAX`) `× m ∈ [1.5, 8]` (`SG_M_LO`, `SG_M_HI`), the default panel edges
+`(0, 0.25, 0.5, 1, 2, 4, 10)` (`SG_PANEL_EDGES`), the same adaptive degree rule and the same caps
+(`SG_DEGREE_START = 8`, `SG_DEGREE_CAP_XI = 64`, `SG_DEGREE_CAP_M = 48`, `SG_BISECT_MAX = 4`).
+One domain buys one domain story: inside it, a table lookup; outside it, the quadrature fallback,
+correct, slow, and documented (Section 6). Beyond `|x| = 10` the partial is below any floor
+anyway (`φ(10; 1.5) ≈ e^{−50}`), and the EPW problem's largest `|ξ|` measured is 4.29, so a fit
+never leaves the domain.
+
+**The panels and degrees, as built (this machine, 2026-09-18).** No panel needed to bisect, and
+the ξ-direction degrees came out identical to `SG_TABLE`'s own:
+
+| Panel | `[a, b]` | `n_ξ` |
+|---|---|---|
+| 1 | [0, 0.25] | 32 |
+| 2 | [0.25, 0.5] | 16 |
+| 3 | [0.5, 1] | 16 |
+| 4 | [1, 2] | 32 |
+| 5 | [2, 4] | 64 |
+| 6 | [4, 10] | 32 |
+
+with one global **`n_m = 48`** (`SG_TABLE`'s own is 32 — the m-partial needs a higher m-degree,
+and this is exactly `SG_DEGREE_CAP_M`, the cap) and slice length `L = Σ(n_ξ+1) = 198` (the same
+number as `SG_TABLE`'s, coincidentally, since the ξ-degrees match panel for panel). **`n_m`
+reaching its cap is not itself a finding** (D4: "a cap that is reached is not a finding; a flag
+that is false is") — `m_converged` is `true`, meaning the trailing-coefficient check passed
+*at* 48, not that it was still failing when the loop stopped. `xi_converged` is `true` on every
+panel. `Base.summarysize(SG_DM_TABLE)` is **78 158 bytes** (`SG_TABLE`'s is 52 814 — larger
+because of the wider m-degree, 49 columns per slice entry against 33).
+
+**τ's escalation history (spec D4).** `SG_DM_FIT_TOL` started at `1e-10` — the 1e-9 accuracy
+target with one order of margin, one order tighter than `SG_TABLE`'s own `1e-9` because the
+generator here (`_dgamma_da`, `rtol = 1e-12`) is itself one order more accurate than `SG_TABLE`'s
+generator (`_cauchy_real`, `CAUCHY_RTOL = 1e-10`) — and **passed on the first try**: DM3 (500
+seeded points) measured a worst absolute error of **9.96 × 10⁻¹³** at `(x ≈ 0.0116, m ≈ 1.678)`,
+DM5 (the m = 2 `expint` oracle) **3.20 × 10⁻¹⁴**, and DM6 (the twelve-point BigFloat oracle) a
+worst relative error of **1.58 × 10⁻¹⁴** — all several orders inside the 1e-9 target, so no
+escalation to the 1e-11 floor was needed or attempted. **`SG_DM_FIT_TOL` is pinned at `1e-10`.**
+
+**The error map's own caveat, exactly Section 7's TB13 for this table.** DM3's *floor-normalized*
+ratio `|tv−rv|/max(|rv|, 1e-9)` — reported, never asserted, for the same reason TB13's is — spikes
+to `6.95 × 10⁻⁸` at `(x ≈ 4.24, m ≈ 3.98)`, which looks alarming next to the 1e-9 target until the
+raw numbers are read: there, the generator itself is `−7.17 × 10⁻³⁴` (the m-partial has decayed
+to double-precision underflow scale in the far tail) and the table gives `−6.95 × 10⁻¹⁷`, an
+*absolute* difference of `6.95 × 10⁻¹⁷` — a floor-division artifact of two numbers both
+indistinguishable from zero at working precision, not a real accuracy problem. This is the same
+phenomenon Section 7's TB13 documents for `R`'s own error map, for the same reason: a pure
+relative comparison is unsatisfiable near a value that is itself near zero.
+
+**The x = 0 caveat (spec D3's argument, restated for this table).** Writing `a = 2/m`,
+`t = |x/x₀|^m`, the lower incomplete gamma's series gives
+`φ = C Γ(a) − C|x/x₀|²/a + C|x/x₀|^{2+m}/(1+a) − …`, so `φ`'s first non-analytic term in `|x|` is
+`|x|^{2+m}` and `∂φ/∂m`'s is **`|x|^{2+m} ln|x|`** — one order milder in `|x|` than `SG_TABLE`'s
+own non-analyticity at `ξ = 0` (about `|ξ|^{m+1}`, D3's analysis when the option was chosen over
+tabulating `∂Γ(a,t)/∂a` directly on `(a, t)`, where the same object carries the *harder*
+`t^{1/4} ln t` at `t = 0`, `a` as small as 1/4 at `m = 8`). The graded panels already handle this
+class of singularity for `SG_TABLE`; DM9 checks the table's assembled call reproduces the exact
+`x = 0` closed form `dφ/dm(0) = C′(m)Γ(a) − (2C(m)/m²)Γ(a)ψ(a)` (D8) directly, at every test `m`,
+to `1e-9` relative — it passed at every point measured (session of 2026-09-18).
+
+**Build and evaluation cost, this machine (Windows 11, Julia 1.12.7; SpecialFunctions 2.9.0,
+QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1), 2026-09-18, both tables warm
+(post-precompile) and each the second of two consecutive calls to `_sg_build_table` with its own
+sampler:**
+
+| Quantity | Kind | `SG_TABLE` | `SG_DM_TABLE` |
+|---|---|---|---|
+| Reference evaluations | count | 6 534 | 12 856 |
+| Build time | latency | ≈ 0.46–0.51 s | ≈ 0.27–0.30 s |
+| Both tables built together | latency | — | ≈ 0.56–0.58 s (budget: < 10 s) |
+| `Base.summarysize` | size | 52 814 B | 78 158 B |
+| Package warm load, before → after this chunk | latency | 2.703 s → 2.831–2.838 s | Δ ≈ +0.13 s (budget: Δ < 1 s) |
+
+`SG_DM_TABLE`'s build is *faster* than `SG_TABLE`'s despite reaching a wider m-degree and nearly
+double the reference-evaluation count: `_dgamma_da`'s single shifted-variable quadrature per
+sample is cheaper than `_cauchy_real`'s three (`_cauchy_real` runs a main window plus two
+infinite tails per point at `CAUCHY_RTOL`, against one bounded-to-infinite `quadgk` call per point
+here). Both are comfortably inside the include-time budget and the warm-load budget alike.
+
+**φ and `spectral_density` throughput (this machine, this session; every figure is a throughput
+over a warm loop, never a single-call latency, rule 8.7):**
+
+| Call | Kind | Plain | Dual `x` / T (plain `m`) | Dual `m` |
+|---|---|---|---|---|
+| φ | throughput | ≈ 133 ns | ≈ 151–233 ns | ≈ 227–323 ns (**table path**, not the quadrature) |
+| `spectral_density` (3 partials) | throughput | 0.821 µs | 1.066 µs (T-dual) | **1.455 µs** (m-dual) |
+
+The `spectral_density` row is **the number the whole phase exists to fix**: before Step 3.C.4 an
+m-dual call cost 11.2 µs against 0.498 µs T-dual (≈ 22.5× — the quadrature in the inner loop);
+here it is 1.455 µs against 1.066 µs T-dual, a ratio of **≈ 1.37×**, matching D11's own prediction
+of "about 1.2× expected after" to the same order. `@allocated` of φ and of `spectrum!` (a 512-bin
+axis, `m` carrying partials) is **0** at a dual `m` (DM11, DM12) — the quadrature this replaces
+allocated 1 504 B a call. The absolute figures above run higher than Phase 1.SG's own historical
+ones (66.1 ns / 84.7 ns plain / dual-x) on every column, plain included, and by a similar factor —
+consistent with ordinary session-to-session variation on this shared machine
+(`conventions.md` 8.6 records this rather than investigating it), not a regression on any path
+this chunk did not touch.
+
+**Construction cost.** `SuperGaussian(m)` at a dual `m` now computes *two* slices where it used
+to compute one, and this shows up plainly at construction (this session; N = 50 000 loop,
+`ForwardDiff` chunk sizes 1/4/8/12): plain **10.77 µs**; dual `m` **46.0 / 79.6 / 91.4 / 103.7 µs**
+at chunk 1/4/8/12. The dual/plain ratio at chunk 1 is now ≈ 4.3×, against Phase 1.SG's own
+≈ 1.7× (9.4 µs / 5.53 µs) — the deliberate, accepted cost D6 item 1 names: building the m-partial
+slice on every dual-`m` construction is exactly what buys the call-site speedup above, and `LM = 0`
+on every plain-`m` shape (D6) is what keeps this cost off the value-only path entirely, where
+Phase 1.SG's own measurement still applies unchanged.
+
+**Two whole-pass figures.** A 512-bin `spectrum` m-gradient pass now costs **≈ 2.0×** a plain
+pass (was 28.5×) against a T_e-gradient pass at **≈ 1.48×** (Phase 1.SG's own figure, on
+T_e-gradient code this chunk does not touch, was 2.2× — again read as session variance, not a
+regression, since nothing on that path changed). And **the EPW 128 × 32 `jacobian` with `m_e`
+fitted now costs 11.85 ms, against 6.65 ms with `m_e` fixed** (chunk 14's own baseline: 37.7 ms
+fitted, 10.6 ms fixed) — the fitted/fixed ratio falls from ≈ 3.56× to ≈ 1.78×. This is the
+measurement Phase 3.C exists to produce.
+
+**The two oracles.** The m = 2 closed form (`Γ(1, t) = e^{−t}`, `Γ_a(1, t) = e^{−t}\ln t + E₁(t)`
+with `SpecialFunctions.expint`, sharing nothing with `_dgamma_da`) and a twelve-point `BigFloat`
+oracle that computes both `∫_t^∞ s^{a−1}e^{−s}ds` and `∫_t^∞ s^{a−1}\ln(s)e^{−s}ds` itself by
+`quadgk` at `atol = 1e-60`, assembled with `BigFloat` `gamma`/`digamma` and the closed forms above
+— both agree with the generator to a few parts in 10⁻¹⁴ (DM5, DM6), an independent confirmation
+at rule 8.2's two chosen anchors: `m = 2` exactly, and a handful of points spanning the panels and
+both m edges.
 
 ## 8. `_cauchy_real`'s breakpoint (spec D8)
 

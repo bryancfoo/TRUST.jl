@@ -57,8 +57,8 @@ end
 # quadrature path unconditionally, so SS4 can check the shape and the geometry are right
 # *before* SS5 blames the table for anything (spec Section 9's pitfall 5). Every other part of
 # the shape interface delegates to the wrapped SuperGaussian unchanged.
-struct _ReferencePathSG{FT,L} <: OTIS.AbstractVelocityDistribution
-    inner::SuperGaussian{FT,L}
+struct _ReferencePathSG{FT,L,LM} <: OTIS.AbstractVelocityDistribution
+    inner::SuperGaussian{FT,L,LM}
 end
 (w::_ReferencePathSG)(x) = w.inner(x)
 OTIS.dfdx(w::_ReferencePathSG, x) = OTIS.dfdx(w.inner, x)
