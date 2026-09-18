@@ -57,17 +57,18 @@ reproduced.
 
 The three foo2026 reproductions (Step 3.7) are tested cut down to a 128 × 32 grid
 (`test/slow/test_reproduce.jl`, run by hand); full resolution (512 × 256) is `examples/`.
-**The full-resolution EPW reproduction is deferred to Phase 3.SG**, a phase to be designed
-separately with Level 1 — fitting the super-Gaussian exponent spends about 93% of the Jacobian
-in an adaptive quadrature, which makes it too slow for this phase's decks as they stand; it is
-not done, and it did not fail, it was not attempted at full resolution. A full-resolution run of
+**The full-resolution EPW reproduction is deferred to Phase 3.C** — fitting the super-Gaussian
+exponent spends about 93% of the Jacobian in an adaptive quadrature, which makes it too slow
+for this phase's decks as they stand; it is not done, and it did not fail, it was not attempted
+at full resolution. A full-resolution run of
 the two Maxwellian problems was attempted and found impractical in one sitting: even with plain
 `lbfgs` in place of the paper's own two-phase procedure, a single fit did not converge inside
 1000 iterations, so a seven-point scan is many times a fifteen-minute budget
 (`dev/reports/phase3_report.md`, Chunk 14). Step 3.8 adds `WarpMap` and `dewarp`, the OMEGA
 streak's geometric correction, built and tested against a synthetic warp; no real OMEGA streak
-was available this chunk, so a first fit of one has not been run. Phase 3.SG, then Phase 4, the
-extensions, are next. The roadmap is kept outside this tree.
+was available this chunk, so a first fit of one has not been run. Phase 3.C, convergence and
+the shape-parameter derivative, then Phase 4, the extensions, are next. The roadmap is kept
+outside this tree.
 
 ## Installing and testing
 

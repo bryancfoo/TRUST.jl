@@ -530,14 +530,18 @@ end
 
 @testset "DK10: the registry has no if name == chain" begin
     configdir = joinpath(@__DIR__, "..", "..", "src", "config")
+    found = String[]
     for file in readdir(configdir)
         endswith(file, ".jl") || continue
-        for line in eachline(joinpath(configdir, file))
+        path = joinpath(configdir, file)
+        for (lineno, line) in enumerate(eachline(path))
             code = split(line, '#'; limit=2)[1]
-            @test !occursin("if name ==", code)
-            @test !occursin("elseif name ==", code)
+            if occursin("if name ==", code) || occursin("elseif name ==", code)
+                push!(found, "$path:$lineno: $(strip(line))")
+            end
         end
     end
+    @test isempty(found)
 end
 
 # ------------------------------------------------------------------------------------------
