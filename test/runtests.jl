@@ -41,6 +41,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("SuperGaussian m-derivative")
         @safetestset "SuperGaussian m-derivative" begin include("distributions/test_supergaussian_dm.jl") end
     end
+    if _wanted("shape cost")
+        @safetestset "shape cost" begin include("distributions/test_shape_cost.jl") end
+    end
     if _wanted("species")
         @safetestset "species" begin include("plasma/test_species.jl") end
     end

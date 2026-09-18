@@ -105,3 +105,41 @@ decay and, per spec D9, for the heavier-tailed shapes arriving at Step 1.SG.1.
 integral is served, on the real axis and inside a domain in `(ξ, m)`, from a Chebyshev table
 built at precompile time (Step 1.SG.2); the generic quadrature fallback above remains its
 reference method and the table's own generator.
+
+## 6. A shape's derivative in its own parameters
+
+`conventions.md` Section 4's `AbstractVelocityDistribution` entry carries the contract every
+shape is built against: **"A shape's derivative with respect to each of its own parameters is
+available without numerical quadrature, by closed form or by a table built at include time"**
+(the user, 2026-09-17, [OQ-38](../../dev/open_questions.md#oq-38)); **"the guard:
+`spectral_density` under a dual in each parameter of every shape in `SHAPE_REGISTRY` allocates
+zero and costs at most 5× the same call under a dual in T"** (`conventions.md` 8.7's one
+admitted ratio assertion, amended 2026-09-17,
+[OQ-39](../../dev/open_questions.md#oq-39)). This section names which route each shape takes and
+points at the guard that checks it, rather than restating the clause: it lives in
+`test/distributions/test_shape_cost.jl`, gated `"shape cost"`, tests SC1-SC4 of
+`dev/phase3C_instructions.md` Section 8.
+
+**`Maxwellian`** meets the contract trivially: `parameters(f) = NamedTuple()`, so there is
+nothing to differentiate. The guard's loop is vacuous for it, and SC1 reports that fact rather
+than letting it pass silently.
+
+**`SuperGaussian`** meets it by table, built at Step 3.C.4 and derived in full in
+`docs/derivations/supergaussian.md` Section 7a. `∂φ/∂m` is served, inside `SG_DM_TABLE`'s domain
+(the same `(|x|, m) ∈ [0, 10] × [1.5, 8]` as the Cauchy table `SG_TABLE`), from a second
+Chebyshev table built at include time. The quadrature form — `∂φ/∂m` obtained by
+`ForwardDiff.derivative` through the generic call path, which runs `_dgamma_da`'s adaptive
+quadrature — remains both the table's reference and its generator, and, outside the domain, the
+documented slow fallback: exactly the role the Cauchy integral's own quadrature fallback plays
+in Section 4 above. Neither quadrature is deleted or sped up; the contract is met by not calling
+it on the fast path, not by making it faster.
+
+**`Kappa` and `HermiteExpansion`** (Step 4.2, not yet built) are expected, as an expectation and
+not a claim, to meet the contract in closed form: kappa's κ-derivative through
+`exp(−κ log(…))`, with `digamma` for `x₀(κ)`'s own derivative; Hermite's coefficients entering
+`φ` linearly, so each one's derivative is just the corresponding basis function. **The guard
+checks this expectation rather than assuming it**: `test_shape_cost.jl`'s `SC1` fails the
+instant either shape is registered in `SHAPE_REGISTRY` without a matching entry in the test's own
+`_SC_SHAPES` table, at a representative parameter value inside its own valid range, so a slow or
+allocating parameter derivative is a test failure on the day it is written — not a profile
+finding three phases later, which is what happened to `SuperGaussian`'s.
