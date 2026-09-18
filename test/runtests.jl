@@ -77,6 +77,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("optimizers")
         @safetestset "optimizers" begin include("inversion/test_optimizers.jl") end
     end
+    if _wanted("optimizer diagnostics")
+        @safetestset "optimizer diagnostics" begin include("inversion/test_optimizers_diagnostics.jl") end
+    end
     if _wanted("weight scan")
         @safetestset "weight scan" begin include("inversion/test_weight_scan.jl") end
     end

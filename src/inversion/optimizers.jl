@@ -92,8 +92,36 @@ end
 const _TRAJECTORY_ROW = NamedTuple{(:iteration, :objective, :chi2, :R),NTuple{4,Float64}}
 
 """
+    _count_near_bound(pspec, y) -> Int
+
+The count of fitted coordinates whose **x**-space value (`_from_unconstrained(y[i], v.lower,
+v.upper)`) is within `BOUND_PROXIMITY_TOL` of a bound (`_near_bound`, the same helper
+`FitResult.near_bound` uses), walking every per-bin entry (`pspec.bin_entries`/`bin_slots`) and
+every global entry (`pspec.global_entries`/`global_slots`) exactly once -- together the whole of
+`y` (`_build_index_map`, `parameters.jl`). Step 3.C.1's `g_trace` hook (D13); not part of D27's own
+signature, Level 3's helper, flagged under rule 11 zero.
+"""
+function _count_near_bound(pspec::ParameterSpec, y::AbstractVector)
+    n = 0
+    for (j, entries) in enumerate(pspec.bin_entries)
+        slots = pspec.bin_slots[j]
+        for (k, idx) in enumerate(entries)
+            v = pspec.variables[slots[k]]
+            x = _from_unconstrained(y[idx], v.lower, v.upper)
+            _near_bound(x, v.lower, v.upper) && (n += 1)
+        end
+    end
+    for (k, idx) in enumerate(pspec.global_entries)
+        v = pspec.variables[pspec.global_slots[k]]
+        x = _from_unconstrained(y[idx], v.lower, v.upper)
+        _near_bound(x, v.lower, v.upper) && (n += 1)
+    end
+    return n
+end
+
+"""
     _build_result(problem, theta, objective_value, trajectory, converged, status, iterations,
-                  f_calls, g_calls, elapsed, name) -> FitResult
+                  f_calls, g_calls, elapsed, name; termination = :none) -> FitResult
 
 Assembles the `FitResult` every `solve` method below returns (D26): `values`/`near_bound` from
 `_value_table`/`_near_bound` (D13) over every entry of `pspec.variables` (frozen or not, OB5) and
@@ -102,12 +130,14 @@ freshly evaluated at `theta` (D25). **`objective` is the caller's own already-co
 recomputed as `chi2 + weight * R`**: the two agree only to `1e-14` relative (OB1, OB2), not
 bitwise, while OP7 and OP10 require the returned `objective` to be `===` the trajectory's own
 recorded value at the same iterate -- so it must be threaded through, not rebuilt from the split.
-Not part of D26-D30's own signatures; Level 3's helper, shared by all four `solve` methods below
-and flagged under rule 11 zero.
+`termination` defaults to `:none`, which is what `LevenbergMarquardt` and `NoisyGradientDescent`
+get (Step 3.C.1, D13); `LBFGS` and `OptimizerSequence` pass their own. Not part of D26-D30's own
+signatures; Level 3's helper, shared by all four `solve` methods below and flagged under rule 11
+zero.
 """
 function _build_result(problem::FitProblem, theta::AbstractVector{Float64}, objective_value::Float64,
     trajectory::Vector{_TRAJECTORY_ROW}, converged::Bool, status::Symbol, iterations::Int,
-    f_calls::Int, g_calls::Int, elapsed::Float64, name::AbstractString)
+    f_calls::Int, g_calls::Int, elapsed::Float64, name::AbstractString; termination::Symbol=:none)
     pspec = problem.pspec
     nvar = length(pspec.variables)
     vtable = _value_table(pspec, theta)
@@ -141,7 +171,7 @@ function _build_result(problem::FitProblem, theta::AbstractVector{Float64}, obje
 
     return FitResult(Vector{Float64}(theta), fitted, pspec, values, near_bound, c2, Rval,
         objective_value, weight, term_values, problem.npixels, trajectory, converged, status,
-        iterations, f_calls, g_calls, elapsed, String(name))
+        termination, iterations, f_calls, g_calls, elapsed, String(name))
 end
 
 # ------------------------------------------------------------------------------------------
@@ -180,7 +210,8 @@ Base.@kwdef struct LBFGS <: AbstractOptimizer
 end
 
 """
-    solve(problem::FitProblem, opt::LBFGS; start = flatten(problem.pspec)) -> FitResult
+    solve(problem::FitProblem, opt::LBFGS; start = flatten(problem.pspec),
+          g_trace::Union{Nothing,Vector} = nothing) -> FitResult
 
 Runs Optim's L-BFGS on `objective`/`_objective_and_gradient!` (D26) through
 `Optim.OnceDifferentiable(f, g!, fg!, start)` with a **two**-argument `fg!(G, y) -> F` (D2, D27):
@@ -193,11 +224,23 @@ iteration, since Optim's own trace and callback state expose only the combined `
 split. Status is read off Optim's own accessors, none of which is exported (Pitfall 21):
 `Optim.g_converged` -> `:gradient_norm`, `Optim.f_converged` -> `:f_tolerance`,
 `Optim.x_converged` -> `:x_tolerance`, `Optim.iteration_limit_reached` -> `:iterations`,
-otherwise `:failed`.
+otherwise `:failed`. `FitResult.termination` is Optim's own finer code,
+`Symbol(string(Optim.termination_code(res)))` (D13, D14).
 
-Spec D27.
+`g_trace`, given a `Vector`, has one named tuple `(iteration, gnorm_inf, gnorm_2, near_bound)`
+pushed per recorded iteration, from inside the same callback the trajectory uses and on the same
+counter, so `g_trace[k]` and `trajectory[k]` are the same iteration (Step 3.C.1, D13):
+`gnorm_inf`/`gnorm_2` from `state.g_x` (the gradient at `state.x`, D14 -- `LBFGSState` has no
+`iteration` field, which is why the counter `solve` already keeps is reused rather than read off
+`state`); `near_bound` is `_count_near_bound(problem.pspec, state.x)`, the count of coordinates
+whose **x**-space value is within `BOUND_PROXIMITY_TOL` of a bound. A test hook that changes
+nothing about the default call shape, on the same footing as `LevenbergMarquardt`'s `mu_trace` and
+`NoisyGradientDescent`'s `y_trace`.
+
+Spec D27, D13.
 """
-function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(problem.pspec))
+function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(problem.pspec),
+    g_trace::Union{Nothing,Vector}=nothing)
     t0 = time()
     y0 = Vector{Float64}(start)
 
@@ -212,6 +255,11 @@ function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(pr
         chi2v, Rval = _chi2_and_R(problem, state.x)
         push!(trajectory, (iteration=Float64(iter_counter[]), objective=Float64(state.f_x),
             chi2=Float64(chi2v), R=Float64(Rval)))
+        if g_trace !== nothing
+            push!(g_trace, (iteration=iter_counter[], gnorm_inf=maximum(abs, state.g_x),
+                gnorm_2=sqrt(sum(abs2, state.g_x)),
+                near_bound=_count_near_bound(problem.pspec, state.x)))
+        end
         iter_counter[] += 1
         return false
     end
@@ -221,6 +269,8 @@ function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(pr
         Optim.Options(; g_abstol=opt.g_abstol, x_reltol=opt.x_reltol, f_reltol=opt.f_reltol,
             iterations=opt.iterations, time_limit=opt.time_limit,
             store_trace=true, extended_trace=true, callback=_lbfgs_callback))
+
+    termination = Symbol(string(Optim.termination_code(res)))
 
     status = if Optim.g_converged(res)
         :gradient_norm
@@ -237,7 +287,8 @@ function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(pr
     theta = Optim.minimizer(res)
     elapsed = time() - t0
     return _build_result(problem, theta, Optim.minimum(res), trajectory, Optim.converged(res),
-        status, Optim.iterations(res), Optim.f_calls(res), Optim.g_calls(res), elapsed, "lbfgs")
+        status, Optim.iterations(res), Optim.f_calls(res), Optim.g_calls(res), elapsed, "lbfgs";
+        termination=termination)
 end
 
 Base.show(io::IO, opt::LBFGS) = print(io, "LBFGS(m = ", opt.m, ", g_abstol = ", opt.g_abstol,
@@ -555,12 +606,12 @@ _optimizer_short_name(::NoisyGradientDescent) = "noisy_descent"
 Runs `members` in order, each warm-started from the previous member's own minimizer -- its
 **best** iterate, not necessarily its last one (D29) -- and returns one `FitResult` whose
 `trajectory` is the members' own trajectories concatenated, with the iteration counter continuing
-across the join, and whose `converged`/`status` are the **last** member's (D30). `iterations` is
-the length of the concatenated trajectory minus one, and `f_calls`/`g_calls` are totals across
-every member: D30 states only that `converged`/`status` follow the last member, so this is Level
-3's reading of the rest, flagged under rule 11 zero.
+across the join, and whose `converged`/`status`/`termination` are the **last** member's (D30, D13).
+`iterations` is the length of the concatenated trajectory minus one, and `f_calls`/`g_calls` are
+totals across every member: D30 states only that `converged`/`status` follow the last member, so
+this is Level 3's reading of the rest, flagged under rule 11 zero.
 
-Spec D30.
+Spec D30, D13.
 """
 struct OptimizerSequence{T<:Tuple} <: AbstractOptimizer
     members::T
@@ -603,7 +654,8 @@ function solve(problem::FitProblem, opt::OptimizerSequence;
     elapsed = time() - t0
     name = _optimizer_short_name(opt)
     return _build_result(problem, result.theta, result.objective, combined, result.converged,
-        result.status, length(combined) - 1, total_f_calls, total_g_calls, elapsed, name)
+        result.status, length(combined) - 1, total_f_calls, total_g_calls, elapsed, name;
+        termination=result.termination)
 end
 
 Base.show(io::IO, opt::OptimizerSequence) = print(io, "OptimizerSequence(",

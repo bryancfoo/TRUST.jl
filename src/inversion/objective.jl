@@ -82,10 +82,14 @@ The outcome of one fit (D26): everything chunks 9 to 13 fill in or read back out
 - `npixels`: `problem.npixels`.
 - `trajectory`: one entry per recorded iteration, `(iteration, objective, chi2, R)`.
 - `converged`, `status`, `iterations`, `f_calls`, `g_calls`: the optimizer's own report.
+- `termination`: Optim's own finer status for `LBFGS` (`Symbol(string(Optim.termination_code(res)))`,
+  e.g. `:GradientNorm`, `:SmallObjectiveChange`, `:Iterations`), `:none` for the three optimizers
+  OTIS writes itself, and the **last member's** for `OptimizerSequence` (Step 3.C.1, D13). Not
+  written to the result file at this step (D17).
 - `elapsed`: wall time of the fit, in seconds.
 - `optimizer`: a short description of what ran, e.g. `"lbfgs"` or `"noisy_descent_lbfgs"`.
 
-Spec D26.
+Spec D26, D13.
 """
 struct FitResult{FT<:Real,E<:Experiment,P<:ParameterSpec}
     theta::Vector{FT}
@@ -102,6 +106,7 @@ struct FitResult{FT<:Real,E<:Experiment,P<:ParameterSpec}
     trajectory::Vector{NamedTuple{(:iteration, :objective, :chi2, :R),NTuple{4,Float64}}}
     converged::Bool
     status::Symbol
+    termination::Symbol
     iterations::Int
     f_calls::Int
     g_calls::Int

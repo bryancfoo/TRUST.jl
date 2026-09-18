@@ -648,3 +648,120 @@ function gradient!(g::AbstractVector, problem::FitProblem, theta::AbstractVector
     g .*= 2
     return g
 end
+
+# ------------------------------------------------------------------------------------------
+# Step 3.C.1, D16: the Gauss-Newton diagonal diag(J_full^T J_full) in y, one pass
+# ------------------------------------------------------------------------------------------
+
+"""
+    _weighted_sumabs2(w, u) -> Real
+
+`sum(w[r] * u[r]^2 for r in eachindex(w, u))`, allocation-light (no temporary array for `u.^2`):
+`_gauss_newton_diagonal`'s innermost reduction, called once per per-bin theta entry and once per
+kernel global.
+"""
+function _weighted_sumabs2(w::AbstractVector, u::AbstractVector)
+    s = zero(promote_type(eltype(w), eltype(u)))
+    @inbounds for r in eachindex(w, u)
+        s += w[r] * u[r]^2
+    end
+    return s
+end
+
+"""
+    _gauss_newton_diagonal(problem::FitProblem, Jac::FitJacobian) -> Vector{Float64}
+
+`d_i = sum_rows (d r_full / d y_i)^2` (D16), the diagonal of `J_full^T J_full` in the unconstrained
+`y` -- the diagonal preconditioner Step 3.C.3 would use, computed in one pass over `Jac`'s blocks
+and the two kinds of global columns, **never from a dense `J`** (807 MB on the full problem against
+a few MB of blocks). Follows `jvp!`'s own propagation exactly (D16 pitfall: "a diagonal that
+disagrees with them is the diagonal of a different matrix"): a per-bin or kernel-global column of
+`J_full` is `response .* ((Klambda-or-I) * Q * (Kt-or-I)^T) ./ sigma` before the mask, restricted to
+`problem.pixel_index`, and `Q`'s only nonzero column(s) are the ones `e_i` touches -- so `blocks[j]`
+and `kernel_globals[:,:,gk]` cannot be squared directly (as D16's own compressed English sketch
+reads if taken literally): the temporal IRF `Kt` spreads a single bin's column over every other
+bin's pixels (Pitfall 5, `JT6`), and `response`/`sigma` are not uniformly 1 on any deck this phase
+measures (P1's own `Sensitivity(scale = 1e-6)` alone is a 1e-12 factor). This function instead:
+
+- builds `invsig2[r,c] = 1/sigma[r,c]^2` at mask-true pixels and `0` elsewhere (`problem.sigma` and
+  `problem.pixel_index`, the one definition of the pixel order, D16), and `respsig2 = response.^2
+  .* invsig2`;
+- for each bin `j`: `U = Klambda === nothing ? blocks[j] : Klambda * blocks[j]` (one matmul, D17's
+  chain), then, for each of its entries `k` (`e_i`'s only nonzero `Q` column is `j`, so the entry's
+  residual-space column is `U[:,k]` alone, spread over every `c` by `Kt[c,j]` when `Kt` is present):
+  `Kt === nothing` gives `d_i = dot(respsig2[:,j], U[:,k].^2)`; `Kt` present gives
+  `d_i = dot(U[:,k].^2, respsig2 * Kt[:,j].^2)` (the `Kt`-spread column, precomputed once per bin
+  since it does not depend on `k`);
+  a per-bin-then-per-column loop, `_weighted_sumabs2` the reduction;
+- for each kernel global `gk` (`Q = kernel_globals[:,:,gk]`, already nonzero over every bin, D18):
+  `W = (Kt-or-I)^T` applied to `(Klambda-or-I) * Q`, exactly `jvp!`'s own two matmuls, then
+  `d += sum(respsig2 .* W.^2)`;
+- for each chain global `c` (`chain_globals[c]`, already the full `dM/dtheta_c` including its own
+  `Klambda`/`Kt`/`response` where the chain rule needs them, D19): `d += sum(invsig2 .*
+  chain_globals[c].^2)` -- no further propagation, since `jvp!` adds it to `W` directly;
+- for each regularizer triple `(row, col, coeff)` (`Jac.reg_rows`/`reg_cols`/`reg_coeffs`, D25,
+  already in theta-space, independent of the pixel/sigma weighting): `d[col] += coeff^2`.
+
+A theta index reachable from more than one of these (a variable that is both a kernel global and a
+chain global, D11; a column a regularizer term also touches) accumulates (`+=`), never overwrites.
+
+Nothing at Step 3.C.1 passes this to an optimizer; it is measured and printed (D16). Whether it
+becomes a preconditioner is Step 3.C.3's question. Not part of D16's own signature (given as a
+one-line summary, not a full algorithm); Level 3's implementation, verified against CV2's dense
+oracle (`jvp!` on unit vectors) and flagged under rule 11 zero.
+
+Spec D16.
+"""
+function _gauss_newton_diagonal(problem::FitProblem, Jac::FitJacobian)
+    pspec = problem.pspec
+    nlambda, nt, G = size(Jac.kernel_globals)
+    d = zeros(Float64, pspec.ntheta)
+
+    idx = problem.pixel_index
+    sig = problem.sigma
+    invsig2 = zeros(Float64, nlambda, nt)
+    @inbounds for k in eachindex(idx)
+        i = idx[k]
+        invsig2[i] = 1.0 / Float64(sig[i])^2
+    end
+    response2 = Float64.(Jac.response) .^ 2
+    respsig2 = response2 .* invsig2
+
+    # --- per-bin blocks ---
+    for j in 1:nt
+        bj = pspec.bin_entries[j]
+        isempty(bj) && continue
+        U = Jac.Klambda === nothing ? Jac.blocks[j] : Jac.Klambda * Jac.blocks[j]
+        if Jac.Kt === nothing
+            wcol = view(respsig2, :, j)
+            for (k, theta_idx) in enumerate(bj)
+                d[theta_idx] += _weighted_sumabs2(wcol, view(U, :, k))
+            end
+        else
+            colvec = respsig2 * abs2.(view(Jac.Kt, :, j))
+            for (k, theta_idx) in enumerate(bj)
+                d[theta_idx] += _weighted_sumabs2(colvec, view(U, :, k))
+            end
+        end
+    end
+
+    # --- kernel globals ---
+    for gk in 1:G
+        Q = Jac.kernel_globals[:, :, gk]
+        Wl = Jac.Klambda === nothing ? Q : Jac.Klambda * Q
+        W = Jac.Kt === nothing ? Wl : Wl * transpose(Jac.Kt)
+        d[Jac.kernel_global_idx[gk]] += sum(respsig2 .* abs2.(W))
+    end
+
+    # --- chain globals ---
+    for (c, theta_idx) in enumerate(Jac.chain_global_idx)
+        d[theta_idx] += sum(invsig2 .* abs2.(Jac.chain_globals[c]))
+    end
+
+    # --- regularizer rows ---
+    @inbounds for m in eachindex(Jac.reg_rows)
+        d[Jac.reg_cols[m]] += Float64(Jac.reg_coeffs[m])^2
+    end
+
+    return d
+end

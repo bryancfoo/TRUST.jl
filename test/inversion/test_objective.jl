@@ -282,7 +282,7 @@ end
     result = FitResult(theta, fitted, pspec, values, near_bound, c2, Rval, obj,
         reg.weight, term_values, problem.npixels,
         NamedTuple{(:iteration, :objective, :chi2, :R),NTuple{4,Float64}}[],
-        true, :gradient_norm, 0, 0, 0, 0.0, "test")
+        true, :gradient_norm, :none, 0, 0, 0, 0.0, "test")
 
     expected_names = Set(vcat([v.name for v in pspec.variables], [d.name for d in pspec.dependents]))
     @test Set(keys(result.values)) == expected_names
@@ -308,7 +308,7 @@ end
     result = FitResult(theta, fitted, pspec, values, near_bound, 1.0, 0.0, 1.0,
         0.0, Float64[], problem.npixels,
         NamedTuple{(:iteration, :objective, :chi2, :R),NTuple{4,Float64}}[],
-        true, :gradient_norm, 1, 1, 1, 0.1, "test")
+        true, :gradient_norm, :none, 1, 1, 1, 0.1, "test")
     str = sprint(show, MIME("text/plain"), result)
     @test occursin("T_D", str)
 end
