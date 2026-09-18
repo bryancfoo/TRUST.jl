@@ -94,3 +94,64 @@ const _RP_DECKS = (
         @test sort(collect(keys(deck.sections["fit_dependent"]))) == sort(dependents)
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# RP3: the three decks carry Table I's normalizations
+# ------------------------------------------------------------------------------------------
+#
+# Step 3.C.6a / D5: foo2026 Table I marks n_e, T_e, T_D and T_C "Relative", and D38's own table
+# cell was never updated to match its prose -- chunk 12 built the three decks from the stale
+# cell, carrying "initial" where Table I (and D5) call for "relative". This pins the correction
+# against silent reversion: the term selecting each deck's Table I "Relative" variables reads
+# normalization = "relative", the unit terms (m_e, f_D) are still "unit", and the flow terms
+# (u_D/u_C, u_pre, u_post) are still "absolute" with scale = 100.0 (Table I's 100 km/s).
+#
+# `read_deck` leaves `normalization` and `scale` as raw strings/numbers in
+# `deck.sections["regularizer"]["terms"]`, a Vector{Dict{String,Any}} -- the conversion to a
+# Symbol through NORMALIZATION_REGISTRY happens later, in build_problem's `_build_regularizer`
+# (config/deck.jl) -- so this test reads the deck's own strings directly, never a built
+# Regularizer. Violations are collected by deck and term (DK10's idiom, chunk 1) so a failure
+# names exactly which deck and which term regressed, rather than a bare @test false.
+
+const _RP3_RELATIVE_VARS = (
+    epw_ablation=("epw_ablation.toml", ["logn", "T_e"]),
+    iaw_multiflow=("iaw_multiflow.toml", ["T_D", "T_C"]),
+    iaw_shock=("iaw_shock.toml", ["T_D", "T_C"]),
+)
+
+@testset "RP3: the three decks carry Table I's normalizations" begin
+    found = String[]
+    for (name, relative_vars) in values(_RP3_RELATIVE_VARS)
+        path = joinpath(_RP_EXAMPLES_DIR, name)
+        terms = read_deck(path).sections["regularizer"]["terms"]
+
+        relative_terms = filter(t -> Set(t["select"]) == Set(relative_vars), terms)
+        if length(relative_terms) != 1
+            push!(found, "$name: expected exactly one term selecting $relative_vars, found $(length(relative_terms))")
+        else
+            norm = relative_terms[1]["normalization"]
+            norm == "relative" ||
+                push!(found, "$name: term selecting $relative_vars has normalization = \"$norm\", expected \"relative\"")
+        end
+
+        for t in terms
+            if t["normalization"] == "unit" && Set(t["select"]) == Set(relative_vars)
+                push!(found, "$name: term selecting $relative_vars is \"unit\", expected \"relative\"")
+            end
+        end
+
+        unit_terms = filter(t -> t["normalization"] == "unit", terms)
+        isempty(unit_terms) &&
+            push!(found, "$name: expected at least one \"unit\" term, found none")
+
+        # epw_ablation fits no flow variable, so it has no absolute term at all; the other two
+        # decks do (u_D/u_C, u_pre/u_post) -- check whichever absolute terms exist, not that any do.
+        absolute_terms = filter(t -> t["normalization"] == "absolute", terms)
+        for t in absolute_terms
+            scale = get(t, "scale", nothing)
+            scale == 100.0 ||
+                push!(found, "$name: absolute term selecting $(t["select"]) has scale = $scale, expected 100.0")
+        end
+    end
+    @test isempty(found)
+end

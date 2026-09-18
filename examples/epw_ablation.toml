@@ -1,8 +1,9 @@
 # foo2026 Section III.A / Table I: EPW ablation. Spec D38. Run examples/epw_ablation.jl once
 # first (`julia --project=. examples/epw_ablation.jl`) to write runs/epw_ablation_streak.jld2,
 # the synthetic streak this deck fits -- its sigma is already frozen at synthesis (OQ-14).
-# The [regularizer] normalizations (logn, T_e: initial; m_e: unit) and the weight follow spec
-# D38's table verbatim.
+# The [regularizer] normalizations follow foo2026 Table I: relative for the variables Table I
+# marks "Relative" (logn, T_e), unit for those it gives as 1.0 (m_e); the weight follows Table I
+# too (Step 3.C.6a, D5).
 
 deck_version = "otis-deck-1"
 
@@ -54,7 +55,7 @@ sigma = "supplied"
 [regularizer]
 weight = 2.0e-4
 terms = [
-  { select = ["logn", "T_e"], operator = "D2", normalization = "initial" },
+  { select = ["logn", "T_e"], operator = "D2", normalization = "relative" },
   { select = ["m_e"], operator = "D2", normalization = "unit" },
 ]
 

@@ -66,7 +66,7 @@ sigma = "supplied"
 weight = 5.0e-3
 terms = [
   { select = ["f_D"], operator = "D2", normalization = "unit" },
-  { select = ["T_D", "T_C"], operator = "D2", normalization = "initial" },
+  { select = ["T_D", "T_C"], operator = "D2", normalization = "relative" },
   { select = ["u_D", "u_C"], operator = "D2", normalization = "absolute", scale = 100.0 },
 ]
 
