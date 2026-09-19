@@ -118,11 +118,16 @@ plain `Dict`/array data (spec D20's `NamedTuple`), and IO6's round-trip test com
 **Only the ground-truth trace is written in Phase 2** (`examples/`, Step 2.5); Step 3.6 built the
 result writer below (roadmap Step 2.4, amended; `dev/phase2_overall_summary.md` A7).
 
-## 3. The result layout, `otis-result-1`
+## 3. The result layout, `otis-result-2`
+
+**Bumped from `otis-result-1` at Step 3.C.2 (D35)**, one bump carrying `fit/termination`,
+`fit/near_bound_fraction` and (with a scan) `scan/status` together, and joined within the same
+version by `scan/termination` at Step 3.C.3 (carried item 2) -- adding a dataset inside a version
+introduced by this same phase, before the phase closes, is not the second bump D35 forbade.
 
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-result-1"` | yes |
+| `layout_version` | `String` | scalar, `"otis-result-2"` | yes |
 | `meta/source` | `String` | free text | yes |
 | `meta/created` | `String` | ISO-8601 UTC, e.g. `"2026-09-15T12:00:00.000Z"` | yes |
 | `meta/created_unix` | `Float64` | seconds since the Unix epoch | yes |
@@ -148,9 +153,12 @@ result writer below (roadmap Step 2.4, amended; `dev/phase2_overall_summary.md` 
 | `fit/npixels`, `fit/iterations`, `fit/f_calls`, `fit/g_calls` | `Int64` | scalar | yes |
 | `fit/converged` | `UInt8` | scalar | yes |
 | `fit/status`, `fit/optimizer` | `String` | scalar | yes |
+| `fit/termination` | `String` | scalar, Optim's finer code (`:none` for the non-Optim optimizers) | yes |
+| `fit/near_bound_fraction` | `Float64` | scalar, `_near_bound_fraction(result)` | yes |
 | `fit/elapsed` | `Float64` | scalar, seconds | yes |
 | `trajectory/iteration` | `Int64` | `(n_iter)` | yes |
 | `trajectory/objective`, `trajectory/chi2`, `trajectory/R` | `Float64` | `(n_iter)` | yes |
+| `scan/status`, `scan/termination` | `String` | `(K)`, one entry per requested weight | with a scan |
 | `scan/weights` | `Float64` | `(K)` | only when a scan was written |
 | `scan/chi2`, `scan/R`, `scan/chi2_normalized`, `scan/R_normalized` | `Float64` | `(K)` | with a scan |
 | `scan/chi2_unreg`, `scan/R_unreg` | `Float64` | scalar | with a scan |

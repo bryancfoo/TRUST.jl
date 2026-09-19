@@ -200,6 +200,7 @@ end
         @test r.trajectory.R == [row.R for row in result.trajectory]
 
         @test r.scan.status == string.(getfield.(_RE_SCAN.results, :status))
+        @test r.scan.termination == string.(getfield.(_RE_SCAN.results, :termination))
         @test r.scan.weights == _RE_SCAN.weights
         @test r.scan.chi2 == _RE_SCAN.chi2
         @test r.scan.R == _RE_SCAN.R
@@ -286,6 +287,7 @@ end
         jldopen(with_scan, "r") do f
             @test haskey(f, "scan")
             @test f["scan/status"] == string.(getfield.(_RE_SCAN.results, :status))
+            @test f["scan/termination"] == string.(getfield.(_RE_SCAN.results, :termination))
             @test f["scan/weights"] == _RE_SCAN.weights
             @test f["scan/chi2"] == _RE_SCAN.chi2
             @test f["scan/R"] == _RE_SCAN.R

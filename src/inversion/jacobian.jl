@@ -765,3 +765,43 @@ function _gauss_newton_diagonal(problem::FitProblem, Jac::FitJacobian)
 
     return d
 end
+
+# ------------------------------------------------------------------------------------------
+# Step 3.C.3, D37: the floored diagonal -- the preconditioner's guard
+# ------------------------------------------------------------------------------------------
+
+"""
+    PRECOND_FLOOR_REL
+
+The relative floor `_gauss_newton_floor` applies to `_gauss_newton_diagonal`'s output before it is
+used as a preconditioner (D37): `1e-8`, so the preconditioner's dynamic range is capped at
+`1/PRECOND_FLOOR_REL = 1e8`. On the same footing as `BOUND_PROXIMITY_TOL`/`SATURATION_FRACTION`
+(`parameters.jl`), not exported.
+
+Spec D37.
+"""
+const PRECOND_FLOOR_REL = 1e-8
+
+"""
+    _gauss_newton_floor(d::AbstractVector{<:Real}) -> Union{Nothing,Vector{Float64}}
+
+`max.(d, PRECOND_FLOOR_REL * maximum(d))` (D37), floored **relative** to `d`'s own maximum, never
+absolute -- `d` carries the problem's own χ² scale, and a fixed absolute floor would mean a
+different thing on every problem. `EPW`'s Gauss-Newton diagonal has **82 exactly-zero entries** at
+its saturated point (chunk 5's report) and `1/(2*0)` is `Inf`; an `Inf` in a preconditioner's `P⁻¹`
+is an infinite step, so this must run before anything divides by `d`.
+
+Returns `nothing` when `maximum(d)` is zero or non-finite (every entry zero, or a `NaN`/`Inf`
+entry present, since `Base.max` propagates both through `maximum`'s pairwise reduction) -- a
+degenerate diagonal that cannot be floored relative to itself. The caller's own fallback (D37):
+at the very first build this means running unpreconditioned; at a later refresh it means keeping
+the previous preconditioner.
+
+Spec D37.
+"""
+function _gauss_newton_floor(d::AbstractVector{<:Real})
+    dmax = maximum(d)
+    (isfinite(dmax) && dmax > 0) || return nothing
+    floor_val = PRECOND_FLOOR_REL * dmax
+    return max.(Float64.(d), floor_val)
+end

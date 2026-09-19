@@ -113,7 +113,15 @@ end
 
 @testset "WS2: chi2 is non-decreasing and R non-increasing in Lambda" begin
     problem, start, truth = _ws_p2_problem()
-    opt = LBFGS()
+    # Step 3.C.3 carried item 1 (A13): WS2 asks whether weight_scan produces a monotone scan, not
+    # whether the *shipped default* does -- that question is CR1's -- exactly the precedent set for
+    # OP4 (Section 6's "OP rows updated where a default moved" license, used here for the same
+    # reason). At the shipped default (f_abstol_per_pixel = 1e-4, patience = 5) the slack the
+    # criterion allows is 1e3-1e4x this fixture's own chi2/R span, because this fixture's truth is
+    # a linear ramp under a D2 regularizer term and D2 of a straight line is zero -- the physical
+    # signal Lambda can move is tiny by construction, the worst case among this phase's fixtures.
+    # A tightened optimizer -- the same one OP4 uses -- makes the comparison meaningful.
+    opt = LBFGS(; f_abstol_per_pixel=1e-12, g_abstol_per_pixel=1e-12, patience=20, iterations=20_000)
     scan = weight_scan(problem, _WS_WEIGHTS, opt; start=start)
     @info "WS2" scan.chi2 scan.R
     # D33: a fit stops once O has decreased by less than f_abstol_per_pixel * npixels on each of
@@ -125,6 +133,12 @@ end
     # through Lambda * R.
     eps_O = opt.patience * opt.f_abstol_per_pixel * problem.npixels
     slack_chi2 = 2 * eps_O
+    span_chi2 = maximum(scan.chi2) - minimum(scan.chi2)
+    @info "WS2: is this test vacuous?" span_chi2 slack_chi2 signal_over_slack = (span_chi2 / slack_chi2)
+    # A monotonicity test whose slack exceeds its own signal is not a weak test, it is no test at
+    # all -- this assertion is what would have caught the shipped default's own 0.00016 ratio
+    # (chunk 7's report) had nobody measured it deliberately.
+    @test span_chi2 > slack_chi2
     for k in 1:3
         slack_R = 2 * eps_O / min(scan.weights[k], scan.weights[k+1])
         @test scan.chi2[k+1] >= scan.chi2[k] - slack_chi2
@@ -253,7 +267,10 @@ end
 
 @testset "CR7: WS2's slack is derived from the optimizer's own fields (D33)" begin
     problem, start, truth = _ws_p2_problem()
-    opt = LBFGS()
+    # The same tightened optimizer WS2 itself now uses (Step 3.C.3 carried item 1, A13) -- this
+    # row asserts the *derivation*, not a particular optimizer's fields, so it must read whichever
+    # optimizer WS2 actually runs.
+    opt = LBFGS(; f_abstol_per_pixel=1e-12, g_abstol_per_pixel=1e-12, patience=20, iterations=20_000)
     scan = weight_scan(problem, _WS_WEIGHTS, opt; start=start)
 
     eps_O = opt.patience * opt.f_abstol_per_pixel * problem.npixels

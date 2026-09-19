@@ -180,7 +180,8 @@ end
 
 """
     LBFGS(; m = 10, f_abstol_per_pixel = 1e-4, patience = 5, g_abstol_per_pixel = 1e-6,
-          x_reltol = 0.0, iterations = 20_000, time_limit = NaN)
+          x_reltol = 0.0, iterations = 20_000, time_limit = NaN,
+          precondition = true, precond_refresh = 25)
 
 Optim.jl's L-BFGS, the polisher (foo2026 Section III.D phase 2; [OQ-20](../../dev/open_questions.md#oq-20)).
 `m` is Optim's LBFGS memory. **The convergence criterion is stated per pixel** (Step 3.C.2, D30),
@@ -216,7 +217,21 @@ saturated stop starts with a y-space gradient already far below even the old, fa
 `g_abstol`, so raising the threshold only makes the trap easier to fall into, not harder; the
 saturation check is what makes it safe to keep a gradient test at all.
 
-Spec D27, D30, D31, D32.
+**The preconditioner (Step 3.C.3, D36, D37).** When `precondition` (default `true`), `solve`
+builds a diagonal Gauss-Newton preconditioner from `_gauss_newton_diagonal` -- `d_i = sum_rows
+(dr_full/dy_i)^2`, computed once at the start from `jacobian(problem, y0)` and passed to
+`Optim.LBFGS` as `P = Optim.InverseDiagonal(1 ./ (2 .* dg))`, `dg = _gauss_newton_floor(d)` (D37's
+relative floor, `PRECOND_FLOOR_REL = 1e-8`). **`P` is a Hessian approximation and Optim applies
+`P⁻¹∇E`** (D14, measured on this package's resolved Optim 2.3.1: `Optim.LBFGS`'s own
+`scaleinvH0 = (P === nothing)`, so supplying `P` also switches off Nocedal's initial scaling,
+changing the *first* step's length as well as every later one), so the quantity built here is
+`2d`, never `d` itself. `precond_refresh` (default `25`) rebuilds `P` from a fresh `jacobian` every
+that many attempted iterations (through a `precondprep!` closure Optim itself calls once per outer
+loop pass); a degenerate diagonal at a refresh (`_gauss_newton_floor` returning `nothing`) leaves
+`P` unchanged, and a degenerate diagonal at the very first build runs the fit unpreconditioned
+(`P = nothing`, `scaleinvH0 = true`, Optim's own default) rather than dividing by nothing.
+
+Spec D27, D30, D31, D32, D36, D37.
 """
 Base.@kwdef struct LBFGS <: AbstractOptimizer
     m::Int = 10
@@ -226,6 +241,8 @@ Base.@kwdef struct LBFGS <: AbstractOptimizer
     x_reltol::Float64 = 0.0
     iterations::Int = 20_000
     time_limit::Float64 = NaN
+    precondition::Bool = true
+    precond_refresh::Int = 25
 end
 
 """
@@ -279,10 +296,18 @@ whose **x**-space value is within `BOUND_PROXIMITY_TOL` of a bound. A test hook 
 nothing about the default call shape, on the same footing as `LevenbergMarquardt`'s `mu_trace` and
 `NoisyGradientDescent`'s `y_trace`.
 
-Spec D27, D13, D30, D31, D34.
+`precond_trace`, given a `Vector`, has one named tuple `(iteration, floor_bound)` pushed each time
+the preconditioner is actually (re)built -- the initial build (`iteration = 0`) and every
+subsequent refresh (Step 3.C.3, D37) -- `floor_bound` the count of `_gauss_newton_diagonal`'s
+entries `_gauss_newton_floor` raised at that build (D37: "count and report how many entries the
+floor binds on at each refresh"). A degenerate refresh that leaves `P` untouched pushes nothing.
+Not part of D36/D37's own signature (given as a reporting requirement, not a hook); Level 3's
+addition, on the same footing as `g_trace` above, flagged under rule 11 zero.
+
+Spec D27, D13, D30, D31, D34, D36, D37.
 """
 function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(problem.pspec),
-    g_trace::Union{Nothing,Vector}=nothing)
+    g_trace::Union{Nothing,Vector}=nothing, precond_trace::Union{Nothing,Vector}=nothing)
     t0 = time()
     y0 = Vector{Float64}(start)
 
@@ -310,7 +335,46 @@ function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(pr
     g_abstol = opt.g_abstol_per_pixel * problem.npixels
 
     od = Optim.OnceDifferentiable(f, g!, fg!, y0)
-    res = Optim.optimize(od, y0, Optim.LBFGS(; m=opt.m),
+
+    # The preconditioner (D36, D37): P ~ nabla^2 E, Optim applies P^-1 grad E, so the quantity
+    # filled is 2d and Optim.InverseDiagonal stores 1 ./ (2d) -- D14, measured, not re-derived.
+    # `refresh_count` counts precondprep! calls (one per Optim.LBFGS outer-loop pass, confirmed
+    # against this package's resolved Optim 2.3.1: `update_state!` calls `_apply_precondprep`
+    # once per `while` iteration, `src/multivariate/solvers/first_order/l_bfgs.jl`); the diagonal
+    # is rebuilt only when that count is a multiple of `opt.precond_refresh`, otherwise `P` is
+    # left untouched, matching "rebuild every precond_refresh accepted iterations" (D37).
+    lbfgs_method = if opt.precondition
+        d0 = _gauss_newton_diagonal(problem, jacobian(problem, y0))
+        dg0 = _gauss_newton_floor(d0)
+        if dg0 === nothing
+            Optim.LBFGS(; m=opt.m)   # degenerate at the very first build: run unpreconditioned
+        else
+            if precond_trace !== nothing
+                nbound0 = count(<(PRECOND_FLOOR_REL * maximum(d0)), d0)
+                push!(precond_trace, (iteration=0, floor_bound=nbound0))
+            end
+            P0 = Optim.InverseDiagonal(1 ./ (2 .* dg0))
+            refresh_count = Ref(0)
+            function _lbfgs_precondprep!(P, x)
+                refresh_count[] += 1
+                mod(refresh_count[], opt.precond_refresh) == 0 || return nothing
+                d = _gauss_newton_diagonal(problem, jacobian(problem, x))
+                dg = _gauss_newton_floor(d)
+                dg === nothing && return nothing   # degenerate refresh: keep the previous P
+                P.diag .= 1 ./ (2 .* dg)
+                if precond_trace !== nothing
+                    nbound = count(<(PRECOND_FLOOR_REL * maximum(d)), d)
+                    push!(precond_trace, (iteration=refresh_count[], floor_bound=nbound))
+                end
+                return nothing
+            end
+            Optim.LBFGS(; m=opt.m, P=P0, precondprep=_lbfgs_precondprep!)
+        end
+    else
+        Optim.LBFGS(; m=opt.m)
+    end
+
+    res = Optim.optimize(od, y0, lbfgs_method,
         Optim.Options(; f_abstol=f_abstol, successive_f_tol=opt.patience - 1, g_abstol=g_abstol,
             x_reltol=opt.x_reltol, f_reltol=0.0, iterations=opt.iterations,
             time_limit=opt.time_limit, store_trace=true, extended_trace=true,
@@ -394,7 +458,7 @@ Base.@kwdef struct LevenbergMarquardt <: AbstractOptimizer
 end
 
 """
-    _cgls(problem, Jac, r, gvec, mu, tol, maxiter) -> (delta, niter)
+    _cgls(problem, Jac, r, gvec, mu, tol, maxiter; precond = nothing) -> (delta, niter)
 
 CGLS on the damped least-squares system `min_delta ‖[J; sqrt(mu) I] delta + [r; 0]‖^2`,
 matrix-free through `jvp!`/`jtvp!` alone (D28): solves `(JᵀJ + mu I) delta = -gvec` for `delta`,
@@ -404,15 +468,29 @@ iterations actually ran (D43 item 9). `gam0 == 0` (an exactly-zero `gvec`) retur
 immediately rather than dividing by it. Not part of D28's own signature (given as an inline
 algorithm, not a named function); Level 3's extraction, flagged under rule 11 zero.
 
-Spec D28.
+**`precond` (Step 3.C.3, D37): Jacobi preconditioning**, the same floored Gauss-Newton diagonal
+`LBFGS`'s own preconditioner uses (`_gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))`,
+`nothing` when the caller chose not to build one, or on a degenerate diagonal). Standard
+preconditioned CG on the SPD system `(JᵀJ + mu I) delta = -gvec` with `M = Diagonal(precond)`:
+`A` is still applied to the search direction `p` directly (`q = J p`, `dot(q, q) + mu * dot(p, p)`
+is `pᵀ A p` regardless of preconditioning, so `alpha`'s formula is unchanged), and only the
+residual-to-direction step is preconditioned, `z = gnew ./ precond` in place of `gnew` itself, in
+both the initial direction and `gam`'s reduction and in the Polak-Ribiere-style update of `p`.
+With `precond === nothing` every one of those becomes `z === gnew`/`p0 === -gvec` and the method is
+bitwise the unpreconditioned CGLS above. A preconditioner that changes the converged `delta` (to
+more than solver-noise tolerance) is a bug (PC4); one that only changes `niter` is the point.
+
+Spec D28, D37.
 """
 function _cgls(problem::FitProblem, Jac::FitJacobian, r::AbstractVector, gvec::AbstractVector,
-    mu::Real, tol::Real, maxiter::Integer)
+    mu::Real, tol::Real, maxiter::Integer; precond::Union{Nothing,AbstractVector}=nothing)
     ntheta = length(gvec)
     delta = zeros(Float64, ntheta)
     s = -r
-    p = -gvec
-    gam = dot(p, p)
+    gnew0 = -gvec
+    z0 = precond === nothing ? gnew0 : gnew0 ./ precond
+    p = copy(z0)
+    gam = dot(gnew0, z0)
     gam0 = gam
     niter = 0
     if gam0 > 0
@@ -426,9 +504,10 @@ function _cgls(problem::FitProblem, Jac::FitJacobian, r::AbstractVector, gvec::A
             s .-= alpha .* q
             jtvp!(gnew, problem, Jac, s)
             gnew .-= mu .* delta
-            gam1 = dot(gnew, gnew)
+            z = precond === nothing ? gnew : gnew ./ precond
+            gam1 = dot(gnew, z)
             gam1 <= tol^2 * gam0 && break
-            p = gnew .+ (gam1 / gam) .* p
+            p = z .+ (gam1 / gam) .* p
             gam = gam1
         end
     end
@@ -446,6 +525,15 @@ through `jvp!`/`jtvp!` -- `J` is never formed and `JᵀJ` never assembled. **Ide
 `diag(JᵀJ)`**: the logit already makes every `y` O(1), so the scale invariance `diag(JᵀJ)` buys is
 already present, and computing it matrix-free would cost `N_theta` Jacobian-vector products
 against CGLS's typical few dozen.
+
+**CGLS is Jacobi-preconditioned (Step 3.C.3, D37)**: the same floored Gauss-Newton diagonal
+`LBFGS`'s own preconditioner uses, `_gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))`,
+recomputed from `Jac` whenever `Jac` itself is (re)assembled -- once at the start and again on
+every **accepted** step, never on a rejected one, since `Jac` is not rebuilt then either. A
+degenerate diagonal (`_gauss_newton_floor` returning `nothing`) runs that call's `_cgls`
+unpreconditioned. This is what chunk 5's own diagnosis measured CGLS needing: a mean of 98.2 of
+100 inner iterations on the 128 x 32 cut-down problem against 8.7 on the toy problem P2 -- the same
+severe conditioning (`spread(d)` of 1.4e3-2.8e3 at the *start*) that motivates `LBFGS`'s own `P`.
 
 `mu`'s update is Nielsen's (Madsen, Nielsen and Tingleff Section 3.2): with predicted reduction
 `pred = 1/2 dot(delta, mu * delta - gvec)` and `rho = (Fold - Fnew) / pred`, a step is accepted
@@ -489,6 +577,7 @@ function solve(problem::FitProblem, opt::LevenbergMarquardt;
     jtvp!(gvec, problem, Jac, r)
     f_calls_count = 1
     g_calls_count = 1
+    precond = _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))
 
     rng = Xoshiro(opt.seed)
     u = randn(rng, ntheta)
@@ -514,7 +603,7 @@ function solve(problem::FitProblem, opt::LevenbergMarquardt;
         iters_run = k
         mu_trace === nothing || push!(mu_trace, mu)   # mu going into this iteration's decision
 
-        delta, niter = _cgls(problem, Jac, r, gvec, mu, opt.cgls_tol, opt.cgls_maxiter)
+        delta, niter = _cgls(problem, Jac, r, gvec, mu, opt.cgls_tol, opt.cgls_maxiter; precond=precond)
         cgls_iterations === nothing || push!(cgls_iterations, niter)
 
         y_new = y .+ delta
@@ -532,6 +621,7 @@ function solve(problem::FitProblem, opt::LevenbergMarquardt;
             Jac = jacobian(problem, y)
             g_calls_count += 1
             jtvp!(gvec, problem, Jac, r)
+            precond = _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))
             mu *= max(1 / 3, 1 - (2 * rho - 1)^3)
             nu = 2.0
 
@@ -562,14 +652,15 @@ Base.show(io::IO, opt::LevenbergMarquardt) = print(io, "LevenbergMarquardt(itera
 # ------------------------------------------------------------------------------------------
 
 """
-    NoisyGradientDescent(; steps = 2000, step_size = 1.0e-8, noise = 0.1, noise_decay = 500.0,
+    NoisyGradientDescent(; steps = 2000, step_size = 1.0e-1, noise = 0.1, noise_decay = 500.0,
                           seed = 1)
 
-Plain gradient descent on `𝒪` in the unconstrained `y` of the logit transform, bumped by Gaussian
-noise of decaying amplitude, the explorer of foo2026 Section III.D's two-phase routine
-([OQ-20](../../dev/open_questions.md#oq-20)):
+Normalized gradient descent on `𝒪` in the unconstrained `y` of the logit transform, bumped by
+Gaussian noise of decaying amplitude, the explorer of foo2026 Section III.D's two-phase routine
+([OQ-20](../../dev/open_questions.md#oq-20), [OQ-37](../../dev/open_questions.md#oq-37)):
 
-    y_{k+1} = y_k - alpha * grad_y O(y_k) + s0 * exp(-k / tau) * xi_k,   xi_k ~ N(0, I),
+    ghat_k  = grad_y O(y_k) / ||grad_y O(y_k)||_2      (the raw gradient if the norm underflows)
+    y_{k+1} = y_k - alpha * ghat_k + s0 * exp(-k / tau) * xi_k,   xi_k ~ N(0, I),
 
 `alpha = step_size`, `s0 = noise`, `tau = noise_decay` in steps, `seed` for `Xoshiro`. **Not
 SGLD, and never called SGLD** (`conventions.md` Section 11): the gradient here is the full
@@ -581,21 +672,32 @@ implements.
 
 **`steps`, `noise`, `noise_decay` and `seed` are [OQ-22](../../dev/open_questions.md#oq-22)'s
 deck sketch, verbatim, and stay provisional** ([OQ-20](../../dev/open_questions.md#oq-20)).
-**`step_size` was `1.0e-2` and is `1.0e-8`, measured 2026-09-14 (D29, D43 item 3), and is no
-longer provisional.** The old default never improved `𝒪` on P1 (D46) -- the ratio
-`𝒪(best)/𝒪(start)` was exactly `1.0` over a 2000-step budget -- and that is not an artefact of
-P1's unit `sigma`: on a realistically weighted problem (weights from `GaussianNoise(a=1.0,
-b=0.02)`) `|grad_y O|` is still of order `1e6`, because `d(chi2)/dy = d(chi2)/dx * dx/dy` and
-`dx/dy` carries the **bound width** (750 eV for a `T_D` on `(50, 800)`), which is the normal
-scale of a `y`-space gradient here, not a symptom of one problem's weighting. `1e-8` is the
-smallest value tested that explores on both fixtures; OP19 is the row that checks the shipped
-default still does.
 
-Spec D29.
+**`step_size` is a step *length* in `y` (Step 3.C.3, D38), not a multiplier on the raw gradient.**
+Before this step, `alpha` multiplied `grad_y O` directly, so its natural scale was a property of
+the problem's χ² and bound widths, not a length -- which is why the old default (`1.0e-8`,
+measured 2026-09-14, D29, D43 item 3) moved P1 (D46) at all: `|grad_y O|` there is of order `1e6`
+(`d(chi2)/dy = d(chi2)/dx * dx/dy`, and `dx/dy` carries the bound width, e.g. 750 eV for `T_D` on
+`(50, 800)`), so `1e-8 * 1e6` is an `O(1e-2)` step. **The old default must not survive the
+normalization**: `1.0e-8` as a step *length* is a fit that never moves, on any problem, regardless
+of its gradient's raw scale -- exactly the regression OP19 exists to catch. `step_size = 1.0e-1` is
+the value Step 3.C.3's sweep chose (measurement 8, `dev/reports/phase3C_report.md`): P1's realistic
+fixture converges to `chi2_end/chi2_start` of order `1e-7` to `1e-5` across the whole sweep
+(`[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1]`), essentially indifferent to `step_size` in that range, but
+the cut-down multi-flow problem -- the sweep's stand-in for a realistically-sized fit -- needs a
+step at least of order `1e-2` to move meaningfully in `steps = 2000` at all (`1e-3`/`3e-3` leave it
+at `0.91`/`0.91` of its start), and `1e-1` is the best value measured on it (`0.0084`, against
+`0.125` at `3e-2` and `0.0090` at `3e-1`); see that report for the full sweep table.
+
+**The guard**: if `||grad_y O||_2` is zero, sub-normal (`<= floatmin(Float64)`) or non-finite, the
+raw gradient is used in its place, which at an exactly-zero gradient is itself a zero step -- the
+noise kick still moves the iterate (`conventions.md` 5.14: both branches return the same type).
+
+Spec D29, D38.
 """
 Base.@kwdef struct NoisyGradientDescent <: AbstractOptimizer
     steps::Int = 2000              # provisional
-    step_size::Float64 = 1.0e-8    # alpha -- measured 2026-09-14, no longer provisional
+    step_size::Float64 = 1.0e-1    # alpha, a step length in y -- Step 3.C.3's sweep, D38
     noise::Float64 = 0.1           # provisional: s0
     noise_decay::Float64 = 500.0   # provisional: tau, in steps
     seed::Int = 1                  # provisional
@@ -644,7 +746,9 @@ function solve(problem::FitProblem, opt::NoisyGradientDescent;
     for k in 1:opt.steps
         randn!(rng, xi)
         sk = opt.noise * exp(-(k - 1) / opt.noise_decay)
-        y = y .- opt.step_size .* g .+ sk .* xi
+        gn = sqrt(sum(abs2, g))
+        ghat = (isfinite(gn) && gn > floatmin(Float64)) ? g ./ gn : g
+        y = y .- opt.step_size .* ghat .+ sk .* xi
         y_trace === nothing || push!(y_trace, copy(y))
 
         Ov, chi2v, Rval = _eval_all!(g, problem, y)

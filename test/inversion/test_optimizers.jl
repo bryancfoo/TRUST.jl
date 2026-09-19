@@ -1,7 +1,8 @@
 using Test
 using OTIS
 using OTIS: _cgls, _build_procedure, _PROCEDURE_NAMES, _from_unconstrained,
-    jtvp!, jvp!, jacobian, _full_residuals
+    jtvp!, jvp!, jacobian, _full_residuals, _gauss_newton_diagonal, _gauss_newton_floor,
+    PRECOND_FLOOR_REL
 using LinearAlgebra: norm
 import ForwardDiff
 
@@ -20,15 +21,20 @@ import ForwardDiff
 const _OP_T_TRUTH = 250.0
 const _OP_U_TRUTH = 40.0
 
-# **Chunk 10 carried item 1** (D29, D43 item 3): chunk 9 found P1's `sigma = ones(...)` (D46)
-# makes chi2's gradient in y-space enormous -- `|grad O|` is already ~2.6e5 at a mere 2% deviation
-# in T_D from the truth -- and D29's shipped `step_size` default overshot the very first step into
-# the logit's saturated region on it. Chunk 9 worked around that here with a tuned
-# `_OP_NGD_STEP_SIZE` override on OP5/OP7/OP8/OP9. Level 2 then measured that the enormous
-# gradient is not a P1 artefact of unit sigma -- it is `dx/dy` carrying the bound width, present on
-# any realistically weighted problem too -- and revised D29's own default to `1.0e-8`. With the
-# default fixed, OP5/OP7/OP8/OP9 use `NoisyGradientDescent`'s own default rather than overriding
-# it; OP19 is the row that would catch a regression to a default that saturates on its first step.
+# **Chunk 10 carried item 1** (D29, D43 item 3), **superseded at Step 3.C.3 (D38)**: chunk 9 found
+# P1's `sigma = ones(...)` (D46) makes chi2's gradient in y-space enormous -- `|grad O|` is already
+# ~2.6e5 at a mere 2% deviation in T_D from the truth -- and the old raw-gradient rule's shipped
+# `step_size` overshot the very first step into the logit's saturated region on it. Chunk 9 worked
+# around that here with a tuned `_OP_NGD_STEP_SIZE` override on OP5/OP7/OP8/OP9; Level 2 then
+# measured that the enormous gradient is not a P1 artefact of unit sigma -- it is `dx/dy` carrying
+# the bound width, present on any realistically weighted problem too -- and revised the raw-gradient
+# default to `1.0e-8`, small enough that OP5/OP7/OP8/OP9 no longer needed the override. **Step
+# 3.C.3 changes the update rule itself, not merely the tuning**: `step_size` is now a step *length*
+# in the normalized gradient direction (D38), which cannot overshoot the way a raw-gradient
+# multiplier could, by construction, on any problem's gradient scale -- so OP5/OP7/OP8/OP9 still
+# use the shipped default with no override, for a structural reason now rather than a numerical
+# coincidence. OP19 remains the row that would catch a regression to a default that saturates on
+# its first step.
 
 # ------------------------------------------------------------------------------------------
 # P1 (D46): the one-bin problem, noise-free
@@ -223,7 +229,19 @@ end
 @testset "OP5: zero noise is plain gradient descent (P1)" begin
     problem = _op_p1_problem()
     start = _op_p1_start(; t_frac=1.05, u_frac=0.9)(problem)
-    opt = NoisyGradientDescent(noise=0.0, steps=200)
+    # Step 3.C.3 (D38): under the *normalized* step the shipped default step_size is a fixed
+    # length in y, chosen (measurement 8) for real progress on realistically-sized problems in a
+    # bounded step budget -- it is not "small enough" in the sense this row needs, and no fixed
+    # step_size can be, once the run gets within O(step_size) of the minimum: a normalized step
+    # cannot shrink the way the old raw-gradient*alpha step did, so it eventually overshoots and
+    # the objective increases at that step (measured: alpha = 5e-4 already violates monotonicity
+    # once, at step 199 of 200, on this fixture). OP5's own question is whether zero-noise descent
+    # is monotone for *a* small enough step size, not whether the shipped default is that size --
+    # the same "OP rows updated where a default moved" license Section 6's Files list gives OP4 --
+    # so this row keeps its own small, explicit step_size (chosen with margin below the smallest
+    # value measured to violate monotonicity) instead of the shipped default; the assertion itself
+    # is unchanged.
+    opt = NoisyGradientDescent(noise=0.0, steps=200, step_size=2e-4)
     result = solve(problem, opt; start=start)
     objs = [t.objective for t in result.trajectory]
     @test all(diff(objs) .< 0)
@@ -312,6 +330,16 @@ end
     @info "OP19" chi2_start result.chi2 (result.chi2 / chi2_start)
     @test result.chi2 <= 1e-2 * chi2_start
 end
+# Rewritten at Step 3.C.3 (D38): step_size is now a step *length* in y, chosen by measurement 8's
+# sweep (dev/reports/phase3C_report.md), not a multiplier on the raw gradient. This is the row
+# that catches a shipped default which saturates on its very first step -- precisely EPW's own
+# LBFGS failure (D36), on a different optimizer: chunk 10 found the old raw-gradient default
+# overshot P1's very first step into the logit's saturated region, and this row's whole purpose is
+# to never let that regress silently. The margin (chi2 falls to at most 1e-2 of its start) is the
+# same bar the old (pre-normalization) row used; it is loose on purpose -- OP8's own tighter 1e-2
+# bound on a *better*-conditioned start already exercises the explorer's accuracy, and this row's
+# job is only to confirm the shipped default moves the fit meaningfully, not to pin its exact
+# endpoint.
 
 # ------------------------------------------------------------------------------------------
 # OP10: OptimizerSequence warm-starts from the best, not the last
@@ -572,4 +600,90 @@ end
     sat_result1 = solve(problem, LBFGS(); start=sat_result0.theta)
     @info "CR6 (saturated wins)" sat_result1.status sat_result1.iterations
     @test sat_result1.status == :saturated
+end
+
+# ------------------------------------------------------------------------------------------
+# PC1 to PC5: the preconditioner and its guard (Step 3.C.3, D36-D37)
+# ------------------------------------------------------------------------------------------
+
+@testset "PC1: preconditioning reaches the same minimizer (P2)" begin
+    problem, start = _op_p2_problem()
+    # Same reasoning as OP4 (Section 6's own "OP rows updated where a default moved" license,
+    # exercised here for a *new* row): the question is whether two descent paths reach the same
+    # minimum, not whether the shipped (loose) default does -- so both runs use a tight criterion,
+    # otherwise the shipped default's own patience/f_abstol slack would dominate any comparison at
+    # 1e-6 and the row would be testing the criterion's looseness, not the preconditioner.
+    tight_on = LBFGS(; f_abstol_per_pixel=1e-12, g_abstol_per_pixel=1e-12, patience=20,
+        iterations=5000, precondition=true)
+    tight_off = LBFGS(; f_abstol_per_pixel=1e-12, g_abstol_per_pixel=1e-12, patience=20,
+        iterations=5000, precondition=false)
+    r_on = solve(problem, tight_on; start=start)
+    r_off = solve(problem, tight_off; start=start)
+    relerr = maximum(abs.(r_on.theta .- r_off.theta) ./ max.(abs.(r_off.theta), 1.0))
+    @info "PC1" relerr r_on.status r_off.status r_on.iterations r_off.iterations
+    @test isapprox(r_on.theta, r_off.theta; rtol=1e-6, atol=1e-6)
+end
+
+@testset "PC2: preconditioning costs no correctness (P2)" begin
+    problem, start = _op_p2_problem()
+    opt = LBFGS()   # precondition = true, the shipped default
+    r_on = solve(problem, opt; start=start)
+    r_off = solve(problem, LBFGS(; precondition=false); start=start)
+    threshold = opt.f_abstol_per_pixel * problem.npixels
+    @info "PC2" r_on.chi2 r_off.chi2 (r_on.chi2 - r_off.chi2) threshold r_on.status r_off.status
+    @test r_on.chi2 <= r_off.chi2 + threshold
+end
+
+@testset "PC3: the floor binds and is relative" begin
+    # A deliberately near-singular diagonal, built directly rather than from a real problem: one
+    # entry near zero, one exactly zero (EPW's own failure mode, chunk 5), one at the scale of the
+    # rest.
+    d = [1e-20, 0.0, 1.0, 1e10]
+    dg = _gauss_newton_floor(d)
+    @test dg !== nothing
+    Pinv = 1 ./ (2 .* dg)
+    @info "PC3" dg Pinv dynamic_range = (maximum(dg) / minimum(dg))
+    @test all(isfinite, Pinv)
+    @test maximum(dg) / minimum(dg) <= 1 / PRECOND_FLOOR_REL
+    @test all(dg .>= d)   # the floor only ever raises an entry, never lowers one
+
+    # The two degenerate cases (D37): every entry zero, and a non-finite entry present.
+    @test _gauss_newton_floor(zeros(5)) === nothing
+    @test _gauss_newton_floor([1.0, NaN, 2.0]) === nothing
+    @test _gauss_newton_floor([1.0, Inf, 2.0]) === nothing
+end
+
+@testset "PC4: preconditioned CGLS reaches the same delta (P2)" begin
+    problem, theta = _op_p2_problem()
+    ntheta = problem.pspec.ntheta
+
+    r = _full_residuals(problem, theta)
+    Jac = jacobian(problem, theta)
+    gvec = zeros(ntheta)
+    jtvp!(gvec, problem, Jac, r)
+    mu = 1e-2
+
+    d = _gauss_newton_diagonal(problem, Jac)
+    dg = _gauss_newton_floor(d)
+    @test dg !== nothing
+
+    delta_off, niter_off = _cgls(problem, Jac, r, gvec, mu, 1e-10, 2000)
+    delta_on, niter_on = _cgls(problem, Jac, r, gvec, mu, 1e-10, 2000; precond=dg)
+
+    relerr = maximum(abs.(delta_on .- delta_off) ./ max.(abs.(delta_off), 1.0))
+    @info "PC4" relerr niter_off niter_on
+    @test isapprox(delta_on, delta_off; rtol=1e-8, atol=1e-8)
+end
+
+@testset "PC5: precond_refresh is honoured" begin
+    problem, start = _op_p2_problem()
+    trace_often = []
+    r_often = solve(problem, LBFGS(; precond_refresh=1); start=start, precond_trace=trace_often)
+    trace_rarely = []
+    r_rarely = solve(problem, LBFGS(; precond_refresh=10_000); start=start, precond_trace=trace_rarely)
+    @info "PC5" r_often.converged r_rarely.converged r_often.iterations r_rarely.iterations n_rebuilds_refresh1 = length(trace_often) n_rebuilds_refresh10000 = length(trace_rarely)
+    @test r_often.converged
+    @test r_rarely.converged
+    @test length(trace_often) != length(trace_rarely)
+    @test length(trace_often) > length(trace_rarely)
 end

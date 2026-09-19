@@ -10,16 +10,22 @@
 # Run (from the slow tier's own environment, which already carries CairoMakie and the package):
 #   julia --project=test/slow examples/diagnostics/convergence.jl [which] [problem]
 #
-# `which` selects one measurement ("m1".."m6", default "all"); `problem` restricts a measurement
-# to one of "epw_ablation", "iaw_multiflow", "iaw_shock" (default "all"). D15's budget is fifteen
-# minutes per command -- run one problem per command for measurements 1, 2 and 5, the ones most
-# likely to hit it. The whole script is not expected to finish inside one invocation.
+# `which` selects one measurement ("m1".."m8", "m2-lbfgs"/"m2-lm" for measurement 2's two halves,
+# default "all"); `problem` restricts a measurement to one of "epw_ablation", "iaw_multiflow",
+# "iaw_shock" (default "all", measurements 7 and 8 do not take it -- 7 is EPW-only, D36; 8 runs its
+# own two fixtures, D38). D15's budget is fifteen minutes per command -- run one problem per
+# command for measurements 1, 2 and 5, the ones most likely to hit it. The whole script is not
+# expected to finish inside one invocation.
+#
+# Measurements 7 (D36) and 8 (D38) are Step 3.C.3's own additions: 7 is the mandatory EPW row
+# testing whether the Gauss-Newton preconditioner rescues EPW's saturation; 8 is the sweep that
+# sets NoisyGradientDescent's shipped step_size default.
 #
 # Nothing here writes a result file or a figure; its printed tables are what goes in the report.
 
 using OTIS
 using OTIS: _with_weight, _leaf_si_path, jacobian, JACOBIAN_CHUNK, _gauss_newton_diagonal,
-    _from_unconstrained, _dx_dy, _count_near_bound
+    _gauss_newton_floor, _from_unconstrained, _dx_dy, _count_near_bound
 using Random: Xoshiro
 
 include(joinpath(@__DIR__, "..", "problems.jl"))
@@ -542,6 +548,112 @@ function measurement6(; nlambda::Int=128, nt::Int=32, n::Int=20)
 end
 
 # ------------------------------------------------------------------------------------------
+# Measurement 7: D36's mandatory EPW row -- does the preconditioner fix EPW's saturation?
+# ------------------------------------------------------------------------------------------
+
+"""
+    measurement7()
+
+The EPW cut-down problem, `LBFGS()` with `precondition = false` and `precondition = true` (D36):
+`iterations`, `status`, `termination`, `near_bound_fraction`, `gn_zero_count` at the stop, and the
+trajectory's first five `(iteration, O)` rows so the first step is visible. Section 6's own
+baseline to compare against: `iterations = 2`, `near_bound_fraction = 1.0`, `gn_zero_count = 82`
+of 96.
+"""
+function measurement7()
+    b = _build_cutdown("epw_ablation", epw_ablation_problem)
+    for precond in (false, true)
+        g_trace = []
+        opt = LBFGS(; precondition=precond)
+        t0 = time()
+        result = solve(b.problem, opt; start=b.start, g_trace=g_trace)
+        elapsed = time() - t0
+        near_bound_fraction = _count_near_bound(b.problem.pspec, result.theta) / b.problem.pspec.ntheta
+        gn = _gauss_newton_diagonal(b.problem, jacobian(b.problem, result.theta))
+        gn_zero_count = count(iszero, gn)
+        @info "measurement7: EPW" precondition = precond converged = result.converged status = result.status termination = result.termination iterations = result.iterations near_bound_fraction gn_zero_count ntheta = length(gn) elapsed_s = elapsed
+        for row in first(result.trajectory, 5)
+            @info "measurement7: EPW trajectory (first five)" precondition = precond iteration = row.iteration objective = row.objective
+        end
+    end
+    return nothing
+end
+
+# ------------------------------------------------------------------------------------------
+# Measurement 8: NoisyGradientDescent's normalized step_size sweep (D38)
+# ------------------------------------------------------------------------------------------
+
+const M8_ALPHAS = [1.0e-3, 3.0e-3, 1.0e-2, 3.0e-2, 1.0e-1, 3.0e-1]
+
+const _M8_T_TRUTH = 250.0
+const _M8_U_TRUTH = 40.0
+
+"""
+    _m8_p1_realistic_problem() -> (problem, start)
+
+`test_optimizers.jl`'s own `_op_p1_realistic_problem()`/`_op_p1_start()` fixture (D38's own name
+for it, OP19's realistic-sigma P1), rebuilt here rather than imported across a file this script
+does not `include`.
+"""
+function _m8_p1_realistic_problem()
+    template = Plasma(; n_e_cm3=3e19, electrons=[electrons(T_eV=400.0)],
+        ions=[ion(name="D", mass_amu=2.014, charge=1, T_eV=200.0, u_kms=0.0)])
+    trace = PlasmaTrace(template; t_ns=[0.0])
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60.0, k_model=:exact)
+    lambda_m = collect(range(262.0, 264.5; length=24)) .* 1e-9
+    expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_m,
+        effects=(Sensitivity(scale=1.0e-6), ConstantBackground(level=25.0)))
+    v_T = FittedVariable("T_D"; bounds=(50.0, 800.0), init=200.0)
+    v_u = FittedVariable("u_D"; bounds=(-200.0, 200.0), init=0.0)
+    pspec = ParameterSpec(expt; variables=[v_T, v_u],
+        bindings=["T_D" => "ions.D.T_eV", "u_D" => "ions.D.u_kms"])
+    working = Experiment(; trace=pspec.trace, probe=expt.probe, collection=expt.collection,
+        lambda_m=expt.lambda, effects=expt.effects, prefactor=expt.prefactor)
+    theta_truth = flatten(pspec, ["T_D" => _M8_T_TRUTH, "u_D" => _M8_U_TRUTH])
+    truth = unflatten(working, pspec, theta_truth)
+    image = measure(truth)
+    sig = sigma(GaussianNoise(a=1.0, b=0.02), image)
+    data = StreakData(lambda_m=working.lambda, t_s=working.t, image=image, sigma=sig)
+    problem = FitProblem(working, pspec, data)
+    start = flatten(pspec, ["T_D" => _M8_T_TRUTH * 1.25, "u_D" => _M8_U_TRUTH * 0.75])
+    return problem, start
+end
+
+"""
+    _m8_sweep_one(label, problem, start)
+
+One fixture's sweep over `M8_ALPHAS`: `chi2_end / chi2_start` and the end near-bound fraction,
+one `@info` line per point as it finishes (D15, ground rule 6).
+"""
+function _m8_sweep_one(label::AbstractString, problem::FitProblem, start::AbstractVector)
+    chi2_start = chi2(problem, start)
+    for alpha in M8_ALPHAS
+        opt = NoisyGradientDescent(; step_size=alpha)
+        result = solve(problem, opt; start=start)
+        nb = _count_near_bound(problem.pspec, result.theta) / problem.pspec.ntheta
+        @info "measurement8: $label" alpha chi2_start chi2_end = result.chi2 chi2_end_over_start = (result.chi2 / chi2_start) near_bound_fraction = nb
+    end
+    return nothing
+end
+
+"""
+    measurement8()
+
+D38's sweep: `M8_ALPHAS` on `_m8_p1_realistic_problem()` and the multi-flow cut-down, reporting
+`chi2_end / chi2_start` and the end near-bound fraction for each -- the shipped default is
+whichever value improves chi2 most on both without saturating either.
+"""
+function measurement8()
+    problem1, start1 = _m8_p1_realistic_problem()
+    _m8_sweep_one("P1 realistic", problem1, start1)
+
+    b = _build_cutdown("iaw_multiflow", iaw_multiflow_problem)
+    _m8_sweep_one("multiflow cutdown", b.problem, b.start)
+    return nothing
+end
+
+# ------------------------------------------------------------------------------------------
 # main
 # ------------------------------------------------------------------------------------------
 
@@ -609,6 +721,12 @@ function main()
     end
     if which in ("all", "m6")
         measurement6()
+    end
+    if which in ("all", "m7")
+        measurement7()
+    end
+    if which in ("all", "m8")
+        measurement8()
     end
     return nothing
 end

@@ -1,8 +1,9 @@
 # write_result/read_result (JLD2, plain arrays and strings, exactly the streak and trace
-# layouts' own rule): the otis-result-1 layout, bumped to otis-result-2 at Step 3.C.2 (D35).
+# layouts' own rule): the otis-result-1 layout, bumped to otis-result-2 at Step 3.C.2 (D35), which
+# also added scan/termination at Step 3.C.3 (carried item 2, inside the same otis-result-2 version
+# -- D35 forbids a *second* layout bump, not a dataset added within one before the phase closes).
 # Step 3.6a, chunk 11 of Phase 3; spec D34, extending the file family of
-# docs/derivations/data_layout.md (Section 3) -- that document is unchanged by Step 3.C.2
-# (Section 5's Files list: "docs/derivations/ EDIT: none"), so it still describes otis-result-1.
+# docs/derivations/data_layout.md (Section 3), which now describes otis-result-2 in full.
 
 using Dates: Dates, DateTime, UTC, now
 using JLD2: jldopen
@@ -13,9 +14,11 @@ using JLD2: jldopen
 The `layout_version` string written to every result JLD2 file and checked on read.
 
 **Bumped to `"otis-result-2"` at Step 3.C.2 (D35, D17)**, one bump, carrying `fit/termination`,
-`fit/near_bound_fraction` and (when a scan is written) `scan/status` together -- `read_result`
-rejects a version mismatch before it reads anything, so one bump covering every new dataset is
-all Phase 3.C needs.
+`fit/near_bound_fraction` and (when a scan is written) `scan/status` together, and **later joined,
+within the same `"otis-result-2"`, by `scan/termination`** (Step 3.C.3 carried item 2, D17-vs-D35):
+`read_result` rejects a version mismatch before it reads anything, so one bump covering every new
+dataset introduced before the phase closes is all Phase 3.C needs -- D35 forbids a *second* bump,
+not a dataset added inside the one it already made.
 
 Spec D34, D45, D35.
 """
@@ -95,8 +98,9 @@ strings (`docs/derivations/data_layout.md` Section 3, spec D34): `layout_version
 group, the effective `deck` text, the axis, one group per fitted variable and per dependent, one
 group per leaf of the fitted trace, the `fit/*` scalars and vectors (including, since
 `otis-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`), the `trajectory/*` arrays,
-and, only when `scan !== nothing`, the `scan/*` arrays (including `scan/status`, one string per
-requested weight) and per-variable `scan/rss*` groups, including `scan/rss_unreg/<variable>`.
+and, only when `scan !== nothing`, the `scan/*` arrays (including `scan/status` and
+`scan/termination`, one string per requested weight each) and per-variable `scan/rss*` groups,
+including `scan/rss_unreg/<variable>`.
 
 Spec D34, D35.
 """
@@ -166,6 +170,7 @@ function write_result(path::AbstractString, result::FitResult; deck::AbstractStr
 
         if scan !== nothing
             f["scan/status"] = String[string(r.status) for r in scan.results]
+            f["scan/termination"] = String[string(r.termination) for r in scan.results]
             f["scan/weights"] = Vector{Float64}(scan.weights)
             f["scan/chi2"] = Vector{Float64}(scan.chi2)
             f["scan/R"] = Vector{Float64}(scan.R)
@@ -270,7 +275,7 @@ function read_result(path::AbstractString)
                 weights=f["scan/weights"], chi2=f["scan/chi2"], R=f["scan/R"],
                 chi2_normalized=f["scan/chi2_normalized"], R_normalized=f["scan/R_normalized"],
                 chi2_unreg=f["scan/chi2_unreg"], R_unreg=f["scan/R_unreg"],
-                status=f["scan/status"],
+                status=f["scan/status"], termination=f["scan/termination"],
                 rss=rss, rss_normalized=rss_normalized, rss_unreg=rss_unreg,
             )
         end
