@@ -722,6 +722,24 @@ part in a thousand of its range -- the optimizer is effectively stalled there.
 const BOUND_PROXIMITY_TOL = 1e-3
 
 """
+    SATURATION_FRACTION
+
+The fraction of `theta`'s coordinates that must sit within `BOUND_PROXIMITY_TOL` of a bound before
+a gradient-norm stop (`Optim.g_converged`) is relabelled `:saturated` rather than trusted as a
+real minimum (D31, Step 3.C.2). Measured contrast (`dev/reports/phase3C_report.md`, chunk 5):
+`0.0` at a healthy start on every cut-down problem, `1.0` at EPW's saturated (2-iteration) stop,
+and `0.1438`/`0.01563` at multi-flow's and shock's own cap-terminated, non-saturated ends -- any
+threshold in `(0.15, 1.0]` separates the saturated case from the non-saturated ones, and `0.5`
+sits in the middle of that gap with a factor of 3 of margin on each side.
+
+**This is a detector, not a tuning knob.** Narrowing it to make a test pass is a defect: a fit
+that lands between 0.15 and 0.5 is a finding to report, not a reason to move this constant.
+
+Spec D31.
+"""
+const SATURATION_FRACTION = 0.5
+
+"""
     _near_bound(x::Real, a::Real, b::Real) -> Bool
 
 Whether `x` is within `BOUND_PROXIMITY_TOL` of the range `b - a` of either bound. A start value

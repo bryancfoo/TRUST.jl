@@ -1,6 +1,8 @@
 # write_result/read_result (JLD2, plain arrays and strings, exactly the streak and trace
-# layouts' own rule): the otis-result-1 layout. Step 3.6a, chunk 11 of Phase 3; spec D34,
-# extending the file family of docs/derivations/data_layout.md (Section 3).
+# layouts' own rule): the otis-result-1 layout, bumped to otis-result-2 at Step 3.C.2 (D35).
+# Step 3.6a, chunk 11 of Phase 3; spec D34, extending the file family of
+# docs/derivations/data_layout.md (Section 3) -- that document is unchanged by Step 3.C.2
+# (Section 5's Files list: "docs/derivations/ EDIT: none"), so it still describes otis-result-1.
 
 using Dates: Dates, DateTime, UTC, now
 using JLD2: jldopen
@@ -10,9 +12,41 @@ using JLD2: jldopen
 
 The `layout_version` string written to every result JLD2 file and checked on read.
 
-Spec D34, D45.
+**Bumped to `"otis-result-2"` at Step 3.C.2 (D35, D17)**, one bump, carrying `fit/termination`,
+`fit/near_bound_fraction` and (when a scan is written) `scan/status` together -- `read_result`
+rejects a version mismatch before it reads anything, so one bump covering every new dataset is
+all Phase 3.C needs.
+
+Spec D34, D45, D35.
 """
-const RESULT_LAYOUT_VERSION = "otis-result-1"
+const RESULT_LAYOUT_VERSION = "otis-result-2"
+
+"""
+    _near_bound_fraction(result::FitResult) -> Float64
+
+The fraction of `result.theta`'s coordinates flagged `near_bound` (D31, D35): the count of `true`
+entries in `result.near_bound[v.name]`, summed over every **fitted** variable (`v.vary`, so a
+frozen variable's own near-a-bound `init` never counts -- it has no entry in `theta` at all),
+divided by `result.pspec.ntheta`. This is deliberately **not** a fresh
+`_count_near_bound(result.pspec, result.theta)` call: it is built from `result.near_bound`, which
+`_build_result` already computed from the same `_from_unconstrained(theta[idx], ...)` values at
+the same coordinates, so the two are the same quantity computed the same way (D31's own test in
+`solve` computes it directly from `theta`; this reads it back off the result already carrying it).
+A time-varying fitted variable's row carries one entry per bin of the whole axis, `NaN`-filled
+(hence `_near_bound` false) outside its own interval by `_value_table`/`_build_result` -- those
+entries are never in `theta` either, and `_near_bound(NaN, a, b)` is `false` (`min` propagates the
+`NaN`, and `NaN < x` is `false`), so summing every variable's `count(true, ...)` and dividing by
+`ntheta` (never by the summed row lengths) gives exactly `_count_near_bound(pspec, theta) /
+pspec.ntheta` without needing to re-walk `theta` at all. Not part of D35's own signature; Level 3's
+helper, flagged under rule 11 zero.
+
+Spec D35, D31.
+"""
+function _near_bound_fraction(result::FitResult)
+    pspec = result.pspec
+    nb = sum((count(result.near_bound[v.name]) for v in pspec.variables if v.vary); init=0)
+    return nb / pspec.ntheta
+end
 
 """
     _iso8601_utc_now() -> String
@@ -59,11 +93,12 @@ end
 Writes `result` (and, if given, `scan`) to `path` as a JLD2 file of plain numeric arrays and
 strings (`docs/derivations/data_layout.md` Section 3, spec D34): `layout_version`, a `meta`
 group, the effective `deck` text, the axis, one group per fitted variable and per dependent, one
-group per leaf of the fitted trace, the `fit/*` scalars and vectors, the `trajectory/*` arrays,
-and, only when `scan !== nothing`, the `scan/*` arrays and per-variable `scan/rss*` groups,
-including `scan/rss_unreg/<variable>`.
+group per leaf of the fitted trace, the `fit/*` scalars and vectors (including, since
+`otis-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`), the `trajectory/*` arrays,
+and, only when `scan !== nothing`, the `scan/*` arrays (including `scan/status`, one string per
+requested weight) and per-variable `scan/rss*` groups, including `scan/rss_unreg/<variable>`.
 
-Spec D34.
+Spec D34, D35.
 """
 function write_result(path::AbstractString, result::FitResult; deck::AbstractString="",
     source="fit", scan::Union{Nothing,WeightScanResult}=nothing)
@@ -119,6 +154,8 @@ function write_result(path::AbstractString, result::FitResult; deck::AbstractStr
         f["fit/g_calls"] = Int64(result.g_calls)
         f["fit/converged"] = UInt8(result.converged)
         f["fit/status"] = string(result.status)
+        f["fit/termination"] = string(result.termination)
+        f["fit/near_bound_fraction"] = _near_bound_fraction(result)
         f["fit/optimizer"] = result.optimizer
         f["fit/elapsed"] = Float64(result.elapsed)
 
@@ -128,6 +165,7 @@ function write_result(path::AbstractString, result::FitResult; deck::AbstractStr
         f["trajectory/R"] = Float64[row.R for row in result.trajectory]
 
         if scan !== nothing
+            f["scan/status"] = String[string(r.status) for r in scan.results]
             f["scan/weights"] = Vector{Float64}(scan.weights)
             f["scan/chi2"] = Vector{Float64}(scan.chi2)
             f["scan/R"] = Vector{Float64}(scan.R)
@@ -211,7 +249,8 @@ function read_result(path::AbstractString)
             theta=f["fit/theta"], chi2=f["fit/chi2"], R=f["fit/R"], objective=f["fit/objective"],
             weight=f["fit/weight"], term_values=f["fit/term_values"], npixels=f["fit/npixels"],
             iterations=f["fit/iterations"], f_calls=f["fit/f_calls"], g_calls=f["fit/g_calls"],
-            converged=f["fit/converged"], status=f["fit/status"], optimizer=f["fit/optimizer"],
+            converged=f["fit/converged"], status=f["fit/status"], termination=f["fit/termination"],
+            near_bound_fraction=f["fit/near_bound_fraction"], optimizer=f["fit/optimizer"],
             elapsed=f["fit/elapsed"],
         )
 
@@ -231,6 +270,7 @@ function read_result(path::AbstractString)
                 weights=f["scan/weights"], chi2=f["scan/chi2"], R=f["scan/R"],
                 chi2_normalized=f["scan/chi2_normalized"], R_normalized=f["scan/R_normalized"],
                 chi2_unreg=f["scan/chi2_unreg"], R_unreg=f["scan/R_unreg"],
+                status=f["scan/status"],
                 rss=rss, rss_normalized=rss_normalized, rss_unreg=rss_unreg,
             )
         end

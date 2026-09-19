@@ -28,6 +28,27 @@ include(joinpath(@__DIR__, "epw_ablation.jl")) # writes runs/epw_ablation_streak
 const LAMBDA_SCAN = [1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1]
 const LAMBDA_SHOWN = 2.0e-4
 
+# D34 item 3: refuse to write a result carrying a non-converged fit. `OTIS_ALLOW_UNCONVERGED=1`
+# downgrades the refusal to a loud warning for a diagnostic run; it defaults off, and a file
+# written under it is a diagnostic, never a reproduction.
+const ALLOW_UNCONVERGED = get(ENV, "OTIS_ALLOW_UNCONVERGED", "0") == "1"
+
+function _check_converged(scan::WeightScanResult, extra::Vector{Pair{String,FitResult}})
+    offenders = String[]
+    scan.unregularized.converged ||
+        push!(offenders, "unregularized (status = $(scan.unregularized.status))")
+    for (w, r) in zip(scan.weights, scan.results)
+        r.converged || push!(offenders, "Lambda = $w (status = $(r.status))")
+    end
+    for (label, r) in extra
+        r.converged || push!(offenders, "$label (status = $(r.status))")
+    end
+    isempty(offenders) && return nothing
+    msg = "not converged, refusing to write a result: " * join(offenders, "; ")
+    ALLOW_UNCONVERGED ? (@warn "$msg (OTIS_ALLOW_UNCONVERGED=1: writing anyway)") : error(msg)
+    return nothing
+end
+
 function _leaf_truth(trace::PlasmaTrace, boundary_key::AbstractString)
     si_path, factor = _leaf_si_path(boundary_key)
     i = findfirst(==(si_path), string.(trace.paths))
@@ -67,6 +88,8 @@ function run_reproduction()
     rss_shown = _rss_normalized(shown, truth, scan)
     avg = sum(values(rss_shown)) / length(rss_shown)
     @info "epw_ablation: fit shown (Lambda = 2e-4, D38)" rss_shown average_rss = avg t_shown_s = t_shown chi2 = shown.chi2 R = shown.R converged = shown.converged iterations = shown.iterations
+
+    _check_converged(scan, ["shown (Lambda = $LAMBDA_SHOWN)" => shown])
 
     outdir = deck.sections["output"]["dir"]
     mkpath(outdir)

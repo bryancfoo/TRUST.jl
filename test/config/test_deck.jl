@@ -649,7 +649,7 @@ end
         @test isfile(joinpath(outdir, "result.jld2"))
         @test isfile(joinpath(outdir, "effective_deck.toml"))
         r = read_result(joinpath(outdir, "result.jld2"))
-        @test r.layout_version == "otis-result-1"
+        @test r.layout_version == "otis-result-2"
     end
 end
 

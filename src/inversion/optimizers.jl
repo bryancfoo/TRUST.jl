@@ -179,33 +179,52 @@ end
 # ------------------------------------------------------------------------------------------
 
 """
-    LBFGS(; m = 10, g_abstol = 1e-8, x_reltol = 0.0, f_reltol = 0.0, iterations = 1000,
-          time_limit = NaN)
+    LBFGS(; m = 10, f_abstol_per_pixel = 1e-4, patience = 5, g_abstol_per_pixel = 1e-6,
+          x_reltol = 0.0, iterations = 20_000, time_limit = NaN)
 
 Optim.jl's L-BFGS, the polisher (foo2026 Section III.D phase 2; [OQ-20](../../dev/open_questions.md#oq-20)).
-Every field name is `Optim.LBFGS`'s or `Optim.Options`' own (measured from `fieldnames` on
-Optim 2.3.1, 2026-09-12, D27): `m` is Optim's LBFGS memory; `g_abstol` is Optim's own default,
-`1e-8`; `x_reltol`/`f_reltol` default to `0.0` (off, Optim's own defaults); `iterations` caps the
-outer loop; `time_limit` in seconds, `NaN` (off) by default.
+`m` is Optim's LBFGS memory. **The convergence criterion is stated per pixel** (Step 3.C.2, D30),
+because `𝒪` is not comparable between problems or resolutions: `chi2` per pixel is about 1 at a
+good fit on every problem, so `f_abstol_per_pixel` and `g_abstol_per_pixel` mean the same thing
+everywhere, while an absolute threshold on `𝒪` would be a different threshold on every problem and
+every resolution. `solve` derives the absolute thresholds `f_abstol = f_abstol_per_pixel *
+problem.npixels` and `g_abstol = g_abstol_per_pixel * problem.npixels` and passes those to Optim.
+
+**The primary test is a decrease of `𝒪` smaller than `f_abstol` for `patience` consecutive
+iterations** (`successive_f_tol = patience - 1` in Optim's own semantics, D14: `k` requires `k + 1`
+qualifying iterations). This is the mechanism that already converges a fit whose gradient never
+gets close to `g_abstol` (D30, measured on multi-flow and shock). The **secondary** test is the
+usual gradient norm, `g_abstol`, raised from Optim's own `1e-8` default to a per-pixel figure five
+orders above it -- still far below the smallest gradient any non-saturated fit reached, and now
+reachable by a real minimum rather than only by numerical noise.
+
+`iterations = 20_000` (D32): the worst cut-down problem measured (shock) had not converged by the
+*old* criterion at 10 000 iterations; under the per-pixel criterion the criterion, not the cap, is
+expected to end every fit, and this is twice the largest cap ever run. `time_limit` in seconds,
+`NaN` (off) by default.
 
 **The saturation trap.** When the starting gradient is large in some direction, Optim's default
 line search can accept a **first step that lands the logit fully in its saturated region**
 (`_logistic(y)` is exactly `1.0` for `y ≳ 37`, D13). There `dx/dy`, and so the true gradient with
 respect to every saturated coordinate, is **exactly zero**, the Wolfe curvature condition is
-satisfied trivially by `0 >= (a negative number)`, and `Optim.g_converged` then reports
-`status = :gradient_norm` truthfully on a fit that is garbage. **`status = :gradient_norm`
-together with a `near_bound` entry in the result (D13) is the signature of this trap, not of a
-converged fit** -- the one combination to distrust. No guard is added to `solve` for this: the
-flag already exists, and the judgement belongs to whoever reads the result.
+satisfied trivially by `0 >= (a negative number)`, and `Optim.g_converged` would then report
+`status = :gradient_norm` truthfully on a fit that is garbage. **`solve` now catches this itself**
+(D31): a gradient-norm stop where at least `SATURATION_FRACTION` of `theta`'s coordinates are
+within `BOUND_PROXIMITY_TOL` of a bound is reported as `status = :saturated`, `converged = false`,
+never as a converged fit. **No value of `g_abstol_per_pixel` fixes this on its own** -- EPW's own
+saturated stop starts with a y-space gradient already far below even the old, far tighter
+`g_abstol`, so raising the threshold only makes the trap easier to fall into, not harder; the
+saturation check is what makes it safe to keep a gradient test at all.
 
-Spec D27.
+Spec D27, D30, D31, D32.
 """
 Base.@kwdef struct LBFGS <: AbstractOptimizer
     m::Int = 10
-    g_abstol::Float64 = 1e-8
+    f_abstol_per_pixel::Float64 = 1e-4
+    patience::Int = 5
+    g_abstol_per_pixel::Float64 = 1e-6
     x_reltol::Float64 = 0.0
-    f_reltol::Float64 = 0.0
-    iterations::Int = 1000
+    iterations::Int = 20_000
     time_limit::Float64 = NaN
 end
 
@@ -221,11 +240,34 @@ recorded through `Optim.Options(callback = ...)`, one `(iteration, 𝒪, chi2, R
 iteration including iteration 0 (Level 2's recommendation, D27, so "iteration" means the same
 thing across all four optimizers) -- at the cost of one extra `chi2`/`R` evaluation per recorded
 iteration, since Optim's own trace and callback state expose only the combined `𝒪`, never the
-split. Status is read off Optim's own accessors, none of which is exported (Pitfall 21):
-`Optim.g_converged` -> `:gradient_norm`, `Optim.f_converged` -> `:f_tolerance`,
-`Optim.x_converged` -> `:x_tolerance`, `Optim.iteration_limit_reached` -> `:iterations`,
-otherwise `:failed`. `FitResult.termination` is Optim's own finer code,
-`Symbol(string(Optim.termination_code(res)))` (D13, D14).
+split.
+
+**The criterion (D30).** `f_abstol = opt.f_abstol_per_pixel * problem.npixels`, `g_abstol =
+opt.g_abstol_per_pixel * problem.npixels`, `successive_f_tol = opt.patience - 1` (D14's measured
+semantics: `k` needs `k + 1` qualifying iterations, so `patience` itself is off by one from what
+Optim is actually asked for) and `f_reltol = 0.0` (D30 rejects a relative test, which would demand
+different flatness of every problem for no physical reason). Status is read off Optim's own
+accessors, none of which is exported (Pitfall 21), in an order that matters: `Optim.g_converged`
+is checked **first**, together with the saturation guard below, so a saturated stop can never be
+relabelled by a later branch --
+`Optim.g_converged` (and saturated) -> `:saturated`, `Optim.g_converged` (and not saturated) ->
+`:gradient_norm`, `Optim.f_converged` -> `:f_tolerance`, `Optim.x_converged` -> `:x_tolerance`,
+`Optim.iteration_limit_reached` -> `:iterations`, otherwise `:failed`. `FitResult.termination` is
+Optim's own finer code, `Symbol(string(Optim.termination_code(res)))` (D13, D14).
+
+**The saturation guard (D31).** `near_bound_fraction = _count_near_bound(problem.pspec, theta) /
+problem.pspec.ntheta`; when `Optim.g_converged(res)` is true **and** `near_bound_fraction >=
+SATURATION_FRACTION`, `status = :saturated` and `converged = false` regardless of what
+`Optim.converged(res)` itself says -- `Optim.g_converged` is truthfully reporting a y-space
+gradient near zero, but one driven there by `dx/dy -> 0` at a saturated logit, not by proximity to
+a minimum. **`:converged_at_start` (D17) is layered on top of that**, and only on top of it: when
+`Optim.iterations(res) == 0` and the run converged by any of Optim's own tests, the status becomes
+`:converged_at_start` -- **unless the saturation check already said `:saturated`, which takes
+precedence** (EPW's own two exact-1.0 scan points are both: the honest label is `:saturated`).
+
+A status of `:iterations` or `:saturated` -- the fit did not converge, or "converged" in a way that
+is not to be trusted -- emits `@warn` naming the optimizer, `problem.npixels`, the iteration count
+and the gradient norm at the returned point (D34).
 
 `g_trace`, given a `Vector`, has one named tuple `(iteration, gnorm_inf, gnorm_2, near_bound)`
 pushed per recorded iteration, from inside the same callback the trajectory uses and on the same
@@ -237,7 +279,7 @@ whose **x**-space value is within `BOUND_PROXIMITY_TOL` of a bound. A test hook 
 nothing about the default call shape, on the same footing as `LevenbergMarquardt`'s `mu_trace` and
 `NoisyGradientDescent`'s `y_trace`.
 
-Spec D27, D13.
+Spec D27, D13, D30, D31, D34.
 """
 function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(problem.pspec),
     g_trace::Union{Nothing,Vector}=nothing)
@@ -264,15 +306,24 @@ function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(pr
         return false
     end
 
+    f_abstol = opt.f_abstol_per_pixel * problem.npixels
+    g_abstol = opt.g_abstol_per_pixel * problem.npixels
+
     od = Optim.OnceDifferentiable(f, g!, fg!, y0)
     res = Optim.optimize(od, y0, Optim.LBFGS(; m=opt.m),
-        Optim.Options(; g_abstol=opt.g_abstol, x_reltol=opt.x_reltol, f_reltol=opt.f_reltol,
-            iterations=opt.iterations, time_limit=opt.time_limit,
-            store_trace=true, extended_trace=true, callback=_lbfgs_callback))
+        Optim.Options(; f_abstol=f_abstol, successive_f_tol=opt.patience - 1, g_abstol=g_abstol,
+            x_reltol=opt.x_reltol, f_reltol=0.0, iterations=opt.iterations,
+            time_limit=opt.time_limit, store_trace=true, extended_trace=true,
+            callback=_lbfgs_callback))
 
     termination = Symbol(string(Optim.termination_code(res)))
+    theta = Optim.minimizer(res)
 
-    status = if Optim.g_converged(res)
+    nb = _count_near_bound(problem.pspec, theta)
+    near_bound_fraction = nb / problem.pspec.ntheta
+    status = if Optim.g_converged(res) && near_bound_fraction >= SATURATION_FRACTION
+        :saturated
+    elseif Optim.g_converged(res)
         :gradient_norm
     elseif Optim.f_converged(res)
         :f_tolerance
@@ -283,24 +334,34 @@ function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(pr
     else
         :failed
     end
+    if status !== :saturated && Optim.iterations(res) == 0 && Optim.converged(res)
+        status = :converged_at_start
+    end
+    converged = status === :saturated ? false : Optim.converged(res)
 
-    theta = Optim.minimizer(res)
+    if status === :iterations || status === :saturated
+        gfinal = zeros(Float64, problem.pspec.ntheta)
+        _objective_and_gradient!(gfinal, problem, theta)
+        @warn "LBFGS did not converge to a trustworthy minimum" optimizer = "lbfgs" status problem.npixels iterations = Optim.iterations(res) gnorm_inf = maximum(abs, gfinal)
+    end
+
     elapsed = time() - t0
-    return _build_result(problem, theta, Optim.minimum(res), trajectory, Optim.converged(res),
+    return _build_result(problem, theta, Optim.minimum(res), trajectory, converged,
         status, Optim.iterations(res), Optim.f_calls(res), Optim.g_calls(res), elapsed, "lbfgs";
         termination=termination)
 end
 
-Base.show(io::IO, opt::LBFGS) = print(io, "LBFGS(m = ", opt.m, ", g_abstol = ", opt.g_abstol,
-    ", iterations = ", opt.iterations, ")")
+Base.show(io::IO, opt::LBFGS) = print(io, "LBFGS(m = ", opt.m,
+    ", f_abstol_per_pixel = ", opt.f_abstol_per_pixel, ", patience = ", opt.patience,
+    ", g_abstol_per_pixel = ", opt.g_abstol_per_pixel, ", iterations = ", opt.iterations, ")")
 
 # ------------------------------------------------------------------------------------------
 # D28: LevenbergMarquardt
 # ------------------------------------------------------------------------------------------
 
 """
-    LevenbergMarquardt(; iterations = 200, g_abstol = 1e-8, x_reltol = 1e-10, mu_init = 1e-3,
-                        cgls_tol = 1e-6, cgls_maxiter = 100, seed = 20260908)
+    LevenbergMarquardt(; iterations = 2000, g_abstol = 1e-8, x_reltol = 1e-10, mu_init = 1e-3,
+                        cgls_tol = 1e-6, cgls_maxiter = 2000, seed = 20260908)
 
 Levenberg-Marquardt, expected fastest near the minimum for a least-squares objective
 ([OQ-20](../../dev/open_questions.md#oq-20)). `iterations` caps the outer loop; `g_abstol` stops
@@ -310,15 +371,25 @@ on `‖grad_y O‖_inf <= g_abstol`; `x_reltol` stops on `‖delta‖ <= x_relto
 `Xoshiro`'s seed for the one random direction `mu0`'s estimate is drawn along, so two runs are
 bitwise identical (D28, OP16).
 
-Spec D28.
+**`iterations` and `cgls_maxiter` are raised from 200/100 (D32)**: multi-flow's cut-down problem
+saturated a 2000-iteration outer cap *and* its inner CGLS cap simultaneously at the old defaults,
+with a mean of 941.6 and a max of exactly 1000 CGLS iterations per outer step at
+`cgls_maxiter = 1000` -- the shipped `100` was an order below what one outer step needs. `g_abstol`
+is left at Optim's-style `1e-8` this step; LM's convergence test is its own, and no deck in this
+phase runs it (Step 3.C.2 leaves it alone rather than harmonizing it on no measurement of its own).
+**At these raised defaults a realistic problem is a minutes-to-tens-of-minutes call**: 763 s
+measured on a 128 x 32 problem at `iterations = 2000, cgls_maxiter = 1000`, and raising
+`cgls_maxiter` to 2000 can double an outer step's inner work again.
+
+Spec D28, D32.
 """
 Base.@kwdef struct LevenbergMarquardt <: AbstractOptimizer
-    iterations::Int = 200
+    iterations::Int = 2000
     g_abstol::Float64 = 1e-8
     x_reltol::Float64 = 1e-10
     mu_init::Float64 = 1e-3
     cgls_tol::Float64 = 1e-6
-    cgls_maxiter::Int = 100
+    cgls_maxiter::Int = 2000
     seed::Int = 20260908
 end
 

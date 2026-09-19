@@ -35,6 +35,27 @@ const LAMBDA_SCAN = [1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1]
 const LAMBDA_A = 1.0e-2
 const LAMBDA_B = 1.0e-1 # the deck's own [regularizer].weight -- Fig. 5's main panel
 
+# D34 item 3: refuse to write a result carrying a non-converged fit. `OTIS_ALLOW_UNCONVERGED=1`
+# downgrades the refusal to a loud warning for a diagnostic run; it defaults off, and a file
+# written under it is a diagnostic, never a reproduction.
+const ALLOW_UNCONVERGED = get(ENV, "OTIS_ALLOW_UNCONVERGED", "0") == "1"
+
+function _check_converged(scan::WeightScanResult, extra::Vector{Pair{String,FitResult}})
+    offenders = String[]
+    scan.unregularized.converged ||
+        push!(offenders, "unregularized (status = $(scan.unregularized.status))")
+    for (w, r) in zip(scan.weights, scan.results)
+        r.converged || push!(offenders, "Lambda = $w (status = $(r.status))")
+    end
+    for (label, r) in extra
+        r.converged || push!(offenders, "$label (status = $(r.status))")
+    end
+    isempty(offenders) && return nothing
+    msg = "not converged, refusing to write a result: " * join(offenders, "; ")
+    ALLOW_UNCONVERGED ? (@warn "$msg (OTIS_ALLOW_UNCONVERGED=1: writing anyway)") : error(msg)
+    return nothing
+end
+
 _total_variation(v::AbstractVector) = sum(abs(v[j+1] - v[j]) for j in 1:(length(v)-1))
 
 function run_reproduction()
@@ -64,6 +85,8 @@ function run_reproduction()
         tv_b = _total_variation(result_b.values[v][bins])
         @info "iaw_shock: total variation" variable = v tv_unreg tv_at_1e_2 = tv_a tv_at_1e_1 = tv_b
     end
+
+    _check_converged(scan, ["shown (Lambda = $LAMBDA_B)" => result_b])
 
     outdir = deck.sections["output"]["dir"]
     mkpath(outdir)

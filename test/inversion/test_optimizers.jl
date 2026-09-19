@@ -132,6 +132,31 @@ function _op_p2_problem()
     return problem, theta_start
 end
 
+# P2's own problem, but with a `mask` on the data half the pixels (CR3, D30: the criterion is per
+# pixel, so the same physical setup at a different `problem.npixels` must give a proportionally
+# different `f_abstol`). Otherwise identical to `_op_p2_problem` -- same truth, same regularizer,
+# same start perturbation.
+function _op_p2_problem_masked(mask::AbstractMatrix{Bool})
+    expt = _op_p2_expt()
+    pspec = _op_p2_pspec(expt)
+    working = _op_working(expt, pspec)
+    nt = nbins(pspec.trace)
+    t_ramp = range(220.0, 260.0; length=nt)
+    u_ramp = range(-20.0, 20.0; length=nt)
+    theta_truth = flatten(pspec, ["T_D" => collect(t_ramp), "u_D" => collect(u_ramp)])
+    truth = unflatten(working, pspec, theta_truth)
+    image = measure(truth)
+    sig = sigma(GaussianNoise(a=1.0, b=0.02), image)
+    data = StreakData(lambda_m=working.lambda, t_s=working.t, image=image, sigma=sig, mask=mask)
+
+    term = RegularizerTerm(pspec; select=["T_D"], operator=:D2, normalization=:unit, weight=1.0)
+    reg = Regularizer([term]; weight=1e-3)
+
+    problem = FitProblem(working, pspec, data; regularizer=reg)
+    theta_start = theta_truth .+ 0.02 .* (1:length(theta_truth))
+    return problem, theta_start
+end
+
 # ------------------------------------------------------------------------------------------
 # OP1, OP2, OP3: the three tight optimizers recover P1's generating parameters
 # ------------------------------------------------------------------------------------------
@@ -176,7 +201,15 @@ end
 
 @testset "OP4: LBFGS and LM agree on a regularized problem (P2)" begin
     problem, start = _op_p2_problem()
-    r1 = solve(problem, LBFGS(); start=start)
+    # Step 3.C.2 (D30): the shipped LBFGS default now stops on a per-pixel objective-decrease
+    # criterion, deliberately much looser than the old g_abstol = 1e-8, so it no longer lands at
+    # the same bitwise-tight minimizer LM's own (untouched, still tight) g_abstol/x_reltol do.
+    # OP4 asks whether two different optimizers agree on the same minimum, not whether the
+    # shipped default is tight -- that question is CR1's -- so it runs LBFGS with an explicitly
+    # tight criterion here (rule 11 zero: "OP rows updated where a default moved", the Files list
+    # for this step).
+    tight = LBFGS(; f_abstol_per_pixel=1e-12, g_abstol_per_pixel=1e-12, patience=20, iterations=5000)
+    r1 = solve(problem, tight; start=start)
     r2 = solve(problem, LevenbergMarquardt(); start=start)
     relerr = maximum(abs.(r1.theta .- r2.theta) ./ max.(abs.(r2.theta), 1.0))
     @info "OP4" relerr r1.status r2.status
@@ -445,4 +478,98 @@ end
     @test occursin("FitResult", sprint(show, result))
     str = sprint(show, MIME("text/plain"), result)
     @test occursin("lbfgs", str)
+end
+
+# ------------------------------------------------------------------------------------------
+# CR1 to CR7: the convergence criterion, the caps and the loud status (Step 3.C.2, D30-D34)
+# ------------------------------------------------------------------------------------------
+
+@testset "CR1: the primary criterion is observable in the trajectory (P2)" begin
+    problem, start = _op_p2_problem()
+    opt = LBFGS()
+    result = solve(problem, opt; start=start)
+    @info "CR1" result.status result.converged result.iterations
+    @test result.status == :f_tolerance
+    @test result.converged
+    threshold = opt.f_abstol_per_pixel * problem.npixels
+    traj = result.trajectory
+    n = length(traj)
+    @test n > opt.patience
+    for k in (n-opt.patience+1):n
+        dO = traj[k-1].objective - traj[k].objective
+        @test dO < threshold
+    end
+end
+
+@testset "CR2: patience arithmetic (successive_f_tol = patience - 1)" begin
+    problem, start = _op_p2_problem()
+    r4 = solve(problem, LBFGS(; patience=4); start=start)
+    r5 = solve(problem, LBFGS(; patience=5); start=start)
+    @info "CR2" r4.iterations r5.iterations
+    @test r5.iterations >= r4.iterations
+end
+
+@testset "CR3: the criterion is per pixel" begin
+    problem, _ = _op_p2_problem()
+    nlambda, nt = size(problem.data.image)
+    mask = trues(nlambda, nt)
+    mask[(nlambda÷2+1):end, :] .= false
+    problem_half, _ = _op_p2_problem_masked(mask)
+    @test problem_half.npixels == problem.npixels ÷ 2
+
+    opt = LBFGS()
+    f_abstol_full = opt.f_abstol_per_pixel * problem.npixels
+    f_abstol_half = opt.f_abstol_per_pixel * problem_half.npixels
+    @info "CR3" problem.npixels problem_half.npixels f_abstol_full f_abstol_half
+    @test f_abstol_full / f_abstol_half == problem.npixels / problem_half.npixels
+end
+
+@testset "CR4: the saturation guard" begin
+    problem = _op_p1_problem()
+    pspec = problem.pspec
+    v_T, v_u = pspec.variables[1], pspec.variables[2]
+    start = flatten(pspec, ["T_D" => v_T.lower + 1e-20 * (v_T.upper - v_T.lower),
+        "u_D" => v_u.upper - 1e-20 * (v_u.upper - v_u.lower)])
+    result = solve(problem, LBFGS(); start=start)
+    @info "CR4" result.status result.converged result.termination result.iterations
+    @test result.status == :saturated
+    @test !result.converged
+    @test result.termination == :GradientNorm   # Optim.g_converged fired underneath
+end
+
+@testset "CR5: a near-bound stop by the primary criterion is still converged" begin
+    problem = _op_p1_problem()
+    pspec = problem.pspec
+    v_T, v_u = pspec.variables[1], pspec.variables[2]
+    start = flatten(pspec, ["T_D" => v_T.lower + 1e-3 * (v_T.upper - v_T.lower),
+        "u_D" => v_u.upper - 1e-3 * (v_u.upper - v_u.lower)])
+    opt = LBFGS(; f_abstol_per_pixel=1.0e6, patience=1)   # trivially satisfied every iteration
+    result = solve(problem, opt; start=start)
+    @info "CR5" result.status result.converged result.iterations
+    @test result.status == :f_tolerance
+    @test result.converged
+end
+
+@testset "CR6: :converged_at_start, and :saturated wins when the start is also saturated" begin
+    problem = _op_p1_problem()
+    start = _op_p1_start()(problem)
+    result0 = solve(problem, LBFGS(); start=start)
+    @test result0.status != :saturated
+
+    result1 = solve(problem, LBFGS(); start=result0.theta)
+    @info "CR6 (normal)" result1.status result1.iterations length(result1.trajectory)
+    @test result1.status == :converged_at_start
+    @test result1.iterations == 0
+    @test length(result1.trajectory) == 1
+
+    pspec = problem.pspec
+    v_T, v_u = pspec.variables[1], pspec.variables[2]
+    sat_start = flatten(pspec, ["T_D" => v_T.lower + 1e-20 * (v_T.upper - v_T.lower),
+        "u_D" => v_u.upper - 1e-20 * (v_u.upper - v_u.lower)])
+    sat_result0 = solve(problem, LBFGS(); start=sat_start)
+    @test sat_result0.status == :saturated
+
+    sat_result1 = solve(problem, LBFGS(); start=sat_result0.theta)
+    @info "CR6 (saturated wins)" sat_result1.status sat_result1.iterations
+    @test sat_result1.status == :saturated
 end

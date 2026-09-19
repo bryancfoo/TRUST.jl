@@ -326,7 +326,8 @@ function measurement2_lbfgs(name::AbstractString, problem::FitProblem, start;
     o_at(it) = (idx = findfirst(e -> e.iteration == it, traj); idx === nothing ? nothing : traj[idx].objective)
     o1000, o2000, o5000, oend = o_at(1000.0), o_at(2000.0), o_at(5000.0), traj[end].objective
     mean_decrease = length(traj) > 1000 ? (traj[end-1000].objective - oend) / 1000 : nothing
-    @info "$name measurement2: LBFGS to $iterations" converged = result.converged status = result.status termination = result.termination iterations_reached = result.iterations O_1000 = o1000 O_2000 = o2000 O_5000 = o5000 O_end = oend mean_decrease_last1000 = mean_decrease elapsed_s = elapsed
+    near_bound_fraction = _count_near_bound(problem.pspec, result.theta) / problem.pspec.ntheta
+    @info "$name measurement2: LBFGS to $iterations" converged = result.converged status = result.status termination = result.termination iterations_reached = result.iterations near_bound_fraction O_1000 = o1000 O_2000 = o2000 O_5000 = o5000 O_end = oend mean_decrease_last1000 = mean_decrease elapsed_s = elapsed
     return nothing
 end
 

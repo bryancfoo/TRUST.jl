@@ -112,6 +112,7 @@ function weight_scan(problem::FitProblem, weights::AbstractVector{<:Real}, optim
     sorted = sort(ws)
 
     unregularized = solve(_with_weight(problem, 0.0), optimizer; start=start)
+    unregularized.converged || @warn "weight_scan: a member did not converge" weight = "unregularized" status = unregularized.status termination = unregularized.termination
     chi2_unreg = unregularized.chi2
     R_unreg = unregularized.R
 
@@ -119,6 +120,7 @@ function weight_scan(problem::FitProblem, weights::AbstractVector{<:Real}, optim
     current_start = unregularized.theta
     for (k, w) in enumerate(sorted)
         results[k] = solve(_with_weight(problem, w), optimizer; start=current_start)
+        results[k].converged || @warn "weight_scan: a member did not converge" weight = w status = results[k].status termination = results[k].termination
         current_start = results[k].theta
     end
 

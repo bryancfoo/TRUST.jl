@@ -113,11 +113,20 @@ end
 
 @testset "WS2: chi2 is non-decreasing and R non-increasing in Lambda" begin
     problem, start, truth = _ws_p2_problem()
-    scan = weight_scan(problem, _WS_WEIGHTS, LBFGS(); start=start)
+    opt = LBFGS()
+    scan = weight_scan(problem, _WS_WEIGHTS, opt; start=start)
     @info "WS2" scan.chi2 scan.R
+    # D33: a fit stops once O has decreased by less than f_abstol_per_pixel * npixels on each of
+    # `patience` consecutive iterations, so its own O is within eps_O = patience *
+    # f_abstol_per_pixel * npixels of where those iterations would have taken it. Two neighbouring
+    # scan points are each independently that far off, so a comparison between them carries
+    # 2 * eps_O -- slack_chi2 directly (O = chi2 + Lambda * R, R >= 0, Lambda >= 0); slack_R
+    # divides by the smaller of the two weights being compared, since R is only constrained
+    # through Lambda * R.
+    eps_O = opt.patience * opt.f_abstol_per_pixel * problem.npixels
+    slack_chi2 = 2 * eps_O
     for k in 1:3
-        slack_chi2 = 1e-6 * scan.chi2[1]
-        slack_R = 1e-6 * scan.R[1]
+        slack_R = 2 * eps_O / min(scan.weights[k], scan.weights[k+1])
         @test scan.chi2[k+1] >= scan.chi2[k] - slack_chi2
         @test scan.R[k+1] <= scan.R[k] + slack_R
     end
@@ -236,4 +245,34 @@ end
         end
     end
     @test isempty(found)
+end
+
+# ------------------------------------------------------------------------------------------
+# CR7: WS2's slack is derived from the optimizer's own fields, never a literal (D33)
+# ------------------------------------------------------------------------------------------
+
+@testset "CR7: WS2's slack is derived from the optimizer's own fields (D33)" begin
+    problem, start, truth = _ws_p2_problem()
+    opt = LBFGS()
+    scan = weight_scan(problem, _WS_WEIGHTS, opt; start=start)
+
+    eps_O = opt.patience * opt.f_abstol_per_pixel * problem.npixels
+    new_slack_chi2 = 2 * eps_O
+    old_slack_chi2 = 1e-6 * scan.chi2[1]
+    new_slack_R_1 = 2 * eps_O / min(scan.weights[1], scan.weights[2])
+    old_slack_R_1 = 1e-6 * scan.R[1]
+    @info "CR7: WS2's slack, old vs new" old_slack_chi2 new_slack_chi2 tighter_chi2 = (new_slack_chi2 < old_slack_chi2 ? "new" : "old") old_slack_R_1 new_slack_R_1 tighter_R = (new_slack_R_1 < old_slack_R_1 ? "new" : "old")
+
+    # the derivation, recomputed from the optimizer's own fields and problem.npixels -- never a
+    # literal, so a default that moves keeps this row honest instead of silently going stale.
+    @test new_slack_chi2 == 2 * opt.patience * opt.f_abstol_per_pixel * problem.npixels
+    @test new_slack_R_1 == 2 * opt.patience * opt.f_abstol_per_pixel * problem.npixels / min(scan.weights[1], scan.weights[2])
+
+    # WS2 itself still passes at this slack (the re-derivation did not just move the number).
+    for k in 1:3
+        slack_chi2 = 2 * eps_O
+        slack_R = 2 * eps_O / min(scan.weights[k], scan.weights[k+1])
+        @test scan.chi2[k+1] >= scan.chi2[k] - slack_chi2
+        @test scan.R[k+1] <= scan.R[k] + slack_R
+    end
 end

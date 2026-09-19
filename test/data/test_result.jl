@@ -107,7 +107,8 @@ const _RE_RESULT, _RE_SCAN = _re_fixture()
                 "axis_boundary_unit",
                 "fit/theta", "fit/chi2", "fit/R", "fit/objective", "fit/weight",
                 "fit/term_values", "fit/npixels", "fit/iterations", "fit/f_calls",
-                "fit/g_calls", "fit/converged", "fit/status", "fit/optimizer", "fit/elapsed",
+                "fit/g_calls", "fit/converged", "fit/status", "fit/termination",
+                "fit/near_bound_fraction", "fit/optimizer", "fit/elapsed",
                 "trajectory/iteration", "trajectory/objective", "trajectory/chi2", "trajectory/R",
             ])
             for v in pspec.variables
@@ -137,7 +138,7 @@ end
         write_result(path, _RE_RESULT; deck="d", scan=_RE_SCAN)
         jldopen(path, "r") do f
             for (name, v) in _walk_leaf_values(f)
-                @test v isa Union{AbstractArray{<:Real},AbstractString,Real}
+                @test v isa Union{AbstractArray{<:Real},AbstractArray{<:AbstractString},AbstractString,Real}
             end
         end
     end
@@ -155,7 +156,7 @@ end
         write_result(path, result; deck="the effective deck", source="fit", scan=_RE_SCAN)
         r = read_result(path)
 
-        @test r.layout_version == "otis-result-1"
+        @test r.layout_version == "otis-result-2"
         @test r.deck == "the effective deck"
         @test r.axis_name == :t
         @test r.axis == pspec.axis
@@ -189,6 +190,8 @@ end
         @test r.fit.g_calls == result.g_calls
         @test r.fit.converged == UInt8(result.converged)
         @test r.fit.status == string(result.status)
+        @test r.fit.termination == string(result.termination)
+        @test r.fit.near_bound_fraction == OTIS._near_bound_fraction(result)
         @test r.fit.optimizer == result.optimizer
         @test r.fit.elapsed == result.elapsed
 
@@ -196,6 +199,7 @@ end
         @test r.trajectory.chi2 == [row.chi2 for row in result.trajectory]
         @test r.trajectory.R == [row.R for row in result.trajectory]
 
+        @test r.scan.status == string.(getfield.(_RE_SCAN.results, :status))
         @test r.scan.weights == _RE_SCAN.weights
         @test r.scan.chi2 == _RE_SCAN.chi2
         @test r.scan.R == _RE_SCAN.R
@@ -223,7 +227,7 @@ end
     mktempdir() do dir
         path = joinpath(dir, "result.jld2")
         write_result(path, _RE_RESULT)
-        @test read_result(path).layout_version == "otis-result-1"
+        @test read_result(path).layout_version == "otis-result-2"
 
         badpath = joinpath(dir, "bad.jld2")
         jldopen(badpath, "w") do f
@@ -281,6 +285,7 @@ end
         write_result(with_scan, _RE_RESULT; scan=_RE_SCAN)
         jldopen(with_scan, "r") do f
             @test haskey(f, "scan")
+            @test f["scan/status"] == string.(getfield.(_RE_SCAN.results, :status))
             @test f["scan/weights"] == _RE_SCAN.weights
             @test f["scan/chi2"] == _RE_SCAN.chi2
             @test f["scan/R"] == _RE_SCAN.R
