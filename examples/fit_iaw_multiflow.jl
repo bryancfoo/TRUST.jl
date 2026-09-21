@@ -90,7 +90,10 @@ function run_reproduction()
     t_shown = @elapsed shown = _shown_fit(problem, scan, LAMBDA_SHOWN, optimizer)
     rss_shown = _rss_normalized(shown, truth, scan)
     avg = sum(values(rss_shown)) / length(rss_shown)
-    @info "iaw_multiflow: fit shown (Lambda = 5e-3, D38)" rss_shown average_rss = avg t_shown_s = t_shown chi2 = shown.chi2 R = shown.R converged = shown.converged iterations = shown.iterations
+    for v in sort(collect(keys(rss_shown)))
+        @info "iaw_multiflow: fit shown (Lambda = 5e-3, D38) per-parameter row" variable = v rss_normalized = rss_shown[v]
+    end
+    @info "iaw_multiflow: fit shown (Lambda = 5e-3, D38)" average_rss = avg t_shown_s = t_shown chi2 = shown.chi2 R = shown.R converged = shown.converged iterations = shown.iterations
 
     _check_converged(scan, ["shown (Lambda = $LAMBDA_SHOWN)" => shown])
 
