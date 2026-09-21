@@ -425,7 +425,8 @@ Base.show(io::IO, opt::LBFGS) = print(io, "LBFGS(m = ", opt.m,
 
 """
     LevenbergMarquardt(; iterations = 2000, g_abstol = 1e-8, x_reltol = 1e-10, mu_init = 1e-3,
-                        cgls_tol = 1e-6, cgls_maxiter = 2000, seed = 20260908)
+                        cgls_tol = 1e-6, cgls_maxiter = 2000, seed = 20260908,
+                        precondition = true)
 
 Levenberg-Marquardt, expected fastest near the minimum for a least-squares objective
 ([OQ-20](../../dev/open_questions.md#oq-20)). `iterations` caps the outer loop; `g_abstol` stops
@@ -445,7 +446,14 @@ phase runs it (Step 3.C.2 leaves it alone rather than harmonizing it on no measu
 measured on a 128 x 32 problem at `iterations = 2000, cgls_maxiter = 1000`, and raising
 `cgls_maxiter` to 2000 can double an outer step's inner work again.
 
-Spec D28, D32.
+**`precondition`** (D41, settling the asymmetry D37 left open): `true` runs CGLS Jacobi-
+preconditioned on the floored Gauss-Newton diagonal, exactly as the "CGLS is Jacobi-preconditioned"
+paragraph of `solve`'s own docstring below describes; `false` passes `precond = nothing` to
+`_cgls`, which chunk 7's own measurement (OP14) found bitwise identical to the unpreconditioned
+solve. Deck-settable like every other field, on the same footing as `LBFGS`'s own
+`precondition::Bool`.
+
+Spec D28, D32, D41.
 """
 Base.@kwdef struct LevenbergMarquardt <: AbstractOptimizer
     iterations::Int = 2000
@@ -455,6 +463,7 @@ Base.@kwdef struct LevenbergMarquardt <: AbstractOptimizer
     cgls_tol::Float64 = 1e-6
     cgls_maxiter::Int = 2000
     seed::Int = 20260908
+    precondition::Bool = true
 end
 
 """
@@ -475,7 +484,9 @@ preconditioned CG on the SPD system `(JᵀJ + mu I) delta = -gvec` with `M = Dia
 `A` is still applied to the search direction `p` directly (`q = J p`, `dot(q, q) + mu * dot(p, p)`
 is `pᵀ A p` regardless of preconditioning, so `alpha`'s formula is unchanged), and only the
 residual-to-direction step is preconditioned, `z = gnew ./ precond` in place of `gnew` itself, in
-both the initial direction and `gam`'s reduction and in the Polak-Ribiere-style update of `p`.
+both the initial direction and `gam`'s reduction and in the Fletcher-Reeves-style update of `p`
+(`gam1/gam` with `gam = dot(r, z)`, the standard choice for SPD PCG -- corrected from an earlier
+"Polak-Ribiere-style" label, D41).
 With `precond === nothing` every one of those becomes `z === gnew`/`p0 === -gvec` and the method is
 bitwise the unpreconditioned CGLS above. A preconditioner that changes the converged `delta` (to
 more than solver-noise tolerance) is a bug (PC4); one that only changes `niter` is the point.
@@ -526,14 +537,16 @@ through `jvp!`/`jtvp!` -- `J` is never formed and `JᵀJ` never assembled. **Ide
 already present, and computing it matrix-free would cost `N_theta` Jacobian-vector products
 against CGLS's typical few dozen.
 
-**CGLS is Jacobi-preconditioned (Step 3.C.3, D37)**: the same floored Gauss-Newton diagonal
-`LBFGS`'s own preconditioner uses, `_gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))`,
-recomputed from `Jac` whenever `Jac` itself is (re)assembled -- once at the start and again on
-every **accepted** step, never on a rejected one, since `Jac` is not rebuilt then either. A
-degenerate diagonal (`_gauss_newton_floor` returning `nothing`) runs that call's `_cgls`
-unpreconditioned. This is what chunk 5's own diagnosis measured CGLS needing: a mean of 98.2 of
-100 inner iterations on the 128 x 32 cut-down problem against 8.7 on the toy problem P2 -- the same
-severe conditioning (`spread(d)` of 1.4e3-2.8e3 at the *start*) that motivates `LBFGS`'s own `P`.
+**CGLS is Jacobi-preconditioned when `opt.precondition` (D41; Step 3.C.3, D37)**: the same floored
+Gauss-Newton diagonal `LBFGS`'s own preconditioner uses,
+`_gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))`, recomputed from `Jac` whenever `Jac`
+itself is (re)assembled -- once at the start and again on every **accepted** step, never on a
+rejected one, since `Jac` is not rebuilt then either. A degenerate diagonal
+(`_gauss_newton_floor` returning `nothing`) runs that call's `_cgls` unpreconditioned, and so does
+`opt.precondition = false`. This is what chunk 5's own diagnosis measured CGLS needing: a mean of
+98.2 of 100 inner iterations on the 128 x 32 cut-down problem against 8.7 on the toy problem P2 --
+the same severe conditioning (`spread(d)` of 1.4e3-2.8e3 at the *start*) that motivates `LBFGS`'s
+own `P`.
 
 `mu`'s update is Nielsen's (Madsen, Nielsen and Tingleff Section 3.2): with predicted reduction
 `pred = 1/2 dot(delta, mu * delta - gvec)` and `rho = (Fold - Fnew) / pred`, a step is accepted
@@ -577,7 +590,7 @@ function solve(problem::FitProblem, opt::LevenbergMarquardt;
     jtvp!(gvec, problem, Jac, r)
     f_calls_count = 1
     g_calls_count = 1
-    precond = _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))
+    precond = opt.precondition ? _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac)) : nothing
 
     rng = Xoshiro(opt.seed)
     u = randn(rng, ntheta)
@@ -621,7 +634,7 @@ function solve(problem::FitProblem, opt::LevenbergMarquardt;
             Jac = jacobian(problem, y)
             g_calls_count += 1
             jtvp!(gvec, problem, Jac, r)
-            precond = _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))
+            precond = opt.precondition ? _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac)) : nothing
             mu *= max(1 / 3, 1 - (2 * rho - 1)^3)
             nu = 2.0
 

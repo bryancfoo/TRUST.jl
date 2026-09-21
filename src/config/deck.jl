@@ -138,16 +138,22 @@ end
 
 One field of an option struct, dispatched on its declared type (D9's corrected rule, D32): an
 `<:AbstractFloat` field (or a vector of one) goes through `_fill_numeric_scalar`, element by
-element for a vector; an `<:Integer` field is never a reference (`nodes`, `offsets`: D9's box);
-`Symbol`, `String` and `Bool` fields, and every other declared type, are literal and untouched --
-this is what makes DK5 hold: a string in a non-numeric key stays a string even when a variable of
-that name exists, because the field's own declared type, not the value, decides.
+element for a vector; a `<:Bool` field (D41) is checked and returned as-is, *before* the
+`<:Integer` branch below -- `Bool <: Integer` in Julia, so a branch written after the integer test
+would never run; an `<:Integer` field is never a reference (`nodes`, `offsets`: D9's box);
+`Symbol`, `String` fields, and every other declared type, are literal and untouched -- this is
+what makes DK5 hold: a string in a non-numeric key stays a string even when a variable of that
+name exists, because the field's own declared type, not the value, decides.
 """
 function _fill_option_field(v, ::Type{FT}, known_names::AbstractSet{String},
                              section::AbstractString, key::AbstractString,
                              refs_allowed::Bool) where {FT}
     if FT <: AbstractFloat
         return _fill_numeric_scalar(v, known_names, section, key, refs_allowed)
+    elseif FT <: Bool
+        v isa Bool || throw(ArgumentError(
+            "read_deck: key \"$key\" in section \"$section\" must be true or false; got $(repr(v))"))
+        return v
     elseif FT <: Integer
         v isa Integer || throw(ArgumentError(
             "read_deck: key \"$key\" in section \"$section\" must be an integer; got $(repr(v))"))

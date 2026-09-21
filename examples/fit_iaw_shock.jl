@@ -40,7 +40,8 @@ const LAMBDA_B = 1.0e-1 # the deck's own [regularizer].weight -- Fig. 5's main p
 # written under it is a diagnostic, never a reproduction.
 const ALLOW_UNCONVERGED = get(ENV, "OTIS_ALLOW_UNCONVERGED", "0") == "1"
 
-function _check_converged(scan::WeightScanResult, extra::Vector{Pair{String,FitResult}})
+function _check_converged(scan::WeightScanResult,
+    extra::AbstractVector{<:Pair{<:AbstractString,<:FitResult}})
     offenders = String[]
     scan.unregularized.converged ||
         push!(offenders, "unregularized (status = $(scan.unregularized.status))")

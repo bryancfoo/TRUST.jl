@@ -759,3 +759,50 @@ end
         end
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# DK18: `precondition` round-trips as a Bool, and a non-Bool value is refused cleanly (D41)
+# ------------------------------------------------------------------------------------------
+#
+# `_fill_option_field` classified every `Bool` field (`precondition` is the first one on any
+# optimizer) through its `FT <: Integer` branch, since `Bool <: Integer` in Julia: a deck's
+# `precondition = false` built and round-tripped, but the effective deck wrote `precondition = 0`,
+# and `precondition = 2` reached `LBFGS`'s own constructor and raised a raw `InexactError: Bool(2)`
+# rather than a `read_deck` error. D41 gives `Bool` its own branch, checked *before* `Integer`'s.
+
+@testset "DK18: precondition round-trips as Bool, and a non-Bool value is refused cleanly" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "data.jld2")
+        _dk_write_streak(datafile)
+        outdir = joinpath(dir, "out")
+        base = _dk_minimal_deck(datafile, outdir)
+
+        deck_false = replace(base, "lbfgs = { iterations = 3 }" =>
+            "lbfgs = { iterations = 3, precondition = false }")
+        deckpath = joinpath(dir, "dk18_false.toml")
+        write(deckpath, deck_false)
+
+        deck1 = read_deck(deckpath)
+        @test deck1.sections["optimizer"]["lbfgs"]["precondition"] === false
+
+        problem, optimizer, start = OTIS.build_problem(deck1)
+        @test optimizer.precondition === false
+
+        eff = effective_deck(deck1, problem, optimizer)
+        @test occursin("precondition = false", eff)
+        @test !occursin("precondition = 0", eff)
+        @test !occursin("precondition = 1", eff)
+
+        effpath = joinpath(dir, "dk18_effective.toml")
+        write(effpath, eff)
+        deck2 = read_deck(effpath)
+        @test deck2.sections["optimizer"]["lbfgs"]["precondition"] === false
+        @test deck2 == deck1
+
+        deck_bad = replace(base, "lbfgs = { iterations = 3 }" =>
+            "lbfgs = { iterations = 3, precondition = 2 }")
+        badpath = joinpath(dir, "dk18_bad.toml")
+        write(badpath, deck_bad)
+        @test_throws "key \"precondition\" in section \"optimizer.lbfgs\" must be true or false" read_deck(badpath)
+    end
+end

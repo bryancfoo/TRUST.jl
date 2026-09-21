@@ -19,7 +19,10 @@ Phase 1.SG is complete too: the `SuperGaussian` shape — the one-dimensional ma
 isotropic three-dimensional super-Gaussian, not `exp(-|x|^m)` — with closed-form moments, a
 derivative rule for the incomplete gamma function, and its Cauchy integral served from a
 Chebyshev table in (ξ, m) built when the package precompiles, so that a super-Gaussian spectrum
-costs about what a Maxwellian one does and is differentiable in the exponent `m`.
+costs about what a Maxwellian one does and is differentiable in the exponent `m`. Its own
+derivative in `m` is served the same way, from a second table (Phase 3.C) rather than the
+adaptive quadrature that once dominated the cost of fitting it — a shape-agnostic cost guard in
+the fast suite checks every registered shape's own parameter derivative against the same bar.
 
 Phase 2 is complete: time and the instrument. A `PlasmaTrace` carries a template plasma, a named
 time axis and a table of per-bin values for the leaves declared time-varying, and materializes
@@ -57,18 +60,34 @@ reproduced.
 
 The three foo2026 reproductions (Step 3.7) are tested cut down to a 128 × 32 grid
 (`test/slow/test_reproduce.jl`, run by hand); full resolution (512 × 256) is `examples/`.
-**The full-resolution EPW reproduction is deferred to Phase 3.C** — fitting the super-Gaussian
-exponent spends about 93% of the Jacobian in an adaptive quadrature, which makes it too slow
-for this phase's decks as they stand; it is not done, and it did not fail, it was not attempted
-at full resolution. A full-resolution run of
-the two Maxwellian problems was attempted and found impractical in one sitting: even with plain
-`lbfgs` in place of the paper's own two-phase procedure, a single fit did not converge inside
-1000 iterations, so a seven-point scan is many times a fifteen-minute budget
-(`dev/reports/phase3_report.md`, Chunk 14). Step 3.8 adds `WarpMap` and `dewarp`, the OMEGA
-streak's geometric correction, built and tested against a synthetic warp; no real OMEGA streak
-was available this chunk, so a first fit of one has not been run. Phase 3.C, convergence and
-the shape-parameter derivative, then Phase 4, the extensions, are next. The roadmap is kept
-outside this tree.
+**Phase 3.C (convergence, and the shape-parameter derivative) is complete, and all three
+full-resolution reproductions now converge.** Phase 3 closed with every realistically-sized fit
+ending at its iteration cap rather than at a real minimum — not because the physics or the
+derivatives were wrong, but because the convergence criterion was an absolute threshold on the
+gradient that meant a different thing on every problem's scale, a false convergence could be
+reported when the logit's own scaling made the gradient look small near a bound, and L-BFGS's
+starting step was badly scaled on the worst-conditioned problem. A convergence criterion stated
+per pixel, a saturation guard that reports a stalled fit as `:saturated` rather than as a false
+convergence, and a diagonal Gauss–Newton preconditioner (built from the same Jacobian blocks
+every fit already assembles) together close that gap: at 512 × 256, the IAW shock, EPW ablation
+and IAW multi-flow problems each fit unregularized and across their full seven-point weight
+scans (plus the paper's own chosen weight where it is not already one of the seven), every fit
+converging by the per-pixel criterion, end to end in roughly 18, 38 and 94 minutes respectively
+at eight threads. The paper's own two-phase `noisy_descent_lbfgs` procedure, tried
+beside plain `lbfgs` on the multi-flow problem, reaches a substantially better minimum in less
+wall time than `lbfgs` alone — the shipped per-deck default stays `lbfgs` pending a wider
+comparison, but the difference is large enough to be worth a future look. The cut-down
+(128 × 32) reproductions in `test/slow/test_reproduce.jl` converge under the same criterion —
+their scan's monotonicity check now holds cleanly — but at that resolution two of their
+regularization-quality checks still do not: the EPW and multi-flow problems' RSS against ground
+truth is not reliably improved by the paper's own chosen weight on a grid this coarse, unlike at
+full resolution, where both improve substantially. The shock problem's own `u_pre` total
+variation, over a nine-bin pre-shock interval, is likewise not smoothed by regularization at
+128 × 32; at 512 × 256 the same variable's total variation drops by an order of magnitude under
+regularization, consistent with a short-interval noise-floor effect rather than a solver defect.
+Step 3.8 adds `WarpMap` and `dewarp`, the OMEGA streak's geometric correction, built and tested
+against a synthetic warp; no real OMEGA streak was available this chunk, so a first fit of one
+has not been run. Phase 4, the extensions, is next. The roadmap is kept outside this tree.
 
 ## Installing and testing
 
