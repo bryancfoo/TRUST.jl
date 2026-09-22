@@ -1,6 +1,6 @@
 using Test
 using OTIS
-using OTIS: _cgls, _build_procedure, _PROCEDURE_NAMES, _from_unconstrained,
+using OTIS: _cgls, _build_procedure, _PROCEDURE_NAMES, _PROCEDURE_BASE_NAMES, _from_unconstrained,
     jtvp!, jvp!, jacobian, _full_residuals, _gauss_newton_diagonal, _gauss_newton_floor,
     PRECOND_FLOOR_REL
 using LinearAlgebra: norm
@@ -382,6 +382,24 @@ end
     @test_throws "unknown procedure" _build_procedure("bogus")
 end
 
+# OP20 -- A19 guard (Step 4.A.0, 2026-09-22, D22 item 1): `_PROCEDURE_NAMES` and
+# `_PROCEDURE_BASE_NAMES` used to be defined twice, once here in optimizers.jl and once, in a
+# different order, in deck.jl -- the redefinition won silently by include order, so every message
+# built from either tuple printed the wrong list. `_PROCEDURE_NAMES` was already imported at the
+# top of this file but never asserted, and no row read `_PROCEDURE_BASE_NAMES` at all, so reverting
+# either definition left the suite green. This row asserts both tuples by value, in order, and
+# that `_build_procedure`'s error message names them in that order, so that a second definition
+# reintroduced anywhere in the module fails here.
+@testset "OP20: the procedure-name tuples have one definition, in optimizers.jl (Step 4.A.0, 2026-09-22)" begin
+    @test _PROCEDURE_NAMES ==
+          ("noisy_descent_lbfgs", "noisy_descent", "lbfgs", "levenberg_marquardt")
+    @test _PROCEDURE_BASE_NAMES == ("noisy_descent", "lbfgs", "levenberg_marquardt")
+
+    # the rendered tuple, not the surrounding English, so a reworded message still fails a
+    # reintroduced second definition
+    @test_throws string(_PROCEDURE_NAMES) _build_procedure("bogus")
+end
+
 # ------------------------------------------------------------------------------------------
 # OP13: the Optim call shape
 # ------------------------------------------------------------------------------------------
@@ -686,4 +704,48 @@ end
     @test r_rarely.converged
     @test length(trace_often) != length(trace_rarely)
     @test length(trace_often) > length(trace_rarely)
+end
+
+# PC6 -- A19 guard (Step 4.A.0, 2026-09-22, D22 item 3): `_cgls`'s `precond` inside
+# `solve(::FitProblem, ::LevenbergMarquardt)` is supposed to be `dg .+ mu`, the Jacobi
+# preconditioner for the damped system `(JᵀJ + mu I) delta = -gvec` that `_cgls` actually solves,
+# not the bare `dg` that is Jacobi for `JᵀJ` alone. PC4 exercises `_cgls` directly with
+# `precond=dg` and so never touches the `dg .+ mu` line inside `solve`; `cgls_iterations` (the hook
+# that would let a row see the difference) appears in no other row. Reverting the `+ mu` therefore
+# left the suite green.
+#
+# The guard exploits a property of `_cgls`'s own stopping test (read it, `optimizers.jl:496-527`,
+# before trusting this): with a *uniform* preconditioner `c .* ones(ntheta)`, `gam = dot(gnew, z)`
+# with `z = gnew ./ precond` scales by `1/c`, so the ratio `gam1/gam0` in the stopping test
+# `gam1 <= tol^2 * gam0` is unchanged; `p` scales by `1/c`, `q = J*p` by `1/c`, `alpha` by `c`, and
+# `delta += alpha .* p` is therefore exactly unchanged -- a uniform preconditioner is
+# mathematically identical, iterate for iterate, to no preconditioner at all. Driving `mu` far
+# above `dg` makes `dg .+ mu` nearly uniform, so under the fix the first trial step's CGLS count
+# must agree between `precondition = true` and `precondition = false`; under the bug, that step's
+# preconditioner is the bare `dg`, which spans an 11x range on this fixture and has no reason to
+# agree.
+#
+# Measured on P2 (`_op_p2_problem`), `LevenbergMarquardt`'s default `seed = 20260908`:
+# `maximum(dg) = 1.5345840194412433e6`, `s_est = 908098.5206821667`
+# (`s_est = dot(q0, q0) / dot(u, u)`, `q0 = J * u`, `u = randn(Xoshiro(seed), ntheta)`, the same
+# probe `solve` itself draws). `mu_init = 1e4` gives `mu = mu_init * s_est ≈ 9.081e9`,
+# `mu / maximum(dg) ≈ 5918` -- comfortably over a 1e3x margin -- at which `dg .+ mu` spans a ratio
+# of 1.000015 (essentially uniform). Only the first outer iteration is asserted
+# (`iterations = 1`): `mu` shrinks on every accepted step, so a later iteration could leave the
+# mu-dominated regime this row sets up.
+#
+# Verified to discriminate: with `src/inversion/optimizers.jl` reverted to `de8bd27` (`git checkout
+# de8bd27 -- src/inversion/optimizers.jl`), this exact row measures `cgls_on = [15]`,
+# `cgls_off = [2]` and FAILS; restored to this commit's file it measures `cgls_on = [2]`,
+# `cgls_off = [2]` and PASSES.
+@testset "PC6: LM's damped preconditioner is the one _cgls actually solves for (Step 4.A.0, 2026-09-22)" begin
+    problem, theta = _op_p2_problem()
+    cgls_on = Int[]
+    cgls_off = Int[]
+    solve(problem, LevenbergMarquardt(; mu_init=1e4, precondition=true, iterations=1);
+        start=theta, cgls_iterations=cgls_on)
+    solve(problem, LevenbergMarquardt(; mu_init=1e4, precondition=false, iterations=1);
+        start=theta, cgls_iterations=cgls_off)
+    @info "PC6" cgls_on cgls_off
+    @test cgls_on[1] == cgls_off[1]
 end
