@@ -20,8 +20,10 @@ model's own prediction (RS6). **`mask[l,j] == true` means the pixel is used** --
 the commoner convention (`StreakData`'s own docstring; `conventions.md` Section 4).
 
 Built with `FitProblem(experiment, pspec, data; regularizer = nothing, scheduler = :auto)`. The
-constructor checks, in this order: `data.sigma !== nothing`; the materialized mask is not empty;
-the axes of `data` agree with `axes(experiment)` to `rtol = 1e-12`.
+constructor checks, in this order: `data.sigma !== nothing`; `experiment.trace === pspec.trace`
+(A17, 2026-09-13 -- a spec built over a different trace object leaves chi2 insensitive to theta
+silently); the materialized mask is not empty; the axes of `data` agree with `axes(experiment)`
+to `rtol = 1e-12`.
 
 Spec D15.
 """

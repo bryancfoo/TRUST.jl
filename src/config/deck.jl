@@ -524,8 +524,9 @@ end
 # ------------------------------------------------------------------------------------------
 
 const _OPTIMIZER_TOP_KEYS = ("procedure", "lbfgs", "levenberg_marquardt", "noisy_descent")
-const _PROCEDURE_BASE_NAMES = ("lbfgs", "levenberg_marquardt", "noisy_descent")
-const _PROCEDURE_NAMES = (_PROCEDURE_BASE_NAMES..., "noisy_descent_lbfgs")
+# _PROCEDURE_NAMES and _PROCEDURE_BASE_NAMES are optimizers.jl's own (Step 4.A.0, D22 item 1):
+# this file used to redefine both, with a different order, and the redefinition silently won
+# by include order, so every message below printed the wrong list.
 
 function _check_procedure_name(nm)
     nm isa AbstractString && nm in _PROCEDURE_NAMES || throw(ArgumentError(

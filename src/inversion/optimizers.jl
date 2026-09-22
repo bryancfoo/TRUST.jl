@@ -537,16 +537,21 @@ through `jvp!`/`jtvp!` -- `J` is never formed and `JᵀJ` never assembled. **Ide
 already present, and computing it matrix-free would cost `N_theta` Jacobian-vector products
 against CGLS's typical few dozen.
 
-**CGLS is Jacobi-preconditioned when `opt.precondition` (D41; Step 3.C.3, D37)**: the same floored
-Gauss-Newton diagonal `LBFGS`'s own preconditioner uses,
-`_gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))`, recomputed from `Jac` whenever `Jac`
-itself is (re)assembled -- once at the start and again on every **accepted** step, never on a
-rejected one, since `Jac` is not rebuilt then either. A degenerate diagonal
-(`_gauss_newton_floor` returning `nothing`) runs that call's `_cgls` unpreconditioned, and so does
-`opt.precondition = false`. This is what chunk 5's own diagnosis measured CGLS needing: a mean of
-98.2 of 100 inner iterations on the 128 x 32 cut-down problem against 8.7 on the toy problem P2 --
-the same severe conditioning (`spread(d)` of 1.4e3-2.8e3 at the *start*) that motivates `LBFGS`'s
-own `P`.
+**CGLS is Jacobi-preconditioned when `opt.precondition` for the damped system `_cgls` actually
+solves, `(JᵀJ + mu I) delta = -gvec`** (Step 4.A.0, D22 item 3, correcting Step 3.C.3's D37: the
+diagonal passed used to be `dg` alone, which is Jacobi for `JᵀJ`, not for `JᵀJ + mu I`, and was
+worst exactly where LM spends its rejected steps, at large `mu`). `dg =
+_gauss_newton_floor(_gauss_newton_diagonal(problem, Jac))`, the same floored Gauss-Newton diagonal
+`LBFGS`'s own preconditioner uses, recomputed from `Jac` whenever `Jac` itself is (re)assembled --
+once at the start and again on every **accepted** step, never on a rejected one, since `Jac` is
+not rebuilt then either. **The vector actually passed to `_cgls` is `dg .+ mu`, rebuilt every
+trial step** (accepted or rejected) since `mu` changes on both, and the `+ mu` is applied after
+`dg`'s own floor, never before it. A degenerate diagonal (`_gauss_newton_floor` returning
+`nothing`) runs that call's `_cgls` unpreconditioned, and so does `opt.precondition = false`. This
+is what chunk 5's own diagnosis measured CGLS needing: a mean of 98.2 of 100 inner iterations on
+the 128 x 32 cut-down problem against 8.7 on the toy problem P2 -- the same severe conditioning
+(`spread(d)` of 1.4e3-2.8e3 at the *start*) that motivates `LBFGS`'s own `P`. **This changes the
+CGLS iteration count, not the converged `delta`** (PC4).
 
 `mu`'s update is Nielsen's (Madsen, Nielsen and Tingleff Section 3.2): with predicted reduction
 `pred = 1/2 dot(delta, mu * delta - gvec)` and `rho = (Fold - Fnew) / pred`, a step is accepted
@@ -590,7 +595,7 @@ function solve(problem::FitProblem, opt::LevenbergMarquardt;
     jtvp!(gvec, problem, Jac, r)
     f_calls_count = 1
     g_calls_count = 1
-    precond = opt.precondition ? _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac)) : nothing
+    dg = opt.precondition ? _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac)) : nothing
 
     rng = Xoshiro(opt.seed)
     u = randn(rng, ntheta)
@@ -616,6 +621,10 @@ function solve(problem::FitProblem, opt::LevenbergMarquardt;
         iters_run = k
         mu_trace === nothing || push!(mu_trace, mu)   # mu going into this iteration's decision
 
+        # Jacobi preconditioner for (JᵀJ + mu I): dg + mu, dg floored once per Jacobian build
+        # (D22 item 3) -- rebuilt here every trial step since mu changes on both an accepted
+        # and a rejected step, not only when Jac is rebuilt.
+        precond = dg === nothing ? nothing : dg .+ mu
         delta, niter = _cgls(problem, Jac, r, gvec, mu, opt.cgls_tol, opt.cgls_maxiter; precond=precond)
         cgls_iterations === nothing || push!(cgls_iterations, niter)
 
@@ -634,7 +643,7 @@ function solve(problem::FitProblem, opt::LevenbergMarquardt;
             Jac = jacobian(problem, y)
             g_calls_count += 1
             jtvp!(gvec, problem, Jac, r)
-            precond = opt.precondition ? _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac)) : nothing
+            dg = opt.precondition ? _gauss_newton_floor(_gauss_newton_diagonal(problem, Jac)) : nothing
             mu *= max(1 / 3, 1 - (2 * rho - 1)^3)
             nu = 2.0
 
