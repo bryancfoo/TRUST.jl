@@ -381,6 +381,24 @@ end
     @test occursin("ConstantBackground", sprint(show, ConstantBackground(level=25.0)))
 end
 
+@testset "EF21: KSmearing/GradientSmearing's reconstruct is concretely typed under a dual (D25)" begin
+    template = _ef_plasma()
+    d = ForwardDiff.Dual(0.02, 1.0)
+    for n in (1, 3, 5, 7)
+        eK = KSmearing(half_angle_deg=2.0, nodes=n)
+        @inferred reconstruct(eK, (half_angle=d,))
+        rebuiltK = reconstruct(eK, parameters(eK))
+        @test rebuiltK.offsets === eK.offsets
+        @test rebuiltK.weights === eK.weights
+
+        eG = GradientSmearing(template; leaf="electrons.e.T", width=60.0 * EV, nodes=n)
+        @inferred reconstruct(eG, (width=d,))
+        rebuiltG = reconstruct(eG, parameters(eG))
+        @test rebuiltG.offsets === eG.offsets
+        @test rebuiltG.weights === eG.weights
+    end
+end
+
 # --- Step 2.3a: the A15 allocation rewrite and the A17 leaf-key fix (spec Section 6a) ---
 
 _ga_template() = Plasma(n_e_cm3=5e19,

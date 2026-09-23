@@ -221,3 +221,16 @@ end
         collection=collection, lambda_m=_WC_LAMBDA,
         effects=(WavelengthCalibration(lambda_offset_nm=0.02), WavelengthCalibration(lambda_offset_nm=0.03)))
 end
+
+@testset "WC13: reconstruct is concretely typed under a dual, and still validates (D25)" begin
+    e = WavelengthCalibration(lambda_offset_nm=0.02, dispersion_scale=0.01)
+    d1 = ForwardDiff.Dual(e.offset, 1.0)
+    d2 = ForwardDiff.Dual(e.dispersion_scale, 1.0)
+    @inferred reconstruct(e, (offset=d1, dispersion_scale=d2))
+
+    @test_throws "offset must be finite" reconstruct(e, (offset=Inf, dispersion_scale=0.0))
+    @test_throws "offset must be finite" reconstruct(e, (offset=NaN, dispersion_scale=0.0))
+    @test_throws "dispersion_scale must be finite" reconstruct(e, (offset=0.0, dispersion_scale=NaN))
+    @test_throws "dispersion_scale must satisfy" reconstruct(e, (offset=0.0, dispersion_scale=1.0))
+    @test_throws "dispersion_scale must satisfy" reconstruct(e, (offset=0.0, dispersion_scale=-1.0))
+end

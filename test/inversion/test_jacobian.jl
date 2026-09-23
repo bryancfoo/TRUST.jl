@@ -1,7 +1,7 @@
 using Test
 using OTIS
 using OTIS: FitJacobian, jvp!, jtvp!, Binding, _kernel_effects, _widen_trace, _make_cache,
-    _jacobian_bin!, _chain_order, JACOBIAN_CHUNK, _dx_dy, _from_unconstrained
+    _jacobian_bin!, _chain_order, JACOBIAN_CHUNK, _dx_dy, _from_unconstrained, _collect_kernel_bindings
 import ForwardDiff
 import Random
 using LinearAlgebra: dot
@@ -76,6 +76,7 @@ end
 
 function _jt_p3_pspec(expt::Experiment)
     ksmearing_idx = findfirst(e -> e isa KSmearing, expt.effects)
+    calib_idx = findfirst(e -> e isa WavelengthCalibration, expt.effects)
     spectral_idx = findfirst(e -> e isa SpectralIRF, expt.effects)
     sens_idx = findfirst(e -> e isa Sensitivity, expt.effects)
     rational_idx = findfirst(e -> e isa RationalBackground, expt.effects)
@@ -86,14 +87,18 @@ function _jt_p3_pspec(expt::Experiment)
     v_sig = FittedVariable("sig_spec"; bounds=(1e-11, 2e-10), init=3.5e-11)
     v_scale = FittedVariable("scale"; bounds=(1e-7, 1e-5), init=1e-6)
     v_numer = FittedVariable("numer0"; bounds=(5.0, 50.0), init=20.0)
+    # P3's seventh variable (chunk 4, D6/D18): a fitted calibration offset, third kernel global,
+    # bound in the hand-built (four-element) form -- factor 1.0, SI metres.
+    v_dlam = FittedVariable("dlam"; bounds=(-0.2e-9, 0.2e-9), init=0.02e-9)
 
     return ParameterSpec(expt;
-        variables=[v_Te, v_fD, v_half, v_sig, v_scale, v_numer],
+        variables=[v_Te, v_fD, v_half, v_sig, v_scale, v_numer, v_dlam],
         bindings=["T_e" => "electrons.e.T_eV", "f_D" => "ions.D.fraction",
             "half_angle" => (ksmearing_idx, :half_angle),
             "sig_spec" => (spectral_idx, :sigma),
             "scale" => (sens_idx, :scale),
-            "numer0" => (rational_idx, :numerator, 1)])
+            "numer0" => (rational_idx, :numerator, 1),
+            "dlam" => (calib_idx, :offset)])
 end
 
 # A rebuilt experiment/pspec pair wired the way unflatten requires: expt built from pspec's own
@@ -535,4 +540,178 @@ end
     v = FittedVariable("bad_sigma"; bounds=(1e-11, 1e-9), init=1e-10)
     @test_throws r"has no fittable parameters" ParameterSpec(expt; variables=[v],
         bindings=["bad_sigma" => (temporal_idx, :sigma)])
+end
+
+# ------------------------------------------------------------------------------------------
+# The KB fixture ("kernel binding", D25, chunk 4): four bins, sixteen wavelengths, every
+# kernel-stage effect (KSmearing, GradientSmearing, WavelengthCalibration) with a fittable
+# parameter, plus SpectralIRF and Sensitivity. A Maxwellian electron, deliberately (D25): a
+# super-Gaussian template allocates one Plasma per bin under 5.2's own recorded exception (A33,
+# GA5), and JT16 would then measure that, not the rebuild.
+# ------------------------------------------------------------------------------------------
+
+function _jt_kb_template()
+    return Plasma(; n_e_cm3=3e19,
+        electrons=[electrons(T_eV=400.0)],
+        ions=[ion(name="D", mass_amu=2.014, charge=1, T_eV=200.0, u_kms=0.0)])
+end
+
+const _JT_KB_LAMBDA_NM = collect(range(262.9, 263.6; length=16))
+
+function _jt_kb_expt()
+    trace = PlasmaTrace(_jt_kb_template(); t_ns=[0.0, 1.0, 2.0, 3.0])
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60.0, k_model=:exact)
+    lambda_m = _JT_KB_LAMBDA_NM .* 1e-9
+    effects = (
+        KSmearing(half_angle_deg=2.0, nodes=3),
+        GradientSmearing(_jt_kb_template(); leaf="electrons.e.T_eV", width=30.0, nodes=3),
+        WavelengthCalibration(lambda_offset_nm=0.02, dispersion_scale=0.001),
+        SpectralIRF(fwhm_nm=0.08),
+        Sensitivity(scale=1.0e-6),
+    )
+    return Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_m, effects=effects)
+end
+
+# JT16: half, gw, dlam, eps all bound in the two-element (hand-built, factor 1.0, SI) form.
+function _jt_kb_pspec16(expt::Experiment)
+    ksmearing_idx = findfirst(e -> e isa KSmearing, expt.effects)
+    gradsmear_idx = findfirst(e -> e isa GradientSmearing, expt.effects)
+    calib_idx = findfirst(e -> e isa WavelengthCalibration, expt.effects)
+
+    v_TD = FittedVariable("T_D"; bounds=(50.0, 800.0), init=200.0, time_varying=true)
+    v_half = FittedVariable("half"; bounds=(0.001, 0.2), init=2 * pi / 180)
+    v_gw = FittedVariable("gw"; bounds=(1.0 * EV, 100.0 * EV), init=30.0 * EV)
+    v_dlam = FittedVariable("dlam"; bounds=(-0.2e-9, 0.2e-9), init=0.02e-9)
+    v_eps = FittedVariable("eps"; bounds=(-0.01, 0.01), init=0.001)
+
+    return ParameterSpec(expt;
+        variables=[v_TD, v_half, v_gw, v_dlam, v_eps],
+        bindings=["T_D" => "ions.D.T_eV",
+            "half" => (ksmearing_idx, :half_angle),
+            "gw" => (gradsmear_idx, :width),
+            "dlam" => (calib_idx, :offset),
+            "eps" => (calib_idx, :dispersion_scale)])
+end
+
+# JT17: dlam and sig declared in deck units, bound through the five-element (factor, unit_key)
+# form; eps stays two-element.
+function _jt_kb_pspec17(expt::Experiment)
+    ksmearing_idx = findfirst(e -> e isa KSmearing, expt.effects)
+    gradsmear_idx = findfirst(e -> e isa GradientSmearing, expt.effects)
+    calib_idx = findfirst(e -> e isa WavelengthCalibration, expt.effects)
+    spectral_idx = findfirst(e -> e isa SpectralIRF, expt.effects)
+
+    v_TD = FittedVariable("T_D"; bounds=(50.0, 800.0), init=200.0, time_varying=true)
+    v_half = FittedVariable("half"; bounds=(0.001, 0.2), init=2 * pi / 180)
+    v_gw = FittedVariable("gw"; bounds=(1.0 * EV, 100.0 * EV), init=30.0 * EV)
+    v_dlam = FittedVariable("dlam"; bounds=(-0.2, 0.2), init=0.02)
+    v_eps = FittedVariable("eps"; bounds=(-0.01, 0.01), init=0.001)
+    v_sig = FittedVariable("sig"; bounds=(0.02, 0.5), init=0.08)
+
+    return ParameterSpec(expt;
+        variables=[v_TD, v_half, v_gw, v_dlam, v_eps, v_sig],
+        bindings=["T_D" => "ions.D.T_eV",
+            "half" => (ksmearing_idx, :half_angle),
+            "gw" => (gradsmear_idx, :width),
+            "dlam" => (calib_idx, :offset, 0, 1e-9, "lambda_offset_nm"),
+            "eps" => (calib_idx, :dispersion_scale),
+            "sig" => (spectral_idx, :sigma, 0, 1e-9 * OTIS._SIGMA_PER_FWHM, "fwhm_nm")])
+end
+
+function _jt_kb_problem(pspec_builder)
+    expt = _jt_kb_expt()
+    pspec = pspec_builder(expt)
+    working = _jt_working(expt, pspec)
+    theta0 = flatten(pspec)
+    data = _jt_data(working, pspec, theta0)
+    problem = FitProblem(working, pspec, data)
+    theta = _jt_perturb(theta0, 0.02)
+    return problem, theta
+end
+
+# ------------------------------------------------------------------------------------------
+# JT16: the per-bin dual pass allocates zero with every kernel-stage parameter bound (D25).
+# ------------------------------------------------------------------------------------------
+
+@testset "JT16: the per-bin dual pass allocates zero with every kernel-stage parameter bound (KB fixture)" begin
+    problem, theta = _jt_kb_problem(_jt_kb_pspec16)
+    pspec = problem.pspec
+    expt = unflatten(problem.experiment, pspec, theta)
+    nvar = length(pspec.variables)
+    nlambda = length(problem.experiment.lambda)
+
+    kernel_effects0 = _kernel_effects(expt)
+    nkernel_eff = length(kernel_effects0)
+    kernel_bindings = _collect_kernel_bindings(pspec, expt, nkernel_eff)
+
+    kernel_global_var = Int[]
+    for i in 1:nvar
+        v = pspec.variables[i]
+        (v.vary && !v.time_varying) || continue
+        affects_P = false
+        for b in pspec.bindings
+            b.slot == i || continue
+            if b.kind === :leaf
+                affects_P = true
+            elseif b.kind === :effect && 1 <= b.effect <= nkernel_eff && _chain_order(expt.effects[b.effect]) == 1
+                affects_P = true
+            end
+        end
+        affects_P && push!(kernel_global_var, i)
+    end
+    G = length(kernel_global_var)
+    @test G == 4   # half, gw, dlam, eps -- every kernel-stage parameter (T_D is time-varying)
+    kernel_global_idx = [pspec.offsets[i] for i in kernel_global_var]
+    kernel_global_of_var = zeros(Int, nvar)
+    for (gk, i) in enumerate(kernel_global_var)
+        kernel_global_of_var[i] = gk
+    end
+
+    DFT = ForwardDiff.Dual{OTIS._JacobianTag,Float64,JACOBIAN_CHUNK}
+    work_trace = _widen_trace(pspec.trace, DFT)
+    vals = Vector{DFT}(undef, pspec.nslots)
+    col_cache = _make_cache(DFT, nlambda)
+    block = Matrix{Float64}(undef, nlambda, length(pspec.bin_entries[1]))
+    kernel_globals = Array{Float64,3}(undef, nlambda, length(pspec.trace.axis), G)
+    probe0, collection0, lambda0 = expt.probe, expt.collection, expt.lambda
+    prefactor_flag = OTIS._prefactor_flag(expt.prefactor)
+
+    _jb!() = _jacobian_bin!(block, kernel_globals, 1, work_trace, vals, col_cache, pspec, nvar, G,
+        kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings,
+        probe0, collection0, lambda0, prefactor_flag, theta)
+    _jb!()   # warm
+    bytes = @allocated _jb!()
+    @test bytes == 0
+end
+
+# ------------------------------------------------------------------------------------------
+# JT17: two bindings on one kernel-stage effect, and a factor on both a kernel and a chain
+# global, against the brute-force oracle (D25, D9-D11).
+# ------------------------------------------------------------------------------------------
+
+@testset "JT17: two bindings on one kernel-stage effect, and a factor on both kinds of global (KB fixture)" begin
+    problem, theta = _jt_kb_problem(_jt_kb_pspec17)
+    ntheta = problem.pspec.ntheta
+
+    Jac = jacobian(problem, theta)
+    J_dense_bruteforce = ForwardDiff.jacobian(th -> residuals(problem, th), theta)
+    @test maximum(abs, J_dense_bruteforce) > 0
+
+    _, J_dense_fields = _jt_dense_transcription(Jac, problem, ntheta)
+
+    worst = 0.0
+    worst_col = 0
+    for k in 1:ntheta
+        colref = @view J_dense_bruteforce[:, k]
+        colours = @view J_dense_fields[:, k]
+        floor_k = 1e-10 * maximum(abs, colref)
+        relerr = maximum(abs.(colours .- colref) ./ max.(abs.(colref), floor_k))
+        if relerr > worst
+            worst = relerr
+            worst_col = k
+        end
+        @test relerr <= 1e-10
+    end
+    @info "JT17 worst relative error" worst worst_col
 end

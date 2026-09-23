@@ -25,7 +25,12 @@ wavelength-dependent response (all ones when no `Sensitivity` is present, `scale
 carries no calibration curve); and `B` is the sum of every background's contribution. `P` itself
 is built bin by bin, `P[:, j] = _bin_kernel!(⋯, j)`, folding the in-kernel effects
 (`KSmearing`, `GradientSmearing`, `WavelengthCalibration`) into the physics evaluated at each bin
-— never touching the post-kernel chain.
+— never touching the post-kernel chain. `KSmearing` and `GradientSmearing` each carry one
+fittable kernel global (`half_angle`, `width`); `WavelengthCalibration` carries two,
+`offset` and `dispersion_scale` (Step 4.A.1b). Because an effect may now have more than one bound
+parameter, each kernel-stage effect carries a `Tuple` of its own `Binding`s, not a single optional
+one (D11(b), `_collect_kernel_bindings`) — empty for an unbound effect, one entry per bound
+parameter.
 
 The residual is `r_k = (M[l,j] - D[l,j]) / σ[l,j]` at the `k`-th mask-true pixel, column-major
 order (`residuals.jl`, D16). Since `D` and `σ` do not depend on θ,

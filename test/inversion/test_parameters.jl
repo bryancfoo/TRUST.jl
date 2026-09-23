@@ -358,6 +358,46 @@ end
         bindings=["bad" => (1, :sigma)])
 end
 
+# ------------------------------------------------------------------------------------------
+# PM28: the five-element target reaches the Binding, and the one-factor rule covers it (D10,
+# amended 2026-09-23, A19: D10 changes _resolve_bindings in this file's own source, and no other
+# row here would fail if it were reverted -- JT17 cannot catch it, since a factor dropped from the
+# value path and the Jacobian path alike is still self-consistent).
+# ------------------------------------------------------------------------------------------
+
+@testset "PM28: the five-element target reaches the Binding and the one-factor rule (D10)" begin
+    trace = PlasmaTrace(_pm_template(); t_ns=[0.0])
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60.0, k_model=:exact)
+    lambda_m = collect(range(262.0, 264.5; length=24)) .* 1e-9
+    calib = WavelengthCalibration(lambda_offset_nm=0.02)
+    spectral = SpectralIRF(fwhm_nm=0.08)
+    expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_m,
+        effects=(calib, spectral))
+    cidx = findfirst(e -> e isa WavelengthCalibration, expt.effects)
+    sidx = findfirst(e -> e isa SpectralIRF, expt.effects)
+
+    v = FittedVariable("dlam"; bounds=(-0.2, 0.2), init=0.02)
+    pspec = ParameterSpec(expt; variables=[v],
+        bindings=["dlam" => (cidx, :offset, 0, 1e-9, "lambda_offset_nm")])
+    b = only(pspec.bindings)
+    @test b.factor == 1e-9
+    @test b.unit_key == "lambda_offset_nm"
+
+    vshared = FittedVariable("shared"; bounds=(50.0, 1500.0), init=400.0)
+    err = nothing
+    try
+        ParameterSpec(expt; variables=[vshared],
+            bindings=["shared" => "electrons.e.T_eV",
+                "shared" => (sidx, :sigma, 0, 1e-9 * OTIS._SIGMA_PER_FWHM, "fwhm_nm")])
+    catch e
+        err = e
+    end
+    @test err isa ArgumentError
+    @test occursin("shared", err.msg)
+    @test occursin("different units", err.msg)
+end
+
 @testset "PM18: the bound-proximity flag" begin
     a, b = 0.0, 100.0
     @test _near_bound(a + 5e-4 * (b - a), a, b)

@@ -102,17 +102,62 @@ stale partial surviving from a previous sweep or a previous bin (Pitfall 6).
     end
 end
 
-# Allocation-free rebuild of the in-kernel effects' one bound scalar parameter each (D18's "do
-# not seed chain globals here": only KSmearing/GradientSmearing/WavelengthCalibration ever appear
-# here, since a chain-stage effect's parameter never enters P). Written by hand, not via
-# parameters.jl's `_rebuild_effect`, which allocates a temporary Vector per field (fine in
-# `unflatten`, not fine here: JT11 requires this per-bin pass to allocate zero bytes once warmed).
-# WavelengthCalibration is not yet bindable through this path in chunk 3 (its two-parameter
-# rebuild needs D11(b)'s tuple-of-bindings-per-effect, Step 4.A.1b); the generic ::Nothing
-# fallback covers it, exactly as it covered every other unbound effect through Phase 3.
-_rebuild_kernel_effect(e::AbstractInstrumentEffect, ::Nothing, vals) = e
-_rebuild_kernel_effect(e::KSmearing, b::Binding, vals) = reconstruct(e, (half_angle=vals[b.slot] * b.factor,))
-_rebuild_kernel_effect(e::GradientSmearing, b::Binding, vals) = reconstruct(e, (width=vals[b.slot] * b.factor,))
+# Allocation-free rebuild of the in-kernel effects' bound scalar parameters (D18's "do not seed
+# chain globals here": only KSmearing/GradientSmearing/WavelengthCalibration ever appear here,
+# since a chain-stage effect's parameter never enters P). Written by hand, not via parameters.jl's
+# `_rebuild_effect`, which allocates a temporary Vector per field (fine in `unflatten`, not fine
+# here: JT11 and JT16 require this per-bin pass to allocate zero bytes once warmed).
+#
+# Each kernel-stage effect carries a Tuple of its own Bindings (D11(b), Step 4.A.1b), built once
+# per `jacobian` call by `_collect_kernel_bindings` -- empty for an unbound effect, one entry per
+# bound scalar parameter, more than one when an effect has more than one fittable parameter
+# (WavelengthCalibration is the first: `offset` and `dispersion_scale` may each be bound to a
+# different variable, which is why a single `Union{Nothing,Binding}` slot, Phase 3's form, is not
+# enough -- it can hold only one). `_bound_value` walks that tuple by recursion, returning the
+# bound value for `field` or `fallback` if no binding in `bs` names it; BOTH arms `convert`
+# (`conventions.md` 5.14): `fallback` is a plain `Float64` off the value-pass effect while `vals`
+# is the dual vector, and an unconverted branch infers `Union{Float64,Dual}` and boxes on every
+# call even though, with every field bound, that arm is never taken at runtime (JT16's discovery).
+_bound_value(::Tuple{}, field::Symbol, fallback, vals::AbstractVector{T}) where {T} =
+    convert(T, fallback)
+function _bound_value(bs::Tuple, field::Symbol, fallback, vals::AbstractVector{T}) where {T}
+    b = first(bs)
+    return b.field === field ? convert(T, vals[b.slot] * b.factor) :
+           _bound_value(Base.tail(bs), field, fallback, vals)
+end
+
+# The two-method split on the second argument (`::Tuple{}` vs `bs::Tuple`), with an untyped first
+# argument, is deliberate: a `_rebuild_kernel_effect(e::KSmearing, ::Tuple{}, vals)` method would
+# be ambiguous against the generic `Tuple` one below. The old `::Nothing` and `::Binding` methods
+# (Phase 3's one-binding-per-effect form) are deleted.
+_rebuild_kernel_effect(e, ::Tuple{}, vals) = e
+_rebuild_kernel_effect(e, bs::Tuple, vals) = _rebuild_bound_effect(e, bs, vals)
+
+_rebuild_bound_effect(e::KSmearing, bs::Tuple, vals) =
+    reconstruct(e, (half_angle=_bound_value(bs, :half_angle, e.half_angle, vals),))
+_rebuild_bound_effect(e::GradientSmearing, bs::Tuple, vals) =
+    reconstruct(e, (width=_bound_value(bs, :width, e.width, vals),))
+_rebuild_bound_effect(e::WavelengthCalibration, bs::Tuple, vals) =
+    reconstruct(e, (offset=_bound_value(bs, :offset, e.offset, vals),
+                    dispersion_scale=_bound_value(bs, :dispersion_scale, e.dispersion_scale, vals)))
+
+"""
+    _collect_kernel_bindings(pspec, expt, nkernel_eff) -> Tuple
+
+One inner `Tuple` of `Binding`s per kernel-stage effect (`expt.effects[1:nkernel_eff]`, the same
+front block `_kernel_effects` returns), empty for an unbound effect, bindings in `pspec.bindings`
+order (D11(b), amended 2026-09-23). Factored out of `jacobian` so that JT16 exercises the exact
+code `jacobian` itself calls, not a copy of it.
+"""
+function _collect_kernel_bindings(pspec::ParameterSpec, expt::Experiment, nkernel_eff::Int)
+    per_effect = [Binding[] for _ in 1:nkernel_eff]
+    for b in pspec.bindings
+        if b.kind === :effect && 1 <= b.effect <= nkernel_eff && _chain_order(expt.effects[b.effect]) == 1
+            push!(per_effect[b.effect], b)
+        end
+    end
+    return Tuple(Tuple(bs) for bs in per_effect)
+end
 
 _rebuild_kernel_tuple(::Tuple{}, ::Tuple{}, vals) = ()
 function _rebuild_kernel_tuple(effects::Tuple, bindings::Tuple, vals)
@@ -395,7 +440,7 @@ function _build_chain_globals(problem::FitProblem, expt::Experiment, theta::Abst
         else
             _chain_global_column(e, b, lambda, P, Q, response, curve0)
         end
-        push!(chain_globals, FT.(col .* chainfactor))
+        push!(chain_globals, FT.(col .* (chainfactor * b.factor)))
         push!(chain_global_idx, pspec.offsets[b.slot])
     end
 
@@ -453,13 +498,7 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
     kernel_effects0 = _kernel_effects(expt)
     nkernel_eff = length(kernel_effects0)
 
-    kernel_effect_binding = Union{Nothing,Binding}[nothing for _ in 1:nkernel_eff]
-    for b in pspec.bindings
-        if b.kind === :effect && 1 <= b.effect <= nkernel_eff && _chain_order(expt.effects[b.effect]) == 1
-            kernel_effect_binding[b.effect] = b
-        end
-    end
-    kernel_bindings = Tuple(kernel_effect_binding)
+    kernel_bindings = _collect_kernel_bindings(pspec, expt, nkernel_eff)
 
     kernel_global_var = Int[]
     for i in 1:nvar

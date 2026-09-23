@@ -145,38 +145,45 @@ const GAUSS_HERMITE_WEIGHTS = (
         0.2401231786050128, 0.0307571239675864, 0.0005482688559722),
 )
 
-function _gauss_legendre(nodes::Integer)
-    _check_nodes(nodes)
-    nodes == 1 && return GAUSS_LEGENDRE_NODES.n1, GAUSS_LEGENDRE_WEIGHTS.n1
-    nodes == 3 && return GAUSS_LEGENDRE_NODES.n3, GAUSS_LEGENDRE_WEIGHTS.n3
-    nodes == 5 && return GAUSS_LEGENDRE_NODES.n5, GAUSS_LEGENDRE_WEIGHTS.n5
-    return GAUSS_LEGENDRE_NODES.n7, GAUSS_LEGENDRE_WEIGHTS.n7
-end
+# D25 (chunk 4, 2026-09-23): Val-dispatched, so reconstruct(::KSmearing{NQ})/reconstruct(::
+# GradientSmearing{NQ}) infer a concrete offsets/weights type under a dual instead of Tuple{Any,
+# Any} -- the Integer form's runtime `if` over four NTuple lengths was invisible in Float64 (a
+# reconstruct called alone with constant arguments reads 0 B, constant propagation rescues it) but
+# made the per-bin dual pass dispatch dynamically once a kernel-stage effect is bound (JT16).
+_gauss_legendre(::Val{1}) = (GAUSS_LEGENDRE_NODES.n1, GAUSS_LEGENDRE_WEIGHTS.n1)
+_gauss_legendre(::Val{3}) = (GAUSS_LEGENDRE_NODES.n3, GAUSS_LEGENDRE_WEIGHTS.n3)
+_gauss_legendre(::Val{5}) = (GAUSS_LEGENDRE_NODES.n5, GAUSS_LEGENDRE_WEIGHTS.n5)
+_gauss_legendre(::Val{7}) = (GAUSS_LEGENDRE_NODES.n7, GAUSS_LEGENDRE_WEIGHTS.n7)
 
-function _gauss_hermite(nodes::Integer)
-    _check_nodes(nodes)
-    nodes == 1 && return GAUSS_HERMITE_NODES.n1, GAUSS_HERMITE_WEIGHTS.n1
-    nodes == 3 && return GAUSS_HERMITE_NODES.n3, GAUSS_HERMITE_WEIGHTS.n3
-    nodes == 5 && return GAUSS_HERMITE_NODES.n5, GAUSS_HERMITE_WEIGHTS.n5
-    return GAUSS_HERMITE_NODES.n7, GAUSS_HERMITE_WEIGHTS.n7
-end
+_gauss_hermite(::Val{1}) = (GAUSS_HERMITE_NODES.n1, GAUSS_HERMITE_WEIGHTS.n1)
+_gauss_hermite(::Val{3}) = (GAUSS_HERMITE_NODES.n3, GAUSS_HERMITE_WEIGHTS.n3)
+_gauss_hermite(::Val{5}) = (GAUSS_HERMITE_NODES.n5, GAUSS_HERMITE_WEIGHTS.n5)
+_gauss_hermite(::Val{7}) = (GAUSS_HERMITE_NODES.n7, GAUSS_HERMITE_WEIGHTS.n7)
 
 function _legendre_offsets_weights(half_angle::Real, nodes::Integer)
-    xi, w = _gauss_legendre(nodes)
+    _check_nodes(nodes)
+    return _legendre_offsets_weights(half_angle, Val(nodes))
+end
+function _legendre_offsets_weights(half_angle::Real, v::Val{N}) where {N}
+    xi, w = _gauss_legendre(v)
     FT = float(typeof(half_angle))
-    offsets = ntuple(q -> FT(half_angle) * FT(xi[q]), Val(length(xi)))
+    offsets = ntuple(q -> FT(half_angle) * FT(xi[q]), Val(N))
     wsum = FT(sum(w))
-    weights = ntuple(q -> FT(w[q]) / wsum, Val(length(w)))
+    weights = ntuple(q -> FT(w[q]) / wsum, Val(N))
     return offsets, weights
 end
 
 function _hermite_offsets_weights(width::Real, nodes::Integer)
-    xi, w = _gauss_hermite(nodes)
+    _check_nodes(nodes)
+    return _hermite_offsets_weights(width, Val(nodes))
+end
+function _hermite_offsets_weights(width::Real, v::Val{N}) where {N}
+    xi, w = _gauss_hermite(v)
     FT = float(typeof(width))
     sqrt2 = sqrt(FT(2))
-    offsets = ntuple(q -> FT(width) * sqrt2 * FT(xi[q]), Val(length(xi)))
+    offsets = ntuple(q -> FT(width) * sqrt2 * FT(xi[q]), Val(N))
     wsum = FT(sum(w))
-    weights = ntuple(q -> FT(w[q]) / wsum, Val(length(w)))
+    weights = ntuple(q -> FT(w[q]) / wsum, Val(N))
     return offsets, weights
 end
 
@@ -220,7 +227,7 @@ function reconstruct(::KSmearing{NQ}, values::NamedTuple) where {NQ}
     half_angle = values.half_angle
     (isfinite(half_angle) && half_angle >= 0) || throw(ArgumentError(
         "KSmearing: half angle must be finite and non-negative; got $half_angle rad"))
-    offsets, weights = _legendre_offsets_weights(half_angle, NQ)
+    offsets, weights = _legendre_offsets_weights(half_angle, Val(NQ))
     FT = eltype(offsets)
     return KSmearing{NQ,FT}(FT(half_angle), offsets, weights)
 end
@@ -308,7 +315,7 @@ function reconstruct(e::GradientSmearing{NQ}, values::NamedTuple) where {NQ}
     width = values.width
     (isfinite(width) && width >= 0) || throw(ArgumentError(
         "GradientSmearing: width must be finite and non-negative; got $width"))
-    offsets, weights = _hermite_offsets_weights(width, NQ)
+    offsets, weights = _hermite_offsets_weights(width, Val(NQ))
     FT = eltype(offsets)
     return GradientSmearing{NQ,FT}(e.ref, e.path, FT(width), e.logarithmic, offsets, weights)
 end
@@ -356,6 +363,11 @@ Built with `WavelengthCalibration(; lambda_offset_nm | lambda_offset_m, dispersi
 The offset is **required** (no default), so that `WavelengthCalibration()` is a loud error rather
 than a silent identity; `dispersion_scale = 0.0` is the deliberate identity and needs no keyword.
 
+**Composes like every other order-1 effect** (D4): the order-1 effects in a chain are stably
+sorted, and each passes through what it does not modify (`KSmearing`/`GradientSmearing` the
+wavelength axis, `WavelengthCalibration` the plasma, probe and collection), so the fold gives the
+same result whatever relative order the user declares them in.
+
 Spec D3, D4, D5 (Phase 4.A, Step 4.A.1a, 2026-09-22).
 """
 struct WavelengthCalibration{FT<:Real} <: AbstractInstrumentEffect
@@ -363,15 +375,27 @@ struct WavelengthCalibration{FT<:Real} <: AbstractInstrumentEffect
     dispersion_scale::FT
 end
 
-function WavelengthCalibration(; dispersion_scale::Real=0.0, kwargs...)
-    offset_raw = _si_value(:lambda_offset, kwargs)
-    _reject_extra_kwargs(kwargs, (:lambda_offset_nm, :lambda_offset_m))
-    isfinite(offset_raw) || throw(ArgumentError(
-        "WavelengthCalibration: offset must be finite; got $offset_raw m"))
+"""
+    _check_calibration(offset, dispersion_scale)
+
+The three validations `WavelengthCalibration`'s keyword constructor and `reconstruct` both apply
+(D25, chunk 4): `offset` finite, `dispersion_scale` finite, `abs(dispersion_scale) < 1`. Shared so
+that WC1's messages do not move whichever path throws them.
+"""
+function _check_calibration(offset, dispersion_scale)
+    isfinite(offset) || throw(ArgumentError(
+        "WavelengthCalibration: offset must be finite; got $offset m"))
     isfinite(dispersion_scale) || throw(ArgumentError(
         "WavelengthCalibration: dispersion_scale must be finite; got $dispersion_scale"))
     abs(dispersion_scale) < 1 || throw(ArgumentError(
         "WavelengthCalibration: dispersion_scale must satisfy abs(dispersion_scale) < 1; got $dispersion_scale"))
+    return nothing
+end
+
+function WavelengthCalibration(; dispersion_scale::Real=0.0, kwargs...)
+    offset_raw = _si_value(:lambda_offset, kwargs)
+    _reject_extra_kwargs(kwargs, (:lambda_offset_nm, :lambda_offset_m))
+    _check_calibration(offset_raw, dispersion_scale)
     FT = promote_type(float(typeof(offset_raw)), float(typeof(dispersion_scale)))
     return WavelengthCalibration{FT}(FT(offset_raw), FT(dispersion_scale))
 end
@@ -381,8 +405,18 @@ _chain_order(::WavelengthCalibration) = 1
 islinear(::WavelengthCalibration) = false
 _chain_class(::WavelengthCalibration) = :WavelengthCalibration
 parameters(e::WavelengthCalibration) = (offset=e.offset, dispersion_scale=e.dispersion_scale)
-reconstruct(::WavelengthCalibration, values::NamedTuple) =
-    WavelengthCalibration(; lambda_offset_m=values.offset, dispersion_scale=values.dispersion_scale)
+
+# D25 (chunk 4): through the inner constructor, not the keyword one -- the keyword path's
+# _si_value has a data-dependent filter length and so infers only WavelengthCalibration, no type
+# parameter, which is invisible in Float64 but dispatches dynamically in the per-bin dual pass
+# once the calibration is bound (JT16). _check_calibration keeps WC1's messages verbatim.
+function reconstruct(::WavelengthCalibration, values::NamedTuple)
+    offset = values.offset
+    dispersion_scale = values.dispersion_scale
+    _check_calibration(offset, dispersion_scale)
+    FT = promote_type(float(typeof(offset)), float(typeof(dispersion_scale)))
+    return WavelengthCalibration{FT}(FT(offset), FT(dispersion_scale))
+end
 
 """
     _CalibratedAxis{FT<:Real,V<:AbstractVector} <: AbstractVector{FT}

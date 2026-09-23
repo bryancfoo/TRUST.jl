@@ -107,18 +107,26 @@ function _check_registry_name(registry::AbstractDict, name::AbstractString, kind
 end
 
 """
-    _fill_numeric_scalar(v, known_names, section, key, refs_allowed) -> Float64 or _VarRef
+    _fill_numeric_scalar(v, known_names, section, key, refs_allowed, refs_reason = "") -> Float64 or _VarRef
 
 One numeric deck value (D9, 7.6): a `Real` becomes `Float64`; a `String` is a variable reference
 when `refs_allowed`, checked against `known_names` (D39's two read_deck fragments), and is
-otherwise a loud error naming the key. Shared by every numeric key this file resolves, whether it
-belongs to an option struct (`_fill_option_fields`) or, like a plasma species' `T_eV`, does not.
+otherwise a loud error naming the key -- the generic "takes a string, not a variable reference"
+message, unless `refs_reason` is non-empty (D12, chunk 4), in which case that text is thrown
+instead (`gradient_smearing.width`'s "its conversion factor is the smeared leaf's own" reason;
+every other caller leaves `refs_reason` empty, so no other refusal's text moves). Shared by every
+numeric key this file resolves, whether it belongs to an option struct (`_fill_option_fields`) or,
+like a plasma species' `T_eV`, does not.
 """
 function _fill_numeric_scalar(v, known_names::AbstractSet{String}, section::AbstractString,
-                               key::AbstractString, refs_allowed::Bool)
+                               key::AbstractString, refs_allowed::Bool,
+                               refs_reason::AbstractString="")
     if v isa AbstractString
-        refs_allowed || throw(ArgumentError(
-            "read_deck: key \"$key\" in section \"$section\" takes a string, not a variable reference"))
+        if !refs_allowed
+            throw(ArgumentError(isempty(refs_reason) ?
+                "read_deck: key \"$key\" in section \"$section\" takes a string, not a variable reference" :
+                refs_reason))
+        end
         v in known_names || throw(ArgumentError(
             "read_deck: key \"$key\" in section \"$section\" refers to \"$v\", which is not a " *
             "declared variable or dependent"))
@@ -134,7 +142,7 @@ function _fill_numeric_scalar(v, known_names::AbstractSet{String}, section::Abst
 end
 
 """
-    _fill_option_field(v, FT::Type, known_names, section, key, refs_allowed)
+    _fill_option_field(v, FT::Type, known_names, section, key, refs_allowed, refs_reason = "")
 
 One field of an option struct, dispatched on its declared type (D9's corrected rule, D32): an
 `<:AbstractFloat` field (or a vector of one) goes through `_fill_numeric_scalar`, element by
@@ -147,9 +155,9 @@ name exists, because the field's own declared type, not the value, decides.
 """
 function _fill_option_field(v, ::Type{FT}, known_names::AbstractSet{String},
                              section::AbstractString, key::AbstractString,
-                             refs_allowed::Bool) where {FT}
+                             refs_allowed::Bool, refs_reason::AbstractString="") where {FT}
     if FT <: AbstractFloat
-        return _fill_numeric_scalar(v, known_names, section, key, refs_allowed)
+        return _fill_numeric_scalar(v, known_names, section, key, refs_allowed, refs_reason)
     elseif FT <: Bool
         v isa Bool || throw(ArgumentError(
             "read_deck: key \"$key\" in section \"$section\" must be true or false; got $(repr(v))"))
@@ -163,7 +171,7 @@ function _fill_option_field(v, ::Type{FT}, known_names::AbstractSet{String},
             "read_deck: key \"$key\" in section \"$section\" must be a list"))
         et = eltype(FT)
         if et <: AbstractFloat
-            return Any[_fill_numeric_scalar(x, known_names, section, key, refs_allowed) for x in v]
+            return Any[_fill_numeric_scalar(x, known_names, section, key, refs_allowed, refs_reason) for x in v]
         elseif et <: Integer
             return Int[Int(x) for x in v]
         else
@@ -175,7 +183,7 @@ function _fill_option_field(v, ::Type{FT}, known_names::AbstractSet{String},
 end
 
 """
-    _fill_option_fields(::Type{T}, given::AbstractDict, known_names, section, refs_allowed) -> Dict{String,Any}
+    _fill_option_fields(::Type{T}, given::AbstractDict, known_names, section, refs_allowed, refs_reason = "") -> Dict{String,Any}
 
 Every field of the option struct `T` (D32), present: `given`'s own value where `given` has the
 key, `T`'s own default (read off a defaults-only instance, `T()`, since every option struct in
@@ -186,7 +194,8 @@ every option-struct-backed section: shapes, the six single instrument effects, t
 backgrounds, and the three optimizers.
 """
 function _fill_option_fields(::Type{T}, given::AbstractDict, known_names::AbstractSet{String},
-                              section::AbstractString, refs_allowed::Bool) where {T}
+                              section::AbstractString, refs_allowed::Bool,
+                              refs_reason::AbstractString="") where {T}
     _check_known_keys(given, String.(fieldnames(T)), section)
     default_inst = T()
     out = Dict{String,Any}()
@@ -194,28 +203,43 @@ function _fill_option_fields(::Type{T}, given::AbstractDict, known_names::Abstra
         fname = String(f)
         FT = fieldtype(T, f)
         out[fname] = haskey(given, fname) ?
-            _fill_option_field(given[fname], FT, known_names, section, fname, refs_allowed) :
+            _fill_option_field(given[fname], FT, known_names, section, fname, refs_allowed, refs_reason) :
             getfield(default_inst, f)
     end
     return out
 end
 
-# > **Effect-parameter bindings are scoped to the four keys whose deck name already equals the**
-# > **reconstruct-facing field name.** `_resolve_bindings` (`src/inversion/parameters.jl`, D9,
-# > chunk 4) hardcodes `factor = 1.0` for every `:effect` binding -- correct for `Sensitivity.scale`,
-# > `ConstantBackground.level`, `PolynomialBackground.coefficients` and
-# > `RationalBackground.numerator`/`denominator`, whose deck key and `parameters(effect)` key
-# > coincide, but silently wrong for `WavelengthCalibrationOptions.lambda_offset_nm` (`parameters`
-# > key `offset`, factor should be `1e-9`), `KSmearingOptions.half_angle_deg` (`parameters` key
-# > `half_angle`, factor should be `pi/180`), and `GradientSmearingOptions.width` (deck-declared in
-# > the smeared leaf's own unit, `parameters` key `width` already SI) -- `SpectralIRFOptions.fwhm_nm`
-# > and `TemporalIRFOptions.fwhm_ns` are worse still, since `parameters`' key `sigma` is not even the
-# > same quantity as `fwhm` (`_sigma_from_fwhm`), so no factor fixes it. **Found while building this
-# > chunk, not asked for by any DK row; reported in the chunk 12 hand-off as a finding for Level 2,
-# > not fixed here** (`_resolve_bindings` is outside this chunk's file list). `_INSTRUMENT_REF_OK`
-# > below is therefore the safe subset; the other five instrument components are filled with
-# > `refs_allowed = false`, so a variable reference there is a loud "takes a string" error rather
-# > than a silently wrong one.
+# > **Effect-parameter bindings read their conversion factor from `_INSTRUMENT_BINDING`**
+# > (D9, chunk 4, 2026-09-23; replaces the box Level 3 wrote at Phase 3 chunk 12, quoted at the
+# > end of this box). `_INSTRUMENT_BINDING` is a
+# > `Dict{String,Dict{String,Tuple{Symbol,Float64,String}}}`, `regname => (deck key =>
+# > (parameters(effect) field, factor, unit_key))`, defined beside `_INSTRUMENT_OPTIONS` below.
+# > `_build_effect_and_pending!` looks the deck key up in this table instead of assuming the deck
+# > key already equals the `parameters(effect)` field name, so every unit-bearing key converts
+# > correctly at `_resolve_bindings` (`src/inversion/parameters.jl`, D10) instead of silently
+# > taking `factor = 1.0`: `WavelengthCalibrationOptions.lambda_offset_nm` (`parameters` key
+# > `offset`, factor `1e-9`), `KSmearingOptions.half_angle_deg` (`parameters` key `half_angle`,
+# > factor `pi/180`), and `SpectralIRFOptions.fwhm_nm`/`TemporalIRFOptions.fwhm_ns` (`parameters`
+# > key `sigma`, factor `1e-9 * _SIGMA_PER_FWHM` = `1e-9/(2*sqrt(2*log(2)))`, D9's
+# > `_SIGMA_PER_FWHM`). Both the value path (`_rebuild_effect`, `src/inversion/parameters.jl`) and
+# > the Jacobian path (`_build_chain_globals`, `src/inversion/jacobian.jl`, D11a) multiply by
+# > `Binding.factor`, so the two agree.
+# >
+# > **`GradientSmearingOptions.width` is the one key still refused**, with a message naming why
+# > (`_fill_option_fields`'s `refs_reason` argument, D12): its conversion factor is the smeared
+# > leaf's own (`_leaf_si_path(e.leaf)[2]`), which is not a constant of the key and so cannot live
+# > in this static table. `_INSTRUMENT_REF_OK`, the old four-component safe subset, is gone;
+# > `haskey(_INSTRUMENT_BINDING, regname)` is the whole test now.
+# >
+# > **What this box said through chunk 3** (Phase 3 chunk 12, quoted so the correction is on the
+# > record): effect-parameter bindings were scoped to the four keys whose deck name already
+# > equalled the `parameters(effect)` field name (`Sensitivity.scale`, `ConstantBackground.level`,
+# > `PolynomialBackground.coefficients`, `RationalBackground.numerator`/`denominator`), with the
+# > other five refused outright. It also said, of `SpectralIRFOptions.fwhm_nm` and
+# > `TemporalIRFOptions.fwhm_ns`, that "no factor fixes it, since `parameters`' key `sigma` is not
+# > even the same quantity as `fwhm`". **That was wrong**: `_sigma_from_fwhm(fwhm) = fwhm /
+# > (2*sqrt(2*log(2)))` is a purely multiplicative map, so a single constant factor is exactly
+# > right, and this chunk's `_INSTRUMENT_BINDING` row for both keys proves it.
 
 # ------------------------------------------------------------------------------------------
 # [data]
@@ -451,8 +475,65 @@ const _INSTRUMENT_OPTIONS = Dict{String,Any}(
     "Constant" => ConstantBackgroundOptions, "Polynomial" => PolynomialBackgroundOptions,
     "Rational" => RationalBackgroundOptions)
 
-# The safe subset (see the box above _fill_option_fields): deck key == parameters(effect) key.
-const _INSTRUMENT_REF_OK = Set{String}(("Sensitivity", "Constant", "Polynomial", "Rational"))
+"""
+    _SIGMA_PER_FWHM
+
+`sigma = fwhm * _SIGMA_PER_FWHM = fwhm / (2*sqrt(2*log(2)))` (`_sigma_from_fwhm`,
+`src/instrument/effects.jl`): the multiplicative factor the deck's `fwhm_nm`/`fwhm_ns` keys
+convert through to reach `SpectralIRF`/`TemporalIRF`'s `parameters(effect)` key `sigma` (D9).
+"""
+const _SIGMA_PER_FWHM = 1 / (2 * sqrt(2 * log(2)))
+
+"""
+    _INSTRUMENT_BINDING
+
+`regname => (deck key => (parameters(effect) field, factor, unit_key))` (D9, closing Phase 3's
+B5, the box above `_fill_option_fields`): the one table every effect-parameter binding's
+conversion factor is read from, whether the binding comes from a deck (`_build_effect_and_pending!`)
+or is hand-built with the five-element target form (`_resolve_bindings`, D10). Only keys that are
+fields of the component's own option struct appear, since `_fill_option_fields` already rejects
+any other key against `fieldnames(T)` -- which is why there is no `lambda_offset_m`,
+`half_angle_rad` or `fwhm_m` row: those are constructor keywords, not deck keys.
+`haskey(_INSTRUMENT_BINDING, regname)` is what `refs_allowed` now means for an instrument
+component (replacing `_INSTRUMENT_REF_OK`); `GradientSmearing` is the one component absent, D12.
+"""
+const _INSTRUMENT_BINDING = Dict{String,Dict{String,Tuple{Symbol,Float64,String}}}(
+    "WavelengthCalibration" => Dict(
+        "lambda_offset_nm" => (:offset, 1e-9, "lambda_offset_nm"),
+        "dispersion_scale" => (:dispersion_scale, 1.0, ""),
+    ),
+    "KSmearing" => Dict(
+        "half_angle_deg" => (:half_angle, pi / 180, "half_angle_deg"),
+    ),
+    "SpectralIRF" => Dict(
+        "fwhm_nm" => (:sigma, 1e-9 * _SIGMA_PER_FWHM, "fwhm_nm"),
+    ),
+    "TemporalIRF" => Dict(
+        "fwhm_ns" => (:sigma, 1e-9 * _SIGMA_PER_FWHM, "fwhm_ns"),
+    ),
+    "Sensitivity" => Dict(
+        "scale" => (:scale, 1.0, ""),
+    ),
+    "Constant" => Dict(
+        "level" => (:level, 1.0, ""),
+    ),
+    "Polynomial" => Dict(
+        "coefficients" => (:coefficients, 1.0, ""),
+    ),
+    "Rational" => Dict(
+        "numerator" => (:numerator, 1.0, ""),
+        "denominator" => (:denominator, 1.0, ""),
+    ),
+)
+
+# GradientSmearing.width's conversion factor is the smeared leaf's own (_leaf_si_path(e.leaf)[2]),
+# not a constant of the key, so it cannot live in the table above; this is its refusal's reason
+# (D12), threaded through _fill_option_fields as refs_reason so the generic "takes a string, not a
+# variable reference" message does not move for every other refused key (there are none left).
+const _GRADIENT_SMEARING_WIDTH_REFS_REASON =
+    "read_deck: key \"width\" in section \"instrument.gradient_smearing\" cannot be a variable " *
+    "reference: its conversion factor is the smeared leaf's own and is not known to the binding " *
+    "layer (conventions.md 7.6)."
 
 const _BACKGROUND_TYPES = ("Constant", "Polynomial", "Rational", "Image")
 
@@ -464,8 +545,9 @@ function _validate_instrument_section(given::AbstractDict, known_names::Abstract
         entry = given[key]
         entry isa AbstractDict || throw(ArgumentError("read_deck: \"instrument.$key\" must be a table"))
         OptT = _INSTRUMENT_OPTIONS[regname]
-        refs_ok = regname in _INSTRUMENT_REF_OK
-        out[key] = _fill_option_fields(OptT, entry, known_names, "instrument.$key", refs_ok)
+        refs_ok = haskey(_INSTRUMENT_BINDING, regname)
+        refs_reason = regname == "GradientSmearing" ? _GRADIENT_SMEARING_WIDTH_REFS_REASON : ""
+        out[key] = _fill_option_fields(OptT, entry, known_names, "instrument.$key", refs_ok, refs_reason)
     end
     if haskey(given, "background")
         bg = given["background"]
@@ -778,14 +860,16 @@ const _EFFECT_CTOR = Dict{String,Any}(
     _build_effect_and_pending!(pending, regname, filled, vals, template) -> AbstractInstrumentEffect
 
 One instrument effect (spec D33): `filled`'s own `_VarRef`s substituted by their placeholder
-values and pushed onto `pending` as `(name, effect_object, field, element)` triples -- `field` is
-the reconstruct-facing key (`parameters(effect)`'s own name; see the box above
-`_fill_option_fields` for the safe/unsafe split), `effect_object` this very effect, resolved to a
-binding target only once `build_problem` knows the effect's final index in `expt.effects` (the
-`findfirst(e -> e === effect, expt0.effects)` loop there). `GradientSmearing`'s `leaf` carries a
-`"plasma."` prefix in the deck
-(`conventions.md` 7.6); it is stripped here before `GradientSmearing`'s own constructor parses it,
-which is the one place a raw SI/boundary leaf key is legal without that prefix.
+values and pushed onto `pending` as `(name, effect_object, field, element, factor, unit_key)`
+six-tuples (D9, D10, chunk 4) -- `field`, `factor` and `unit_key` come from
+`_INSTRUMENT_BINDING[regname][deck_key]`, not from the deck key itself (that table is what closes
+Phase 3's B5; see the box above `_fill_option_fields`), `effect_object` this very effect, resolved
+to a binding target only once `build_problem` knows the effect's final index in `expt.effects`
+(the `findfirst(e -> e === effect, expt0.effects)` loop there). `GradientSmearing`'s `leaf` carries
+a `"plasma."` prefix in the deck (`conventions.md` 7.6); it is stripped here before
+`GradientSmearing`'s own constructor parses it, which is the one place a raw SI/boundary leaf key
+is legal without that prefix. `GradientSmearing` itself never reaches the table lookup below: its
+one numeric key, `width`, is refused a variable reference before `read_deck` gets here (D12).
 """
 _deck_field_value!(::Any, key::String, v, refs::Vector{Tuple{String,Symbol,Int}},
                     vals::Dict{String,Float64}, fieldsym::Symbol) =
@@ -806,24 +890,29 @@ function _deck_field_value!(::Type{GradientSmearing}, key::String, v, refs::Vect
     return _resolve_and_collect!(refs, v, vals, fieldsym)
 end
 
-function _build_effect_and_pending!(pending::Vector{Tuple{String,Any,Symbol,Int}}, regname::String,
-                                     filled::AbstractDict, vals::Dict{String,Float64}, template::Plasma)
+function _build_effect_and_pending!(pending::Vector{Tuple{String,Any,Symbol,Int,Float64,String}},
+                                     regname::String, filled::AbstractDict, vals::Dict{String,Float64},
+                                     template::Plasma)
     ctor = _EFFECT_CTOR[regname]
     resolved = Dict{Symbol,Any}()
-    local_refs = Tuple{String,Symbol,Int}[]
+    local_refs = Tuple{String,String,Int}[]   # (variable name, deck key, element)
     for (k, v) in filled
         fieldsym = Symbol(k)
         refs = Tuple{String,Symbol,Int}[]
         resolved[fieldsym] = _deck_field_value!(ctor, k, v, refs, vals, fieldsym)
-        append!(local_refs, refs)
+        for (nm, fs, elem) in refs
+            push!(local_refs, (nm, String(fs), elem))
+        end
     end
     effect = _construct_effect(ctor, resolved, template)
     ks = keys(parameters(effect))
-    for (nm, fieldsym, elem) in local_refs
-        fieldsym in ks || throw(ArgumentError(
-            "\"$nm\" is bound to \"$regname.$fieldsym\", which has no matching reconstruct-facing " *
+    binding_table = get(_INSTRUMENT_BINDING, regname, nothing)
+    for (nm, deck_key, elem) in local_refs
+        field, factor, unit_key = binding_table[deck_key]
+        field in ks || throw(ArgumentError(
+            "\"$nm\" is bound to \"$regname.$field\", which has no matching reconstruct-facing " *
             "parameter; valid parameters are $(collect(ks))"))
-        push!(pending, (nm, effect, fieldsym, elem))
+        push!(pending, (nm, effect, field, elem, factor, unit_key))
     end
     return effect
 end
@@ -927,7 +1016,7 @@ function build_problem(deck::Deck)
 
     template, bindings_plasma = _build_template(s["plasma"], vals)
 
-    pending = Tuple{String,Any,Symbol,Int}[]
+    pending = Tuple{String,Any,Symbol,Int,Float64,String}[]
     effects = AbstractInstrumentEffect[]
     for key in ("k_smearing", "gradient_smearing", "wavelength_calibration", "spectral_irf", "temporal_irf",
                 "sensitivity")
@@ -945,9 +1034,9 @@ function build_problem(deck::Deck)
         effects=Tuple(effects))
 
     bindings_instrument = Pair{String,Any}[]
-    for (nm, effect, field, elem) in pending
+    for (nm, effect, field, elem, factor, unit_key) in pending
         idx = findfirst(e -> e === effect, expt0.effects)
-        target = elem == 0 ? (idx, field) : (idx, field, elem)
+        target = (idx, field, elem, factor, unit_key)
         push!(bindings_instrument, nm => target)
     end
 
@@ -972,7 +1061,8 @@ end
 function _binding_description(b::Binding)
     b.kind === :leaf && return string(b.path) * (isempty(b.unit_key) ? "" : " (unit_key=$(b.unit_key))")
     suffix = b.element == 0 ? "" : "[$(b.element)]"
-    return "instrument.effect[$(b.effect)].$(b.field)$suffix"
+    return "instrument.effect[$(b.effect)].$(b.field)$suffix" *
+           (isempty(b.unit_key) ? "" : " (unit_key=$(b.unit_key))")
 end
 
 """

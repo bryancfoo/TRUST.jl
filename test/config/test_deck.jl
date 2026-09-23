@@ -689,22 +689,26 @@ end
 end
 
 # ------------------------------------------------------------------------------------------
-# DK17: the five unsafe instrument keys refuse a variable reference (carried from chunk 12,
-# dev/phase3_prompt_13.md's carried item)
+# DK17: the one instrument key that still refuses a variable reference; the calibration offset
+# now binds (Phase 4.A, Step 4.A.1b, D9-D12, chunk 4, 2026-09-23; carried from chunk 12,
+# dev/phase3_prompt_13.md's carried item -- shape changed, [propagate] to roadmap.md Step
+# 4.A.1's Test sentence)
 # ------------------------------------------------------------------------------------------
 #
-# Chunk 12's `_resolve_bindings` (src/inversion/parameters.jl, D9) hardcodes `factor = 1.0` for
-# every `:effect` binding -- correct for the four instrument keys whose deck name already equals
-# `parameters(effect)`'s own key, and silently wrong for five others (deck.jl's box above
-# `_fill_option_fields`). Chunk 12's `_INSTRUMENT_REF_OK` therefore fills those five with
-# `refs_allowed = false`, so a deck naming a variable there is refused at `read_deck` time with
-# D39's "takes a string, not a variable reference" fragment rather than silently mishandled.
-# Nothing tested that containment before this chunk (a grep of this file's own history found no
-# row putting a string in any of the five); DK17 is that test. Each string below names a
-# *declared* fitted variable ("x"), not a nonexistent name, so a passing row is the "takes a
-# string" error and not DK6's "which is not a declared variable or dependent" -- the row must
-# fail for the right reason, or it would pass a version of `_fill_option_fields` that checked
-# `refs_allowed` after the name lookup instead of before it.
+# Through chunk 3, `_resolve_bindings` (src/inversion/parameters.jl, D9) hardcoded `factor = 1.0`
+# for every `:effect` binding -- correct for the four instrument keys whose deck name already
+# equalled `parameters(effect)`'s own key, silently wrong for five others (deck.jl's box above
+# `_fill_option_fields`). Chunk 4's `_INSTRUMENT_BINDING` table (D9) closes that: every key but
+# one now converts correctly and binds. **`gradient_smearing.width` is the one exception** (D12):
+# its conversion factor is the smeared leaf's own, not a constant of the key, so it cannot live in
+# the table, and it is refused with a message that says why rather than the generic "takes a
+# string" fragment (this is the one row DK17 keeps). The other four rows this @testset used to
+# hold (spectral_irf, temporal_irf, wavelength_calibration, k_smearing) are deleted; BF4 and BF6
+# (test/inversion/test_binding_factors.jl) cover them as positive rows. **DK17 keeps one positive
+# row of its own** (A19, amended 2026-09-23): the calibration offset deck must *build*
+# (`OTIS.build_problem`), not just `read_deck`, because a revert of the table lookup in
+# `_build_effect_and_pending!` fails at build time, not at read time -- without this row,
+# reverting D9's table lookup in `deck.jl` leaves `deck`'s own pass count unchanged.
 
 function _dk17_deck(datafile::AbstractString, instrument_line::AbstractString)
     return """
@@ -742,23 +746,23 @@ function _dk17_deck(datafile::AbstractString, instrument_line::AbstractString)
     """
 end
 
-@testset "DK17: the five unsafe instrument keys refuse a variable reference" begin
+@testset "DK17: gradient_smearing.width still refuses; the calibration offset now binds" begin
     mktempdir() do dir
         datafile = joinpath(dir, "data.jld2")
         _dk_write_streak(datafile)
 
-        rows = (
-            "spectral_irf" => "spectral_irf = { fwhm_nm = \"x\" }",
-            "temporal_irf" => "temporal_irf = { fwhm_ns = \"x\" }",
-            "wavelength_calibration" => "wavelength_calibration = { lambda_offset_nm = \"x\" }",
-            "k_smearing" => "k_smearing = { half_angle_deg = \"x\" }",
-            "gradient_smearing" => "gradient_smearing = { leaf = \"plasma.electrons.e.T_eV\", width = \"x\" }",
-        )
-        for (label, instrument_line) in rows
-            deckpath = joinpath(dir, "dk17_$label.toml")
-            write(deckpath, _dk17_deck(datafile, instrument_line))
-            @test_throws "takes a string, not a variable reference" read_deck(deckpath)
-        end
+        refused_path = joinpath(dir, "dk17_gradient_smearing.toml")
+        write(refused_path, _dk17_deck(datafile,
+            "gradient_smearing = { leaf = \"plasma.electrons.e.T_eV\", width = \"x\" }"))
+        @test_throws "its conversion factor is the smeared leaf's own" read_deck(refused_path)
+
+        builds_path = joinpath(dir, "dk17_wavelength_calibration.toml")
+        write(builds_path, _dk17_deck(datafile, "wavelength_calibration = { lambda_offset_nm = \"x\" }"))
+        deck = read_deck(builds_path)
+        problem, optimizer, start = OTIS.build_problem(deck)
+        b = only(b for b in problem.pspec.bindings if b.name == "x")
+        @test b.factor == 1e-9
+        @test b.unit_key == "lambda_offset_nm"
     end
 end
 

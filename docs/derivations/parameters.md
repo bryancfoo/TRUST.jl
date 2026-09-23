@@ -147,6 +147,20 @@ effects act on the whole streak once, and `Experiment` holds one effect tuple, n
 OQ-24) the effect a fit binds instead when the wavelength axis itself needs to move; the probe
 wavelength itself is never bindable.
 
+**An effect-parameter binding's factor comes from `_INSTRUMENT_BINDING`** (`src/config/deck.jl`,
+D9, Step 4.A.1b, closing Phase 3's B5), not from an assumption that the deck key already equals
+`parameters(effect)`'s own key: `_build_effect_and_pending!` looks the deck key up in that table
+to get the `parameters` field, the factor and the unit key together, and `_resolve_bindings`
+(here) writes them onto the `Binding` from the target's fourth and fifth elements. **A hand-built
+binding still defaults to `factor = 1.0`, `unit_key = ""`** (the two- and three-element target
+forms, `(idx, field)`/`(idx, field, element)`): only the deck path and a target written out in the
+five-element form, `(idx, field, element, factor, unit_key)`, carry a non-trivial factor. The
+one-conversion-factor rule above therefore covers an effect binding exactly as it covers a leaf
+one — a variable bound to `electrons.e.T_eV` and to `spectral_irf.fwhm_nm` is refused, naming both
+keys, even though neither is a plasma leaf. **`gradient_smearing.width` is the one instrument key
+that still refuses a variable reference**: its factor is the smeared leaf's own
+(`_leaf_si_path(e.leaf)[2]`), not a constant of the key, so it cannot live in a static table.
+
 **Two variables may never write one leaf**, but one variable may write many leaves (the
 one-conversion-factor rule above is what keeps that meaningful). A leaf the trace does not already
 tabulate gains a new row, built once at `ParameterSpec`'s construction with the union of the

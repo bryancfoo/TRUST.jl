@@ -416,6 +416,8 @@ function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
             effect_idx = Int(target[1])
             field = Symbol(target[2])
             element = length(target) >= 3 ? Int(target[3]) : 0
+            factor = length(target) >= 4 ? Float64(target[4]) : 1.0
+            unit_key = length(target) >= 5 ? String(target[5]) : ""
             (1 <= effect_idx <= length(effects)) || throw(ArgumentError(
                 "binding \"$name\": effect index $effect_idx is out of range 1:$(length(effects))"))
             e = effects[effect_idx]
@@ -427,8 +429,8 @@ function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
             is_tv = slot <= nvar ? variables[slot].time_varying : dep_tv[slot-nvar]
             is_tv && throw(ArgumentError(
                 "\"$name\" is time-varying and cannot be bound to an instrument parameter"))
-            _check_unit_factor!(name_factor, name, 1.0, "")
-            bindings[i] = Binding(name, slot, :effect, _DUMMY_LEAF_PATH, 0, effect_idx, field, element, 1.0, "")
+            _check_unit_factor!(name_factor, name, factor, unit_key)
+            bindings[i] = Binding(name, slot, :effect, _DUMMY_LEAF_PATH, 0, effect_idx, field, element, factor, unit_key)
         end
     end
     return bindings
