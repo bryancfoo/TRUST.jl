@@ -21,6 +21,7 @@ include("instrument/measure.jl")          # new (2.2/2.3): needs Experiment and 
 include("data/streak.jl")                 # new (2.4)
 include("data/io.jl")                     # new (2.4): needs StreakData and PlasmaTrace
 include("data/warp.jl")                   # new (3.8): WarpMap, dewarp, read_warpmap; needs StreakData
+include("data/average.jl")                # new (4.A.2): average_regions, AveragingRegion; needs StreakData
 include("instrument/noise.jl")            # new (2.5): needs Experiment and StreakData
 include("inversion/expressions.jl")       # new (3.1b): the dependent-expression layer; no exports yet
 include("inversion/parameters.jl")        # new (3.1c): ParameterSpec, the transform, the index map
@@ -72,6 +73,9 @@ export StreakData, read_streak, write_streak, read_trace, write_trace
 
 # data (3.8)
 export WarpMap, dewarp, read_warpmap
+
+# data (4.A.2)
+export average_regions, AveragingRegion
 
 # data (3.6a)
 export write_result, read_result

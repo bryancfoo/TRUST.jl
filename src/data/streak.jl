@@ -12,12 +12,15 @@ same-shape matrix of strictly positive uncertainties; `mask` is `nothing` or a s
 `Bool` matrix, **`true` meaning the pixel is used** — the opposite convention is the likeliest
 misreading, and Phase 3's χ² depends on it; `meta` is a free-form `Dict{String,Any}` for
 metadata (every key a `String`, every value a `Real`, a `String`, or an `AbstractArray` of
-those, so `write_streak` can write it without a type map).
+those, so `write_streak` can write it without a type map). **A meta key must not contain `/`**
+(D26, Step 4.A.2, 2026-09-23): `write_streak` stores each meta key as the JLD2 path
+`"meta/\$k"`, where `/` is a group separator, so a `/`-bearing key is accepted, written and then
+unreadable by `read_streak` -- a loud error at construction catches it instead.
 
 Built with `StreakData(; lambda_nm | lambda_m, t_ns | t_s, image, sigma = nothing, mask =
 nothing, meta = Dict{String,Any}())`.
 
-`conventions.md` Section 4; spec D18.
+`conventions.md` Section 4; spec D18, D26.
 """
 struct StreakData{FT<:Real,I<:AbstractMatrix{FT},S<:Union{Nothing,AbstractMatrix{FT}},
     M<:Union{Nothing,AbstractMatrix{Bool}}}
@@ -64,6 +67,9 @@ function StreakData(; image, sigma=nothing, mask=nothing, meta=Dict{String,Any}(
     end
     for (k, v) in meta
         k isa String || throw(ArgumentError("StreakData: meta key $k must be a String"))
+        occursin('/', k) && throw(ArgumentError(
+            "StreakData: meta key \"$k\" must not contain \"/\": write_streak stores each meta key as a " *
+            "JLD2 dataset name, where \"/\" separates groups, and the key would not read back"))
         _check_meta_value(v) || throw(ArgumentError(
             "StreakData: meta[\"$k\"] must be a Real, a String, or an AbstractArray of those"))
     end

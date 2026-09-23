@@ -128,6 +128,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("data streak")
         @safetestset "data streak" begin include("data/test_streak.jl") end
     end
+    if _wanted("streak averaging")
+        @safetestset "streak averaging" begin include("data/test_average.jl") end
+    end
     if _wanted("data io")
         @safetestset "data io" begin include("data/test_io.jl") end
     end

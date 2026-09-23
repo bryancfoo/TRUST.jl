@@ -157,7 +157,7 @@ forms, `(idx, field)`/`(idx, field, element)`): only the deck path and a target 
 five-element form, `(idx, field, element, factor, unit_key)`, carry a non-trivial factor. The
 one-conversion-factor rule above therefore covers an effect binding exactly as it covers a leaf
 one — a variable bound to `electrons.e.T_eV` and to `spectral_irf.fwhm_nm` is refused, naming both
-keys, even though neither is a plasma leaf. **`gradient_smearing.width` is the one instrument key
+keys, even though only one of them is a plasma leaf. **`gradient_smearing.width` is the one instrument key
 that still refuses a variable reference**: its factor is the smeared leaf's own
 (`_leaf_si_path(e.leaf)[2]`), not a constant of the key, so it cannot live in a static table.
 

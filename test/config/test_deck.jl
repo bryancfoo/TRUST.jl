@@ -491,6 +491,18 @@ end
     end
 end
 
+@testset "DK7: an unknown key in [data]" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "data.jld2")
+        _dk_write_streak(datafile)
+        outdir = joinpath(dir, "out")
+        deck_text = replace(_dk_minimal_deck(datafile, outdir), "[data]" => "[data]\nbogus_key = 1.0")
+        deckpath = joinpath(dir, "deck.toml")
+        write(deckpath, deck_text)
+        @test_throws "unknown key" read_deck(deckpath)
+    end
+end
+
 # ------------------------------------------------------------------------------------------
 # DK8: sigma must be "supplied"
 # ------------------------------------------------------------------------------------------

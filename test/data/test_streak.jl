@@ -64,3 +64,32 @@ end
     @test_throws MethodError spectrumplot(lam, image[:, 1])
     @test_throws MethodError lcurveplot([1.0, 2.0], [3.0, 4.0])
 end
+
+# ------------------------------------------------------------------------------------------
+# SD6 (D26, A19: this is Phase 2's file, the fix belongs here beside the other meta checks): a
+# meta key containing "/" is refused at construction, naming the key; a key without one still
+# round-trips through write_streak/read_streak, type included.
+# ------------------------------------------------------------------------------------------
+
+@testset "SD6: a meta key containing / is refused; a regions_-prefixed key round-trips" begin
+    nl, nt = 4, 3
+    lam, t = _sd_axes(nl, nt)
+    image = rand(nl, nt)
+
+    @test_throws "must not contain" StreakData(lambda_m=lam, t_s=t, image=image,
+        meta=Dict{String,Any}("bad/key" => 1.0))
+    @test_throws "regions/source_t" StreakData(lambda_m=lam, t_s=t, image=image,
+        meta=Dict{String,Any}("regions/source_t" => 1.0))
+
+    sd = StreakData(lambda_m=lam, t_s=t, image=image,
+        meta=Dict{String,Any}("regions_source_t" => collect(1.0:9.0),
+            "regions_usable_counts" => Matrix{Int}(reshape(1:12, nl, nt))))
+    mktempdir() do dir
+        path = joinpath(dir, "sd6.jld2")
+        write_streak(path, sd; source="test")
+        back = read_streak(path)
+        @test back.meta["regions_source_t"] == collect(1.0:9.0)
+        @test back.meta["regions_usable_counts"] == Matrix{Int}(reshape(1:12, nl, nt))
+        @test eltype(back.meta["regions_usable_counts"]) <: Integer
+    end
+end

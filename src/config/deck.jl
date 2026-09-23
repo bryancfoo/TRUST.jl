@@ -245,8 +245,41 @@ end
 # [data]
 # ------------------------------------------------------------------------------------------
 
-const _DATA_KEYS = ("file", "lambda_range_nm", "t_range_ns")
+# The regions (D15) supersede t_range_ns, are averaged onto in data preparation (D13, D14) and
+# may each name a [fit.intervals] entry -- amended 2026-09-23 before chunk 5 with four loud
+# errors in place of a silent behaviour: see _validate_data_section's docstring.
+const _DATA_KEYS = ("file", "lambda_range_nm", "t_range_ns", "regions", "t_shift_ns", "t_shift_s",
+    "min_usable_fraction")
+const _REGION_KEYS = ("t_range_ns", "t_range_s", "nbins", "interval")
+const _REGION_RANGE_KEYS = ("t_range_ns", "t_range_s")
 
+"""
+    _validate_data_section(given::AbstractDict) -> Dict{String,Any}
+
+Validates `[data]` (D15, amended 2026-09-23). `regions` is stored as a `Vector{Dict{String,Any}}`,
+one per `[[data.regions]]` table, each carrying exactly the unit key the deck gave (a two-element
+`Any[Float64, Float64]`), `nbins::Int`, and `interval` filled with `""` when absent;
+`min_usable_fraction` is filled with `0.5` when `regions` is given and the key is absent; neither
+`t_shift` key is ever filled in (absent means zero to `average_regions`, and filling one next to
+the user's other unit keyword would make the effective deck re-read with both given).
+
+Four loud errors, each in place of a silent behaviour:
+
+1. Both `regions` and `t_range_ns` -- the roadmap's "regions supersede t_range_ns" would silently
+   ignore whichever is not honoured; `lambda_range_nm` is unaffected. **[propagate]** to
+   `roadmap.md` Step 4.A.2 (this document decides it, Level 3 does not choose it).
+2. `t_shift_ns` and `t_shift_s` together -- the unit table's own error, surfaced early here as
+   well as later through `_si_value`.
+3. A region table naming a key other than `t_range_ns`/`t_range_s`/`nbins`/`interval`, or naming
+   both/neither of the two range keys.
+4. `t_shift_ns`, `t_shift_s` or `min_usable_fraction` given without `regions` -- without regions
+   nothing is averaged, so the value would be silently ignored.
+
+(The fifth loud error of D15 -- a region naming an interval `[fit.intervals]` also declares -- is
+cross-section and is checked in `build_problem` instead.)
+
+Spec D15.
+"""
 function _validate_data_section(given::AbstractDict)
     _check_known_keys(given, _DATA_KEYS, "data")
     haskey(given, "file") || throw(ArgumentError("read_deck: section \"data\" needs a \"file\" key"))
@@ -258,7 +291,57 @@ function _validate_data_section(given::AbstractDict)
         (v isa AbstractVector && length(v) == 2 && all(x -> x isa Real, v)) || throw(ArgumentError(
             "read_deck: key \"$k\" in section \"data\" must be a two-element [lo, hi] of numbers"))
     end
-    return Dict{String,Any}(given)
+
+    (haskey(given, "t_shift_ns") && haskey(given, "t_shift_s")) && throw(ArgumentError(
+        "read_deck: section \"data\" gives both \"t_shift_ns\" and \"t_shift_s\"; give exactly one"))
+
+    out = Dict{String,Any}(given)
+
+    if haskey(given, "regions")
+        haskey(given, "t_range_ns") && throw(ArgumentError(
+            "read_deck: section \"data\" gives both \"regions\" and \"t_range_ns\"; regions " *
+            "supersede t_range_ns, and a deck whose stated time window would be silently " *
+            "ignored is refused instead"))
+
+        regions_raw = given["regions"]
+        regions_raw isa AbstractVector || throw(ArgumentError(
+            "read_deck: \"data.regions\" must be an array of tables"))
+        regions_out = Vector{Dict{String,Any}}(undef, length(regions_raw))
+        for (i, entry) in enumerate(regions_raw)
+            entry isa AbstractDict || throw(ArgumentError(
+                "read_deck: \"data.regions[$i]\" must be a table"))
+            _check_known_keys(entry, _REGION_KEYS, "data.regions[$i]")
+            present = [k for k in _REGION_RANGE_KEYS if haskey(entry, k)]
+            length(present) == 1 || throw(ArgumentError(
+                "read_deck: \"data.regions[$i]\" needs exactly one of $_REGION_RANGE_KEYS"))
+            key = present[1]
+            rng = entry[key]
+            (rng isa AbstractVector && length(rng) == 2 && all(x -> x isa Real, rng)) ||
+                throw(ArgumentError(
+                    "read_deck: \"data.regions[$i].$key\" must be a two-element [lo, hi]"))
+            haskey(entry, "nbins") || throw(ArgumentError(
+                "read_deck: \"data.regions[$i]\" needs \"nbins\""))
+            entry["nbins"] isa Integer || throw(ArgumentError(
+                "read_deck: \"data.regions[$i].nbins\" must be an integer"))
+            interval = get(entry, "interval", "")
+            interval isa AbstractString || throw(ArgumentError(
+                "read_deck: \"data.regions[$i].interval\" must be a string"))
+            regions_out[i] = Dict{String,Any}(
+                key => Any[Float64(rng[1]), Float64(rng[2])],
+                "nbins" => Int(entry["nbins"]),
+                "interval" => String(interval))
+        end
+        out["regions"] = regions_out
+        out["min_usable_fraction"] = Float64(get(given, "min_usable_fraction", 0.5))
+    else
+        for k in ("t_shift_ns", "t_shift_s", "min_usable_fraction")
+            haskey(given, k) && throw(ArgumentError(
+                "read_deck: section \"data\" gives \"$k\" without \"regions\"; without " *
+                "regions nothing is averaged and the value would be silently ignored"))
+        end
+    end
+
+    return out
 end
 
 function _crop_streak(sd::StreakData, lambda_range_nm, t_range_ns)
@@ -281,6 +364,38 @@ function _crop_streak(sd::StreakData, lambda_range_nm, t_range_ns)
     return StreakData(; lambda_m=sd.lambda[l_idx], t_s=sd.t[t_idx], image=sd.image[l_idx, t_idx],
         sigma=sd.sigma === nothing ? nothing : sd.sigma[l_idx, t_idx],
         mask=sd.mask === nothing ? nothing : sd.mask[l_idx, t_idx], meta=sd.meta)
+end
+
+"""
+    _build_averaging_regions(regions_raw::AbstractVector{Dict{String,Any}}) -> Vector{AveragingRegion}
+
+One `AveragingRegion` per entry of `_validate_data_section`'s own `"regions"` (each already
+carrying exactly one of `t_range_ns`/`t_range_s`, `nbins`, `interval`), in deck order.
+
+Spec D15.
+"""
+function _build_averaging_regions(regions_raw::AbstractVector)
+    regions = AveragingRegion[]
+    for r in regions_raw
+        key = only(k for k in _REGION_RANGE_KEYS if haskey(r, k))
+        push!(regions, AveragingRegion(; nbins=r["nbins"], interval=r["interval"],
+            NamedTuple{(Symbol(key),)}((r[key],))...))
+    end
+    return regions
+end
+
+"""
+    _averaging_kwargs(data_section::AbstractDict) -> Dict{Symbol,Any}
+
+The keyword arguments `average_regions` needs from `[data]`: `min_usable_fraction` (always
+present -- `_validate_data_section` filled its default) and whichever of `t_shift_ns`/`t_shift_s`
+the deck gave, if either (neither filled in means zero, D15 amendment 2).
+"""
+function _averaging_kwargs(data_section::AbstractDict)
+    kwargs = Dict{Symbol,Any}(:min_usable_fraction => data_section["min_usable_fraction"])
+    haskey(data_section, "t_shift_ns") && (kwargs[:t_shift_ns] = data_section["t_shift_ns"])
+    haskey(data_section, "t_shift_s") && (kwargs[:t_shift_s] = data_section["t_shift_s"])
+    return kwargs
 end
 
 # ------------------------------------------------------------------------------------------
@@ -1000,15 +1115,54 @@ Spec D33.
 function build_problem(deck::Deck)
     s = deck.sections
     data0 = read_streak(s["data"]["file"])
-    data = _crop_streak(data0, get(s["data"], "lambda_range_nm", nothing),
-        get(s["data"], "t_range_ns", nothing))
+    regions_given = haskey(s["data"], "regions")
+    data1 = _crop_streak(data0, get(s["data"], "lambda_range_nm", nothing),
+        regions_given ? nothing : get(s["data"], "t_range_ns", nothing))
+
+    # Route B's master axis, the data averaged onto it rather than the model mapped to the
+    # detector's bins (OQ-34, decided 2026-09-21; D13-D16). Only the time axis is averaged, and
+    # this is the only place average_regions is called from the deck.
+    regions = regions_given ? _build_averaging_regions(s["data"]["regions"]) : AveragingRegion[]
+    data = regions_given ? average_regions(data1, regions; _averaging_kwargs(s["data"])...) : data1
 
     probe, collection = _build_geometry(s["geometry"])
 
     axis = data.t
     axis_unit = Symbol(s["fit"]["axis_unit"])
     factor = axis_unit === :ns ? 1e-9 : 1.0
-    ivals, interval_index = _build_intervals(s["fit_intervals"], axis)
+
+    # D15 amendment 1: a region naming an interval [fit.intervals] also declares is a loud error;
+    # otherwise the region's own interval is synthesized into a LOCAL copy of fit_intervals, never
+    # into deck.sections (effective_deck re-serializes deck.sections as they stand, D15 amendment).
+    fit_intervals = s["fit_intervals"]
+    if !isempty(regions)
+        synthesized = Dict{String,Any}()
+        for region in regions
+            isempty(region.interval) && continue
+            haskey(fit_intervals, region.interval) && throw(ArgumentError(
+                "read_deck: \"data.regions\" names interval \"$(region.interval)\", which " *
+                "\"fit.intervals\" also declares"))
+            synthesized[region.interval] = Dict{String,Any}("t_range_s" => Any[region.lo, region.hi])
+        end
+        fit_intervals = merge(fit_intervals, synthesized)
+    end
+    ivals, interval_index = _build_intervals(fit_intervals, axis)
+
+    # D15 amendment 4: a region-declared interval's bins must equal the region's own output-bin
+    # range (contiguous, in region order on the averaged axis), or the deck is refused.
+    if !isempty(regions)
+        offset = 0
+        for region in regions
+            region_bins = (offset+1):(offset+region.nbins)
+            offset += region.nbins
+            isempty(region.interval) && continue
+            iv = ivals[interval_index[region.interval]]
+            iv.bins == region_bins || throw(ArgumentError(
+                "read_deck: region interval \"$(region.interval)\" resolved to bins " *
+                "$(iv.bins), but the region's own output bins are $region_bins"))
+        end
+    end
+
     vars = _build_variables(s["fit_variables"], interval_index)
     dep_pairs = collect(Pair{String,String}, s["fit_dependent"])
 

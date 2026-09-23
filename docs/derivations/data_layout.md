@@ -28,7 +28,30 @@ Real}`), not by an actual h5py read.
 | `meta/theta_deg` | `Float64` | | when a collection is given |
 | `meta/polarization_deg` | `Float64` | | when a probe is given |
 | `meta/k_model` | `String` | `"exact"` or `"approximate"` | when a collection is given |
+| `meta/regions_source_t` | `Float64` | `(N_t,source)` | when `average_regions` produced this streak |
+| `meta/regions_t_shift` | `Float64` | scalar, s | when `average_regions` produced this streak |
+| `meta/regions_min_usable_fraction` | `Float64` | scalar | when `average_regions` produced this streak |
+| `meta/regions_starts` | `Float64` | `(N_regions,)`, s | when `average_regions` produced this streak |
+| `meta/regions_ends` | `Float64` | `(N_regions,)`, s | when `average_regions` produced this streak |
+| `meta/regions_nbins` | `Int` | `(N_regions,)` | when `average_regions` produced this streak |
+| `meta/regions_intervals` | `String` | `(N_regions,)`, `""` for none | when `average_regions` produced this streak |
+| `meta/regions_window_counts` | `Int` | `(N_t,)`, `\|W_k\|` | when `average_regions` produced this streak |
+| `meta/regions_usable_counts` | `Int` | `(N_λ, N_t)`, `\|U_k,l\|` | when `average_regions` produced this streak |
 | `meta/<user key>` | as given | | every entry of `sd.meta` |
+
+**The nine `regions_*` keys (Step 4.A.2, 2026-09-23; spec D16, amended).** Written by
+`average_regions` (`src/data/average.jl`) when it produces a streak by averaging a source streak
+onto a user-given time axis ([OQ-34](../../dev/open_questions.md#oq-34)): `regions_source_t` is
+the source axis in s, **before** the channel's fixed timing shift; `regions_t_shift` is that
+shift, Δt, in s; the rest describe the regions and the per-window pixel counts the averaging used.
+**These add no dataset the table above did not already have a place for and bump no layout
+version**: all nine are `Real`s, `String`s or arrays of those, exactly the type `_check_meta_value`
+already accepts and `write_streak`'s `meta/$k` loop already writes without a type map. **The
+prefix is `regions_`, not `regions/`**, and this is load-bearing, not stylistic: `/` is a JLD2
+group separator, and a meta key containing one produces a nested group `read_streak` cannot read
+back as a scalar or an array (`StreakData`'s constructor refuses such a key outright, D26). A
+source streak whose own `meta` already carries a key beginning `regions_` is a loud error at
+`average_regions`, since these nine describe an operation that must not be silently reapplied.
 
 **Orientation, in bold because it is the trap.** Arrays are written in Julia's **column-major
 order with wavelength first** — `image[l, j]` is wavelength `l`, time `j`. An h5py reader,

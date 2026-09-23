@@ -74,7 +74,11 @@ effect's own factor, added at Step 2.2, was **retired at Step 4.A.1a** (2026-09-
 in its place in the tuple, by `lambda_offset` (`lambda_offset_nm`/`lambda_offset_m`,
 `WavelengthCalibration`'s own factor; the user, 2026-09-21,
 [OQ-24](../dev/open_questions.md#oq-24)): the two effects are nearly degenerate, and the
-probe-wavelength-shift effect is removed rather than kept alongside the new one.
+probe-wavelength-shift effect is removed rather than kept alongside the new one. The `t_shift` row
+is a Step 4.A.2 addition (2026-09-23, spec D13): `average_regions`' own channel timing offset,
+in the style of `fwhm_lambda`/`fwhm_t` -- its factors duplicate `t`'s, and the row exists only so
+that `_si_value` accepts `t_shift_ns`/`t_shift_s` and `_reject_extra_kwargs` catches a typo in
+one of them.
 """
 const ACCEPTED_UNITS = (
     T      = (T_eV      = EV,               T_keV     = 1000 * EV),
@@ -91,6 +95,7 @@ const ACCEPTED_UNITS = (
     fwhm_t       = (fwhm_ns = 1e-9,          fwhm_s   = 1.0),
     half_angle   = (half_angle_deg = π/180,  half_angle_rad = 1.0),
     lambda_offset = (lambda_offset_nm = 1e-9,  lambda_offset_m = 1.0),
+    t_shift        = (t_shift_ns = 1e-9,         t_shift_s = 1.0),
     intensity      = (intensity_wcm2 = 1e4,      intensity_wm2 = 1.0),
     diameter       = (diameter_um = 1e-6,        diameter_m = 1.0),
     dispersion     = (dispersion_nm_px = 1e-9,   dispersion_m_px = 1.0),

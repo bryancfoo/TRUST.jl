@@ -61,6 +61,16 @@ Both IRFs share one builder, `_convolution_matrix(kernel, axis)` (spec D13):
 - **Element type.** `promote_type` of the kernel's own type and the axis's — never `Float64`
   (Pitfall 3): a dual `σ` (from a fitted IRF width) gives a dual matrix, which is how that
   width's Jacobian column is obtained (XP12).
+- **The axis itself, since Step 4.A.2 (2026-09-23).** `K_t` is built on `expt.t`, and since
+  [OQ-34](../../dev/open_questions.md#oq-34) that axis is the user's own **fitted** axis: one or
+  more `AveragingRegion`s, each a start, an end and a bin count, onto which `average_regions`
+  (`src/data/average.jl`, beside `dewarp`) averages the detector's raw pixels, σ and mask in data
+  preparation, before `Experiment` is ever built. A streak's 1024 detector time bins therefore
+  become the tens of fitted bins `K_t` actually operates on. Nothing here changes because of it:
+  `TemporalIRF` never sees a source pixel that was not already averaged onto the fitted axis, and
+  the square, columns-sum-to-one matrix this section describes is unchanged in form and in code —
+  [OQ-16](../../dev/open_questions.md#oq-16)'s "one plasma snapshot per detector time bin" survives
+  in generalized form, the "detector time bin" now being the averaged one.
 
 ## 3. The in-kernel effects
 
