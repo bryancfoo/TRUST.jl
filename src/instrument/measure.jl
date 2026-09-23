@@ -161,8 +161,8 @@ end
 function _accumulate!(col, p, probe, collection, lambda, effects::Tuple, w, first_order)
     e = first(effects)
     rest = Base.tail(effects)
-    for (wq, pq, probeq, collectionq) in samples(e, p, probe, collection)
-        _accumulate!(col, pq, probeq, collectionq, lambda, rest, w * wq, first_order)
+    for (wq, pq, probeq, collectionq, lambdaq) in samples(e, p, probe, collection, lambda)
+        _accumulate!(col, pq, probeq, collectionq, lambdaq, rest, w * wq, first_order)
     end
     return col
 end

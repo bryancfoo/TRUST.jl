@@ -126,7 +126,7 @@ function _cv_p3_expt()
     effects = (
         KSmearing(half_angle_deg=2.0, nodes=3),
         GradientSmearing(_cv_p3_template(); leaf="electrons.e.T_eV", width=30.0, nodes=3),
-        ProbeOffset(probe_offset_nm=0.02),
+        WavelengthCalibration(lambda_offset_nm=0.02),
         SpectralIRF(fwhm_nm=0.08),
         TemporalIRF(TabulatedKernel((-1, 0, 2), (0.2, 0.5, 0.3))),
         Sensitivity(scale=1.0e-6, lambda_nm=[262.0, 263.25, 264.5], response=[0.8, 1.0, 0.9]),

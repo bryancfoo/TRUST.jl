@@ -12,8 +12,8 @@
 order ([OQ-13](../../dev/open_questions.md#oq-13)):
 
 - **Group 1, inside the per-bin kernel**: effects that change what physics is evaluated rather
-  than acting on the streak — `KSmearing`, `GradientSmearing`, `ProbeOffset`. Any number of
-  these may be given; they run in the user's own relative order.
+  than acting on the streak — `KSmearing`, `GradientSmearing`, `WavelengthCalibration`. Any
+  number of these may be given; they run in the user's own relative order.
 - **Group 2, after the per-bin loop, in this fixed order**: `SpectralIRF`, `TemporalIRF`,
   `Sensitivity`, then any number of backgrounds.
 
@@ -79,10 +79,27 @@ P(λ) = Σ_q w_q · spectrum(p_q, probe_q, collection_q, λ)
   nodes `ξ_q`, or, for `n_e` only, `x_q = x·exp(width·√2·ξ_q)` (**multiplicative**, so the
   smeared density stays strictly positive at any width and any node — EF11 is the reason this
   form was chosen over an additive one).
-- **`ProbeOffset`.** `lambda_probe -> lambda_probe + offset`, a single sample of weight one. It
-  enters `wavevector` and `_omega_probe` through `probe.lambda` alone (since Step 2.3a's split,
-  `ProbeBeam` is the only one of the pair rebuilt); the detector axis `expt.lambda` is never
-  touched (EF12, Pitfall 11) — the probe moves, not the detector.
+- **`WavelengthCalibration`** (replaces the Phase 2/3 probe-wavelength-shift effect at Step
+  4.A.1a, the user, 2026-09-21, [OQ-24](../../dev/open_questions.md#oq-24)). A scalar offset and
+  a dimensionless dispersion scale perturb **the axis the kernel evaluates the spectrum at**, one
+  pixel at a time:
+
+  ```
+  λ_eval,l = λ_l + offset + dispersion_scale · (λ_l − λ_ref),   λ_ref = (first(λ) + last(λ)) / 2
+  ```
+
+  with `λ` the evaluation axis the effect receives and `λ_ref` its midpoint, **always** — not a
+  field, a keyword or a deck key. `λ_ref` is a pure reparameterization of `(offset,
+  dispersion_scale)` (a shift of it is exactly absorbed by `offset`), so the only thing any choice
+  of it changes is the conditioning of the two parameters against each other, and the window's own
+  midpoint is the choice that decorrelates them (the two basis functions of the map, `1` and
+  `λ − λ_ref`, are orthogonal over the window exactly there). A single sample of weight one, lazily
+  evaluated (`_CalibratedAxis`, never materialized, so it costs no `N_λ`-element allocation).
+  **The operators never move**: `SpectralIRF`, `TemporalIRF`, the `Sensitivity` response curve and
+  every background's abscissa are all built from `expt.lambda` — the unperturbed detector axis —
+  at `Experiment` construction, and stay there regardless of this effect (WC8); a spectrometer's
+  response belongs on the detector's pixel axis, not on a perturbed evaluation point. The probe's
+  own wavelength is never touched.
 
 **Both quadrature rules use an odd node count** (`1, 3, 5, 7`) so the nominal (unsmeared) value
 is always one of the nodes, and both normalize their weights to sum to one at construction, so
@@ -97,7 +114,7 @@ this effect be pushed through as a fixed linear operator?*
 |---|---|---|
 | `SpectralIRF`, `TemporalIRF`, `Sensitivity` | `true` | each is a fixed matrix or scalar multiplication of the streak |
 | `ConstantBackground`, `PolynomialBackground`, `ImageBackground` | `false` | **affine**, not linear: `effect(aP+bQ) - a·effect(P) - b·effect(Q) = (1-a-b)·B`, tested directly (EF15, BG4) |
-| `KSmearing`, `GradientSmearing`, `ProbeOffset` | `false` | these act on the **plasma**, not the streak — `effect(aP+bQ) = a·effect(P)+b·effect(Q)` is not even a meaningful statement about them, since they change what is evaluated rather than post-processing a value that already exists |
+| `KSmearing`, `GradientSmearing`, `WavelengthCalibration` | `false` | these act on the **plasma** or the **evaluation axis**, not the streak — `effect(aP+bQ) = a·effect(P)+b·effect(Q)` is not even a meaningful statement about them, since they change what is evaluated rather than post-processing a value that already exists |
 
 Every effect with `islinear(e) == true` satisfies the linear identity to round-off (EF14); every
 background satisfies the affine identity instead (EF15, BG4); the three kernel effects have

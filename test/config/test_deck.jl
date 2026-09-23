@@ -31,7 +31,7 @@ end
 # substituted in.
 function _dk_minimal_deck(datafile::AbstractString, outdir::AbstractString; extra_geometry="")
     return """
-    deck_version = "otis-deck-1"
+    deck_version = "otis-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -131,7 +131,7 @@ end
 
         # -- the deck --
         deck_text = """
-        deck_version = "otis-deck-1"
+        deck_version = "otis-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -227,7 +227,7 @@ end
         _dk_write_streak(datafile)
         outdir = joinpath(dir, "out")
         deck_text = """
-        deck_version = "otis-deck-1"
+        deck_version = "otis-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -306,7 +306,7 @@ end
         _dk_write_streak(datafile)
         outdir = joinpath(dir, "out")
         deck_text = """
-        deck_version = "otis-deck-1"
+        deck_version = "otis-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -364,7 +364,7 @@ end
         _dk_write_streak(datafile)
         outdir = joinpath(dir, "out")
         deck_text = """
-        deck_version = "otis-deck-1"
+        deck_version = "otis-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -398,7 +398,7 @@ end
         datafile = joinpath(dir, "data.jld2")
         _dk_write_streak(datafile)
         deck_text = """
-        deck_version = "otis-deck-1"
+        deck_version = "otis-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -430,7 +430,7 @@ end
         datafile = joinpath(dir, "data.jld2")
         _dk_write_streak(datafile)
         deck_text = """
-        deck_version = "otis-deck-1"
+        deck_version = "otis-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -520,7 +520,7 @@ end
         deck_text = replace(_dk_minimal_deck(datafile, outdir), "theta_deg = 60.0" => "theta_deg = \"th\"")
         deckpath = joinpath(dir, "deck.toml")
         write(deckpath, deck_text)
-        @test_throws "the probe and the collection are fixed in Phase 3; use ProbeOffset" read_deck(deckpath)
+        @test_throws "wavelength_calibration" read_deck(deckpath)
     end
 end
 
@@ -665,12 +665,14 @@ end
 
         no_version_path = joinpath(dir, "no_version.toml")
         write(no_version_path, replace(_dk_minimal_deck(datafile, outdir),
-            "deck_version = \"otis-deck-1\"\n" => ""))
-        @test_throws "otis-deck-1" read_deck(no_version_path)
+            "deck_version = \"otis-deck-2\"\n" => ""))
+        @test_throws "otis-deck-2" read_deck(no_version_path)
 
+        # otis-deck-1 is refused by name, not just as an unknown string: it names the version
+        # this deck actually has.
         wrong_version_path = joinpath(dir, "wrong_version.toml")
         write(wrong_version_path, replace(_dk_minimal_deck(datafile, outdir),
-            "deck_version = \"otis-deck-1\"" => "deck_version = \"otis-deck-2\""))
+            "deck_version = \"otis-deck-2\"" => "deck_version = \"otis-deck-1\""))
         @test_throws "otis-deck-1" read_deck(wrong_version_path)
 
         good_path = joinpath(dir, "good.toml")
@@ -678,7 +680,7 @@ end
         deck = read_deck(good_path)
         problem, optimizer, start = OTIS.build_problem(deck)
         eff = effective_deck(deck, problem, optimizer)
-        @test occursin("deck_version = \"otis-deck-1\"", eff)
+        @test occursin("deck_version = \"otis-deck-2\"", eff)
 
         effpath = joinpath(dir, "eff.toml")
         write(effpath, eff)
@@ -706,7 +708,7 @@ end
 
 function _dk17_deck(datafile::AbstractString, instrument_line::AbstractString)
     return """
-    deck_version = "otis-deck-1"
+    deck_version = "otis-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -748,7 +750,7 @@ end
         rows = (
             "spectral_irf" => "spectral_irf = { fwhm_nm = \"x\" }",
             "temporal_irf" => "temporal_irf = { fwhm_ns = \"x\" }",
-            "probe_offset" => "probe_offset = { probe_offset_nm = \"x\" }",
+            "wavelength_calibration" => "wavelength_calibration = { lambda_offset_nm = \"x\" }",
             "k_smearing" => "k_smearing = { half_angle_deg = \"x\" }",
             "gradient_smearing" => "gradient_smearing = { leaf = \"plasma.electrons.e.T_eV\", width = \"x\" }",
         )

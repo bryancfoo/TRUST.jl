@@ -47,8 +47,8 @@ end
 function _wd_gs_functional(template, probe, collection, lambda, e0, w)
     e = reconstruct(e0, (width=w,))
     total = zero(w)
-    for (weight, p2, probe2, collection2) in samples(e, template, probe, collection)
-        total += weight * sum(spectrum(p2, probe2, collection2, lambda))
+    for (weight, p2, probe2, collection2, lambdaq) in samples(e, template, probe, collection, lambda)
+        total += weight * sum(spectrum(p2, probe2, collection2, lambdaq))
     end
     return total
 end
@@ -122,8 +122,8 @@ end
     for nodes in (1, 5, 7)
         e = GradientSmearing(template; leaf="electrons.e.T_eV", width=60.0, nodes=nodes)
         col = zeros(512)
-        for (w, p2, probe2, collection2) in samples(e, template, probe, collection)
-            col .+= w .* spectrum(p2, probe2, collection2, lambda)
+        for (w, p2, probe2, collection2, lambdaq) in samples(e, template, probe, collection, lambda)
+            col .+= w .* spectrum(p2, probe2, collection2, lambdaq)
         end
         @test all(col .=== refs[nodes])
     end

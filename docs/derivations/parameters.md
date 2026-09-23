@@ -142,9 +142,10 @@ time-varying variable, or a dependent that transitively reads one (walking the s
 graph the topological sort already built, so the check is free), is refused: the post-kernel
 effects act on the whole streak once, and `Experiment` holds one effect tuple, not one per bin.
 
-**The probe and the collection are fixed in Phase 3.** A binding whose target key begins
-`probe.` or `collection.` is refused naming `ProbeOffset`, the one probe quantity Phase 3 does let
-a fit move.
+**The probe and the collection are fixed.** A binding whose target key begins `probe.` or
+`collection.` is refused, naming `WavelengthCalibration` — since Step 4.A.1a (2026-09-21,
+OQ-24) the effect a fit binds instead when the wavelength axis itself needs to move; the probe
+wavelength itself is never bindable.
 
 **Two variables may never write one leaf**, but one variable may write many leaves (the
 one-conversion-factor rule above is what keeps that meaningful). A leaf the trace does not already

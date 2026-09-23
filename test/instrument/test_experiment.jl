@@ -125,8 +125,8 @@ end
     Pkernel = zeros(64, nt)
     for j in 1:nt
         pj = plasma(trace, j)
-        for (w, pq, probeq, collectionq) in samples(e_k, pj, probe, collection)
-            Pkernel[:, j] .+= w .* spectrum(pq, probeq, collectionq, lambda64)
+        for (w, pq, probeq, collectionq, lambdaq) in samples(e_k, pj, probe, collection, lambda64)
+            Pkernel[:, j] .+= w .* spectrum(pq, probeq, collectionq, lambdaq)
         end
     end
     Klam = _convolution_matrix(e_spec.kernel, lambda64)

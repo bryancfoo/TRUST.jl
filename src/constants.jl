@@ -62,15 +62,19 @@ same factors as `lambda` and `theta` respectively, needed because `ProbeBeam`'s 
 combined geometry type of Phase 1, split into `ProbeBeam`/`Collection` at Step 2.3a, spec D40)
 constructor keywords are `lambda_probe_nm`/`lambda_probe_m` and
 `polarization_deg`/`polarization_rad`, not `lambda_nm` or `theta_deg`. The `fwhm_lambda`,
-`fwhm_t`, `half_angle` and `probe_offset` rows are a Phase 2 addition (Step 2.2, spec D3):
-their factors duplicate `lambda`, `t`, `theta` and `lambda` respectively, and the rows exist
-only so that `_si_value` accepts the keyword names `fwhm_nm`/`fwhm_ns`/`half_angle_deg`/
-`half_angle_rad`/`probe_offset_nm`/`probe_offset_m` and `_reject_extra_kwargs` catches a typo
-in one of them loudly; no `<quantity>_to_si`/`_from_si` pair is added for these four, since the
-existing `lambda_to_si` and `theta_to_si` already do the arithmetic. Unlike `lambda_probe` and
-`n_e`, whose keyword names carry their row's own name, `fwhm_nm` and `fwhm_ns` do not carry
-`fwhm_lambda`/`fwhm_t`'s row name, because they are what instrument papers quote (the user,
-2026-09-09).
+`fwhm_t` and `half_angle` rows are a Phase 2 addition (Step 2.2, spec D3): their factors
+duplicate `lambda`, `t` and `theta` respectively, and the rows exist only so that `_si_value`
+accepts the keyword names `fwhm_nm`/`fwhm_ns`/`half_angle_deg`/`half_angle_rad` and
+`_reject_extra_kwargs` catches a typo in one of them loudly; no `<quantity>_to_si`/`_from_si`
+pair is added for these three, since the existing `lambda_to_si` and `theta_to_si` already do
+the arithmetic. Unlike `lambda_probe` and `n_e`, whose keyword names carry their row's own name,
+`fwhm_nm` and `fwhm_ns` do not carry `fwhm_lambda`/`fwhm_t`'s row name, because they are what
+instrument papers quote (the user, 2026-09-09). A row for the Phase 2 probe-wavelength-shift
+effect's own factor, added at Step 2.2, was **retired at Step 4.A.1a** (2026-09-22) and replaced,
+in its place in the tuple, by `lambda_offset` (`lambda_offset_nm`/`lambda_offset_m`,
+`WavelengthCalibration`'s own factor; the user, 2026-09-21,
+[OQ-24](../dev/open_questions.md#oq-24)): the two effects are nearly degenerate, and the
+probe-wavelength-shift effect is removed rather than kept alongside the new one.
 """
 const ACCEPTED_UNITS = (
     T      = (T_eV      = EV,               T_keV     = 1000 * EV),
@@ -86,7 +90,7 @@ const ACCEPTED_UNITS = (
     fwhm_lambda  = (fwhm_nm = 1e-9,          fwhm_m   = 1.0),
     fwhm_t       = (fwhm_ns = 1e-9,          fwhm_s   = 1.0),
     half_angle   = (half_angle_deg = π/180,  half_angle_rad = 1.0),
-    probe_offset = (probe_offset_nm = 1e-9,  probe_offset_m = 1.0),
+    lambda_offset = (lambda_offset_nm = 1e-9,  lambda_offset_m = 1.0),
     intensity      = (intensity_wcm2 = 1e4,      intensity_wm2 = 1.0),
     diameter       = (diameter_um = 1e-6,        diameter_m = 1.0),
     dispersion     = (dispersion_nm_px = 1e-9,   dispersion_m_px = 1.0),

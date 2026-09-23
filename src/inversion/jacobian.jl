@@ -37,7 +37,7 @@ matrix outside a test.
 - `blocks[j]` is `N_lambda x p_j`: `dP[:,j] / d(bin-j entries)`, `p_j = length(bin_entries[j])`.
 - `kernel_globals` is `N_lambda x N_t x n_kernel_global`: `dP / d(kernel global)`, one whole
   `N_lambda x N_t` slice per scalar fitted variable that affects `P` (bound to a plasma leaf, or
-  to an in-kernel effect's parameter -- `KSmearing`, `GradientSmearing`, `ProbeOffset`).
+  to an in-kernel effect's parameter -- `KSmearing`, `GradientSmearing`, `WavelengthCalibration`).
 - `chain_globals[c]` is one `N_lambda x N_t` matrix per scalar fitted variable bound to a
   chain-stage effect parameter (`SpectralIRF`/`TemporalIRF`'s `sigma`, `Sensitivity`'s `scale`,
   or a background coefficient): `dM / d(chain global)`, already the closed form times the
@@ -102,15 +102,17 @@ stale partial surviving from a previous sweep or a previous bin (Pitfall 6).
     end
 end
 
-# Allocation-free rebuild of the three in-kernel effects' one scalar parameter each (D18's "do
-# not seed chain globals here": only KSmearing/GradientSmearing/ProbeOffset ever appear here,
-# since a chain-stage effect's parameter never enters P). Written by hand, not via parameters.jl's
-# `_rebuild_effect`, which allocates a temporary Vector per field (fine in `unflatten`, not
-# fine here: JT11 requires this per-bin pass to allocate zero bytes once warmed).
+# Allocation-free rebuild of the in-kernel effects' one bound scalar parameter each (D18's "do
+# not seed chain globals here": only KSmearing/GradientSmearing/WavelengthCalibration ever appear
+# here, since a chain-stage effect's parameter never enters P). Written by hand, not via
+# parameters.jl's `_rebuild_effect`, which allocates a temporary Vector per field (fine in
+# `unflatten`, not fine here: JT11 requires this per-bin pass to allocate zero bytes once warmed).
+# WavelengthCalibration is not yet bindable through this path in chunk 3 (its two-parameter
+# rebuild needs D11(b)'s tuple-of-bindings-per-effect, Step 4.A.1b); the generic ::Nothing
+# fallback covers it, exactly as it covered every other unbound effect through Phase 3.
 _rebuild_kernel_effect(e::AbstractInstrumentEffect, ::Nothing, vals) = e
 _rebuild_kernel_effect(e::KSmearing, b::Binding, vals) = reconstruct(e, (half_angle=vals[b.slot] * b.factor,))
 _rebuild_kernel_effect(e::GradientSmearing, b::Binding, vals) = reconstruct(e, (width=vals[b.slot] * b.factor,))
-_rebuild_kernel_effect(e::ProbeOffset, b::Binding, vals) = reconstruct(e, (offset=vals[b.slot] * b.factor,))
 
 _rebuild_kernel_tuple(::Tuple{}, ::Tuple{}, vals) = ()
 function _rebuild_kernel_tuple(effects::Tuple, bindings::Tuple, vals)

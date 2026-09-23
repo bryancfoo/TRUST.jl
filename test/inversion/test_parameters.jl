@@ -347,7 +347,7 @@ end
 
     # Binding: a probe or collection key
     vc = FittedVariable("th"; bounds=(0.0, 180.0), init=60.0)
-    @test_throws r"ProbeOffset" ParameterSpec(expt; variables=[vc],
+    @test_throws r"WavelengthCalibration" ParameterSpec(expt; variables=[vc],
         bindings=["th" => "collection.theta_deg"])
 
     # Binding: a TabulatedKernel parameter (no fittable parameters)

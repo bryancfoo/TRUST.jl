@@ -1,6 +1,6 @@
 # AbstractInstrumentEffect and its concrete effects: the three in-kernel effects (KSmearing,
-# GradientSmearing, ProbeOffset), the two post-kernel IRF convolutions and Sensitivity, and the
-# convolution-matrix builder they and the noise model's point spread share.
+# GradientSmearing, WavelengthCalibration), the two post-kernel IRF convolutions and Sensitivity,
+# and the convolution-matrix builder they and the noise model's point spread share.
 # docs/derivations/instrument.md; conventions.md Section 4; spec D9-D13.
 
 using Printf: @printf
@@ -53,12 +53,30 @@ Spec D9, D15.
 function _chain_order end
 
 """
-    samples(effect::AbstractInstrumentEffect, plasma::Plasma, probe::ProbeBeam, collection::Collection) -> NTuple
+    _chain_class(effect::AbstractInstrumentEffect) -> Symbol
 
-For a `:kernel` effect: the weighted list of `(weight, plasma, probe, collection)` samples the
-per-bin kernel folds over; each in-kernel effect rebuilds only the one of `plasma`, `probe` or
-`collection` it modifies (`KSmearing` a `Collection`, `ProbeOffset` a `ProbeBeam`,
-`GradientSmearing` a `Plasma`). Spec D9, D10, D40.
+The effect's uniqueness class: `:none` for an effect any number of which may appear in a chain,
+or a per-type Symbol for one of which `Experiment` allows at most one
+(`_check_unique_chain_classes`). Unlike `_chain_order`, which is keyed on the chain's numeric
+position and cannot tell apart the three different classes that share position 1
+(`KSmearing`, `GradientSmearing`, `WavelengthCalibration`), this is a trait with one method per
+type — not `isa` branching (`conventions.md` Section 4) — so a kernel-stage effect can be made
+unique-per-chain without the position number being asked to mean two things.
+
+Spec D8 (Phase 4.A, Step 4.A.1a, 2026-09-22).
+"""
+_chain_class(::AbstractInstrumentEffect) = :none
+
+"""
+    samples(effect::AbstractInstrumentEffect, plasma::Plasma, probe::ProbeBeam, collection::Collection,
+            lambda::AbstractVector) -> NTuple
+
+For a `:kernel` effect: the weighted list of `(weight, plasma, probe, collection, lambda)` samples
+the per-bin kernel folds over; each in-kernel effect rebuilds only the one of `plasma`, `probe`,
+`collection` or `lambda` it modifies (`KSmearing` a `Collection`, `GradientSmearing` a `Plasma`,
+`WavelengthCalibration` the wavelength axis), passing the other three through unchanged, as the
+same objects. Spec D9, D10, D40; the fifth element (the evaluation axis) added at Step 4.A.1a
+(spec D4, 2026-09-22).
 """
 function samples end
 
@@ -208,22 +226,23 @@ function reconstruct(::KSmearing{NQ}, values::NamedTuple) where {NQ}
 end
 
 """
-    samples(e::KSmearing, p::Plasma, probe::ProbeBeam, collection::Collection) -> NTuple
+    samples(e::KSmearing, p::Plasma, probe::ProbeBeam, collection::Collection, lambda::AbstractVector) -> NTuple
 
-`θ -> θ + e.offsets[q]`; the plasma and the probe are untouched. Only `Collection` is rebuilt,
-through its **inner** constructor `Collection{FT}`, never the keyword constructor, so this is
-allocation-free (EF9; Level 2 measured 0 bytes over 1000 samples for the whole geometry before
-the split, and the split makes the rebuilt struct smaller still, spec D40).
+`θ -> θ + e.offsets[q]`; the plasma, the probe and the wavelength axis are untouched. Only
+`Collection` is rebuilt, through its **inner** constructor `Collection{FT}`, never the keyword
+constructor, so this is allocation-free (EF9; Level 2 measured 0 bytes over 1000 samples for the
+whole geometry before the split, and the split makes the rebuilt struct smaller still, spec D40).
 
 Spec D10, D40, Pitfall 10.
 """
-function samples(e::KSmearing{NQ,FTe}, p::Plasma, probe::ProbeBeam, collection::Collection{FTc}) where {NQ,FTe,FTc}
+function samples(e::KSmearing{NQ,FTe}, p::Plasma, probe::ProbeBeam, collection::Collection{FTc},
+                  lambda::AbstractVector) where {NQ,FTe,FTc}
     FTg = promote_type(FTc, FTe)
     return ntuple(Val(NQ)) do q
         (e.weights[q], p, probe,
             Collection{FTg}(FTg(collection.theta) + FTg(e.offsets[q]), collection.k_model,
                 FTg(collection.lambda_center), FTg(collection.dispersion), collection.npixels,
-                FTg(collection.reference_pixel)))
+                FTg(collection.reference_pixel)), lambda)
     end
 end
 
@@ -297,61 +316,114 @@ end
 _offset_value(e::GradientSmearing, x, q) = e.logarithmic ? x * exp(e.offsets[q]) : x + e.offsets[q]
 
 """
-    samples(e::GradientSmearing, p::Plasma, probe::ProbeBeam, collection::Collection) -> NTuple
+    samples(e::GradientSmearing, p::Plasma, probe::ProbeBeam, collection::Collection, lambda::AbstractVector) -> NTuple
 
 One leaf of `p` offset per sample (`_with_leaf`, allocation-free by the same argument as
-`plasma(trace, j)`); the probe and the collection are untouched.
+`plasma(trace, j)`); the probe, the collection and the wavelength axis are untouched.
 
 Spec D10, D40, Pitfall 12.
 """
-function samples(e::GradientSmearing{NQ}, p::Plasma, probe::ProbeBeam, collection::Collection) where {NQ}
+function samples(e::GradientSmearing{NQ}, p::Plasma, probe::ProbeBeam, collection::Collection,
+                  lambda::AbstractVector) where {NQ}
     return ntuple(q -> (e.weights[q],
-            _with_leaf(p, e.ref, _offset_value(e, _leaf_value(p, e.ref), q)), probe, collection),
+            _with_leaf(p, e.ref, _offset_value(e, _leaf_value(p, e.ref), q)), probe, collection, lambda),
         Val(NQ))
 end
 
 """
-    ProbeOffset{FT<:Real} <: AbstractInstrumentEffect
+    WavelengthCalibration{FT<:Real} <: AbstractInstrumentEffect
 
-A shift `lambda_probe -> lambda_probe + offset` of the probe wavelength — **not** of the
-detector wavelength axis. It enters `wavevector` and `_omega_probe` through `probe.lambda`;
-`expt.lambda` is untouched (EF12, Pitfall 11).
+A calibration of the **measured wavelength axis**, replacing the Phase 2/3 probe-wavelength-shift
+effect at Step 4.A.1a (the user, 2026-09-21, [OQ-24](../../dev/open_questions.md#oq-24)): the collaborator judges the
+dominant uncertainty to be the calibration of the measured axis, not the probe beam, whose offset
+is small experimentally, and the two are nearly degenerate (both shift the spectrum against the
+pixels), so this is a **replacement**, not an addition.
 
-Built with `ProbeOffset(; probe_offset_nm | probe_offset_m)`.
+A scalar `offset` (m) and a dimensionless `dispersion_scale` perturb **the axis at which the
+kernel evaluates the spectrum for each pixel**: the pixel labelled `λ_l` is modelled as seeing
 
-Spec D10, D40.
+    λ_eval,l = λ_l + offset + dispersion_scale · (λ_l − λ_ref),   λ_ref = (first(λ) + last(λ)) / 2
+
+with `λ` the evaluation axis the effect receives and `λ_ref` its midpoint, **always** — not a
+field, a keyword or a deck key (spec D5): λ_ref is a pure reparameterization of `(offset,
+dispersion_scale)`, so the only thing any choice of it can change is the conditioning of the two
+parameters against each other, and the window's own midpoint is what decorrelates them. **The IRF,
+the sensitivity and every background stay on the detector's pixel axis** `expt.lambda`, which never
+moves (WC8) — a spectrometer's response belongs there, not on a perturbed evaluation point. A
+probe wavelength is never touched: `ProbeBeam.lambda` is fixed.
+
+Built with `WavelengthCalibration(; lambda_offset_nm | lambda_offset_m, dispersion_scale = 0.0)`.
+The offset is **required** (no default), so that `WavelengthCalibration()` is a loud error rather
+than a silent identity; `dispersion_scale = 0.0` is the deliberate identity and needs no keyword.
+
+Spec D3, D4, D5 (Phase 4.A, Step 4.A.1a, 2026-09-22).
 """
-struct ProbeOffset{FT<:Real} <: AbstractInstrumentEffect
+struct WavelengthCalibration{FT<:Real} <: AbstractInstrumentEffect
     offset::FT
+    dispersion_scale::FT
 end
 
-function ProbeOffset(; kwargs...)
-    offset_raw = _si_value(:probe_offset, kwargs)
-    _reject_extra_kwargs(kwargs, (:probe_offset_nm, :probe_offset_m))
-    FT = float(typeof(offset_raw))
-    return ProbeOffset{FT}(FT(offset_raw))
+function WavelengthCalibration(; dispersion_scale::Real=0.0, kwargs...)
+    offset_raw = _si_value(:lambda_offset, kwargs)
+    _reject_extra_kwargs(kwargs, (:lambda_offset_nm, :lambda_offset_m))
+    isfinite(offset_raw) || throw(ArgumentError(
+        "WavelengthCalibration: offset must be finite; got $offset_raw m"))
+    isfinite(dispersion_scale) || throw(ArgumentError(
+        "WavelengthCalibration: dispersion_scale must be finite; got $dispersion_scale"))
+    abs(dispersion_scale) < 1 || throw(ArgumentError(
+        "WavelengthCalibration: dispersion_scale must satisfy abs(dispersion_scale) < 1; got $dispersion_scale"))
+    FT = promote_type(float(typeof(offset_raw)), float(typeof(dispersion_scale)))
+    return WavelengthCalibration{FT}(FT(offset_raw), FT(dispersion_scale))
 end
 
-stage(::ProbeOffset) = :kernel
-_chain_order(::ProbeOffset) = 1
-islinear(::ProbeOffset) = false
-parameters(e::ProbeOffset) = (offset=e.offset,)
-reconstruct(::ProbeOffset, values::NamedTuple) = ProbeOffset(; probe_offset_m=values.offset)
+stage(::WavelengthCalibration) = :kernel
+_chain_order(::WavelengthCalibration) = 1
+islinear(::WavelengthCalibration) = false
+_chain_class(::WavelengthCalibration) = :WavelengthCalibration
+parameters(e::WavelengthCalibration) = (offset=e.offset, dispersion_scale=e.dispersion_scale)
+reconstruct(::WavelengthCalibration, values::NamedTuple) =
+    WavelengthCalibration(; lambda_offset_m=values.offset, dispersion_scale=values.dispersion_scale)
 
 """
-    samples(e::ProbeOffset, p::Plasma, probe::ProbeBeam, collection::Collection) -> NTuple
+    _CalibratedAxis{FT<:Real,V<:AbstractVector} <: AbstractVector{FT}
 
-`lambda_probe -> lambda_probe + e.offset`; the plasma and the collection are untouched. One
-sample, weight one. Only `ProbeBeam` is rebuilt, through its **inner** constructor.
+The lazy, never-materialized perturbed evaluation axis `samples(::WavelengthCalibration, ...)`
+returns: `a[l] = base[l] + offset + dispersion_scale * (base[l] - lambda_ref)`, computed on
+indexing rather than stored, so that a bin's evaluation axis costs no `N_λ`-element allocation in
+the value pass or the dual pass (`conventions.md` 5.2). Not `isbits` (it holds a reference to
+`base`); it is the one new object per bin this phase's mechanism adds (Section 12 row 2).
 
-Spec D10, D40.
+Spec D4.
 """
-function samples(e::ProbeOffset, p::Plasma, probe::ProbeBeam{FTp0}, collection::Collection) where {FTp0}
-    FTp = promote_type(FTp0, typeof(e.offset))
-    return ((one(FTp), p,
-        ProbeBeam{FTp}(FTp(probe.lambda) + FTp(e.offset), FTp(probe.polarization), FTp(probe.a0_sq),
-            FTp(probe.diameter)),
-        collection),)
+struct _CalibratedAxis{FT<:Real,V<:AbstractVector} <: AbstractVector{FT}
+    base::V
+    offset::FT
+    dispersion_scale::FT
+    lambda_ref::FT
+end
+
+Base.size(a::_CalibratedAxis) = size(a.base)
+Base.IndexStyle(::Type{<:_CalibratedAxis}) = IndexLinear()
+@inline Base.getindex(a::_CalibratedAxis, l::Int) =
+    a.base[l] + a.offset + a.dispersion_scale * (a.base[l] - a.lambda_ref)
+
+"""
+    samples(e::WavelengthCalibration, p::Plasma, probe::ProbeBeam, collection::Collection, lambda::AbstractVector) -> NTuple
+
+The plasma, the probe and the collection are untouched; only the wavelength axis is rebuilt, as a
+lazy `_CalibratedAxis` (never materialized). `λ_ref` is computed from `first(lambda)`/`last(lambda)`
+of the axis this call receives, **always the plain-float base axis** even under a dual pass (the
+base is `expt.lambda`, plain `Float64`), so `λ_ref` carries no partials: it is a constant of the
+window, not a parameter. One sample, weight one.
+
+Spec D4, D5.
+"""
+function samples(e::WavelengthCalibration, p::Plasma, probe::ProbeBeam, collection::Collection,
+                  lambda::AbstractVector)
+    FT = promote_type(eltype(lambda), typeof(e.offset), typeof(e.dispersion_scale))
+    lref = (FT(first(lambda)) + FT(last(lambda))) / 2
+    axis = _CalibratedAxis{FT,typeof(lambda)}(lambda, FT(e.offset), FT(e.dispersion_scale), lref)
+    return ((one(FT), p, probe, collection, axis),)
 end
 
 # --- D12: the post-kernel IRFs and Sensitivity ---
@@ -470,6 +542,8 @@ _chain_order(::SpectralIRF) = 2
 _chain_order(::TemporalIRF) = 3
 islinear(::SpectralIRF) = true
 islinear(::TemporalIRF) = true
+_chain_class(::SpectralIRF) = :SpectralIRF
+_chain_class(::TemporalIRF) = :TemporalIRF
 
 parameters(e::SpectralIRF{<:GaussianKernel}) = (sigma=e.kernel.sigma,)
 parameters(e::TemporalIRF{<:GaussianKernel}) = (sigma=e.kernel.sigma,)
@@ -544,6 +618,7 @@ end
 stage(::Sensitivity) = :detector
 _chain_order(::Sensitivity) = 4
 islinear(::Sensitivity) = true
+_chain_class(::Sensitivity) = :Sensitivity
 parameters(e::Sensitivity) = (scale=e.scale,)
 
 function reconstruct(e::Sensitivity{FT,L,R}, values::NamedTuple) where {FT,L,R}
@@ -682,6 +757,8 @@ function Base.show(io::IO, e::GradientSmearing)
         @printf(io, "GradientSmearing(%s, %.1f %s, %d nodes)", string(e.path), e.width / factor, unit, length(e.offsets))
     end
 end
-Base.show(io::IO, e::ProbeOffset) = @printf(io, "ProbeOffset(%+.3f nm)", lambda_from_si(e.offset, :lambda_nm))
+Base.show(io::IO, e::WavelengthCalibration) =
+    @printf(io, "WavelengthCalibration(%+.3f nm, dispersion_scale = %.3e)",
+        lambda_from_si(e.offset, :lambda_nm), e.dispersion_scale)
 Base.show(io::IO, e::Sensitivity{FT,Nothing,Nothing}) where {FT} = @printf(io, "Sensitivity(%.1e)", e.scale)
 Base.show(io::IO, e::Sensitivity) = @printf(io, "Sensitivity(%.1e, response curve)", e.scale)

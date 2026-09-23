@@ -76,17 +76,25 @@ function _stable_sort_effects(effects::Tuple)
     return Tuple(v)
 end
 
-const _CHAIN_CLASS_NAME = Dict(2 => "SpectralIRF", 3 => "TemporalIRF", 4 => "Sensitivity")
+"""
+    _check_unique_chain_classes(effects::Tuple)
 
+At most one effect of each `_chain_class` other than `:none` (spec D8): `SpectralIRF`,
+`TemporalIRF`, `Sensitivity`, and, since Step 4.A.1a, `WavelengthCalibration` — chain order 1
+holds three different classes (`KSmearing`, `GradientSmearing`, `WavelengthCalibration`), which is
+why this counts by `_chain_class` rather than by `_chain_order` as it did through Phase 3.
+
+Spec D8.
+"""
 function _check_unique_chain_classes(effects::Tuple)
-    counts = Dict{Int,Int}()
+    counts = Dict{Symbol,Int}()
     for e in effects
-        c = _chain_order(e)
-        haskey(_CHAIN_CLASS_NAME, c) || continue
+        c = _chain_class(e)
+        c === :none && continue
         counts[c] = get(counts, c, 0) + 1
     end
     for (c, n) in counts
-        n > 1 && throw(ArgumentError("Experiment: only one $(_CHAIN_CLASS_NAME[c]) is allowed"))
+        n > 1 && throw(ArgumentError("Experiment: only one $(c) is allowed"))
     end
     return nothing
 end

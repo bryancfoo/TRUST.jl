@@ -10,7 +10,7 @@
 # explicitly (Table I's own 100 km/s) -- the default would silently use each variable's own
 # 900 km/s bound width instead.
 
-deck_version = "otis-deck-1"
+deck_version = "otis-deck-2"
 
 [data]
 file = "runs/iaw_multiflow_streak.jld2"

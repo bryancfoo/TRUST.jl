@@ -28,7 +28,7 @@
 
 import TOML
 
-const DECK_VERSION = "otis-deck-1"
+const DECK_VERSION = "otis-deck-2"
 
 # ------------------------------------------------------------------------------------------
 # _VarRef: a numeric-key string that names a declared variable or dependent
@@ -205,8 +205,8 @@ end
 # > chunk 4) hardcodes `factor = 1.0` for every `:effect` binding -- correct for `Sensitivity.scale`,
 # > `ConstantBackground.level`, `PolynomialBackground.coefficients` and
 # > `RationalBackground.numerator`/`denominator`, whose deck key and `parameters(effect)` key
-# > coincide, but silently wrong for `ProbeOffsetOptions.probe_offset_nm` (`parameters` key
-# > `offset`, factor should be `1e-9`), `KSmearingOptions.half_angle_deg` (`parameters` key
+# > coincide, but silently wrong for `WavelengthCalibrationOptions.lambda_offset_nm` (`parameters`
+# > key `offset`, factor should be `1e-9`), `KSmearingOptions.half_angle_deg` (`parameters` key
 # > `half_angle`, factor should be `pi/180`), and `GradientSmearingOptions.width` (deck-declared in
 # > the smeared leaf's own unit, `parameters` key `width` already SI) -- `SpectralIRFOptions.fwhm_nm`
 # > and `TemporalIRFOptions.fwhm_ns` are worse still, since `parameters`' key `sigma` is not even the
@@ -272,8 +272,9 @@ function _validate_geometry_section(given::AbstractDict)
     _check_known_keys(given, (_PROBEBEAM_KEYS..., _COLLECTION_KEYS...), "geometry")
     for (k, v) in given
         (k != "k_model" && v isa AbstractString) && throw(ArgumentError(
-            "read_deck: key \"$k\" in section \"geometry\" cannot be a variable reference; " *
-            "the probe and the collection are fixed in Phase 3; use ProbeOffset"))
+            "read_deck: key \"$k\" in section \"geometry\" cannot be a variable reference; the " *
+            "probe and the collection are fixed. Fit the wavelength axis with " *
+            "instrument.wavelength_calibration instead."))
     end
     return Dict{String,Any}(given)
 end
@@ -439,14 +440,14 @@ end
 
 const _INSTRUMENT_SINGLE_REGISTRY_NAME = Dict{String,String}(
     "spectral_irf" => "SpectralIRF", "temporal_irf" => "TemporalIRF", "k_smearing" => "KSmearing",
-    "gradient_smearing" => "GradientSmearing", "probe_offset" => "ProbeOffset",
+    "gradient_smearing" => "GradientSmearing", "wavelength_calibration" => "WavelengthCalibration",
     "sensitivity" => "Sensitivity")
 const _INSTRUMENT_TOP_KEYS = (keys(_INSTRUMENT_SINGLE_REGISTRY_NAME)..., "background")
 
 const _INSTRUMENT_OPTIONS = Dict{String,Any}(
     "SpectralIRF" => SpectralIRFOptions, "TemporalIRF" => TemporalIRFOptions,
     "KSmearing" => KSmearingOptions, "GradientSmearing" => GradientSmearingOptions,
-    "ProbeOffset" => ProbeOffsetOptions, "Sensitivity" => SensitivityOptions,
+    "WavelengthCalibration" => WavelengthCalibrationOptions, "Sensitivity" => SensitivityOptions,
     "Constant" => ConstantBackgroundOptions, "Polynomial" => PolynomialBackgroundOptions,
     "Rational" => RationalBackgroundOptions)
 
@@ -769,9 +770,9 @@ _construct_effect(::Type{GradientSmearing}, kwargs::AbstractDict, template::Plas
 
 const _EFFECT_CTOR = Dict{String,Any}(
     "SpectralIRF" => SpectralIRF, "TemporalIRF" => TemporalIRF, "KSmearing" => KSmearing,
-    "GradientSmearing" => GradientSmearing, "ProbeOffset" => ProbeOffset, "Sensitivity" => Sensitivity,
-    "Constant" => ConstantBackground, "Polynomial" => PolynomialBackground,
-    "Rational" => RationalBackground)
+    "GradientSmearing" => GradientSmearing, "WavelengthCalibration" => WavelengthCalibration,
+    "Sensitivity" => Sensitivity, "Constant" => ConstantBackground,
+    "Polynomial" => PolynomialBackground, "Rational" => RationalBackground)
 
 """
     _build_effect_and_pending!(pending, regname, filled, vals, template) -> AbstractInstrumentEffect
@@ -928,7 +929,7 @@ function build_problem(deck::Deck)
 
     pending = Tuple{String,Any,Symbol,Int}[]
     effects = AbstractInstrumentEffect[]
-    for key in ("k_smearing", "gradient_smearing", "probe_offset", "spectral_irf", "temporal_irf",
+    for key in ("k_smearing", "gradient_smearing", "wavelength_calibration", "spectral_irf", "temporal_irf",
                 "sensitivity")
         haskey(s["instrument"], key) || continue
         regname = _INSTRUMENT_SINGLE_REGISTRY_NAME[key]

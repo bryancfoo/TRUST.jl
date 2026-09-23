@@ -107,6 +107,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("instrument effects")
         @safetestset "instrument effects" begin include("instrument/test_effects.jl") end
     end
+    if _wanted("wavelength calibration")
+        @safetestset "wavelength calibration" begin include("instrument/test_calibration.jl") end
+    end
     if _wanted("sensitivity")
         @safetestset "sensitivity" begin include("instrument/test_sensitivity.jl") end
     end

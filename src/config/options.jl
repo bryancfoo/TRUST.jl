@@ -69,12 +69,14 @@ Base.@kwdef struct GradientSmearingOptions
 end
 
 """
-    ProbeOffsetOptions
+    WavelengthCalibrationOptions
 
-The deck key for `ProbeOffset` (spec D10).
+The deck keys for `WavelengthCalibration` (spec D3), replacing the removed probe-wavelength-shift
+effect's own option struct at Step 4.A.1a (2026-09-22).
 """
-Base.@kwdef struct ProbeOffsetOptions
-    probe_offset_nm::Float64 = 0.0
+Base.@kwdef struct WavelengthCalibrationOptions
+    lambda_offset_nm::Float64 = 0.0
+    dispersion_scale::Float64 = 0.0
 end
 
 """

@@ -371,7 +371,7 @@ end
     _resolve_bindings(bindings_input, variables, names, nvar, dep_tv, template, trace, effects) -> Vector{Binding}
 
 Resolve every `name => target` pair into a `Binding`, checking, in order: the name is a declared
-variable or dependent; a probe/collection key is refused naming `ProbeOffset`; the target leaf or
+variable or dependent; a probe/collection key is refused naming `WavelengthCalibration`; the target leaf or
 effect parameter exists; the one-conversion-factor rule (D9); the scalar-instrument rule for an
 `:effect` target (D9); the one-variable-per-leaf rule for a `:leaf` target (D9). `row` is left `0`
 for a leaf the trace does not yet tabulate; `ParameterSpec`'s constructor fills it in after the
@@ -398,8 +398,9 @@ function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
             key = String(target)
             first_seg = split(key, '.')[1]
             (first_seg == "probe" || first_seg == "collection") && throw(ArgumentError(
-                "\"$name\" cannot be bound to \"$key\": the probe and the collection are fixed " *
-                "in Phase 3; use ProbeOffset"))
+                "\"$name\" cannot be bound to \"$key\": the probe and the collection are fixed. " *
+                "Bind the wavelength axis through a WavelengthCalibration effect in the " *
+                "instrument chain instead."))
             si_path, factor = _leaf_si_path(key)
             path = LeafPath(si_path)
             _resolve_leaf(template, path)

@@ -39,7 +39,7 @@ function _jt_p2_pspec(expt::Experiment)
 end
 
 # P3 (D46): four bins, eight wavelengths, every effect on. A SuperGaussian(2.5) electron
-# species and two ion species; KSmearing/GradientSmearing/ProbeOffset in the kernel; a
+# species and two ion species; KSmearing/GradientSmearing/WavelengthCalibration in the kernel; a
 # GaussianKernel SpectralIRF, a deliberately asymmetric TabulatedKernel TemporalIRF, a
 # Sensitivity with a three-point response curve, and a RationalBackground. Fitted: one trace
 # variable (T_e), one scalar plasma variable (f_D), one kernel global (KSmearing's half_angle),
@@ -65,7 +65,7 @@ function _jt_p3_expt()
     effects = (
         KSmearing(half_angle_deg=2.0, nodes=3),
         GradientSmearing(_jt_p3_template(); leaf="electrons.e.T_eV", width=30.0, nodes=3),
-        ProbeOffset(probe_offset_nm=0.02),
+        WavelengthCalibration(lambda_offset_nm=0.02),
         SpectralIRF(fwhm_nm=0.08),
         TemporalIRF(TabulatedKernel((-1, 0, 2), (0.2, 0.5, 0.3))),
         Sensitivity(scale=1.0e-6, lambda_nm=[262.0, 263.25, 264.5], response=[0.8, 1.0, 0.9]),

@@ -72,11 +72,11 @@ end
     probe = _ef_probe(); collection = _ef_collection()
     e = KSmearing(half_angle_deg=3.0, nodes=1)
     P_ref = spectrum(template, probe, collection, _EF_LAMBDA)
-    samp = samples(e, template, probe, collection)
+    samp = samples(e, template, probe, collection, _EF_LAMBDA)
     @test length(samp) == 1
-    w, p2, probe2, collection2 = samp[1]
+    w, p2, probe2, collection2, lambda2 = samp[1]
     @test w == 1.0
-    @test spectrum(p2, probe2, collection2, _EF_LAMBDA) == P_ref
+    @test spectrum(p2, probe2, collection2, lambda2) == P_ref
 end
 
 @testset "EF5: a five-sample KSmearing equals its own definition" begin
@@ -92,8 +92,8 @@ end
         oracle .+= (w[q] / wsum) .* spectrum(template, probe, cq, _EF_LAMBDA)
     end
     P = zeros(length(_EF_LAMBDA))
-    for (wq, p2, probe2, collection2) in samples(e, template, probe, collection)
-        P .+= wq .* spectrum(p2, probe2, collection2, _EF_LAMBDA)
+    for (wq, p2, probe2, collection2, lambdaq) in samples(e, template, probe, collection, _EF_LAMBDA)
+        P .+= wq .* spectrum(p2, probe2, collection2, lambdaq)
     end
     @test isapprox(P, oracle; rtol=1e-13)
 end
@@ -127,13 +127,13 @@ end
     template = _ef_plasma()
     probe = _ef_probe(); collection = _ef_collection()
     e1 = GradientSmearing(template; leaf="electrons.e.T", width=0.0, nodes=5)
-    for (w, p2, probe2, collection2) in samples(e1, template, probe, collection)
+    for (w, p2, probe2, collection2, lambda2) in samples(e1, template, probe, collection, _EF_LAMBDA)
         @test p2.electrons[1].T === template.electrons[1].T
         @test probe2 === probe
         @test collection2 === collection
     end
     e2 = GradientSmearing(template; leaf="n_e", width=0.0, nodes=5)
-    for (w, p2, probe2, collection2) in samples(e2, template, probe, collection)
+    for (w, p2, probe2, collection2, lambda2) in samples(e2, template, probe, collection, _EF_LAMBDA)
         @test p2.n_e === template.n_e
     end
 end
@@ -148,19 +148,17 @@ end
     @test (@allocated _wl()) == 0
 
     eK = KSmearing(half_angle_deg=2.0, nodes=5)
-    _sk() = samples(eK, template, probe, collection)
+    _sk() = samples(eK, template, probe, collection, _EF_LAMBDA)
     _sk()
     @test (@allocated _sk()) == 0
 
     eG = GradientSmearing(template; leaf="electrons.e.T", width=60.0 * EV, nodes=5)
-    _sg() = samples(eG, template, probe, collection)
+    _sg() = samples(eG, template, probe, collection, _EF_LAMBDA)
     _sg()
     @test (@allocated _sg()) == 0
 
-    eP = ProbeOffset(probe_offset_nm=0.05)
-    _sp() = samples(eP, template, probe, collection)
-    _sp()
-    @test (@allocated _sp()) == 0
+    # The calibration effect's own allocation check is WC11 (test/instrument/test_calibration.jl,
+    # Step 4.A.1a), not duplicated here.
 end
 
 @testset "EF10: AD through the sample construction" begin
@@ -191,7 +189,7 @@ end
     @test isapprox(ad2, fd2; rtol=1e-6, atol=1e-6 * abs(fd2))
 
     function sum_with_offset(x)
-        e = ProbeOffset(probe_offset_m=x)
+        e = WavelengthCalibration(lambda_offset_m=x)
         trace = PlasmaTrace(template; t_ns=[0.0])
         expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_EF_LAMBDA, effects=(e,))
         return sum(ideal_streak(expt))
@@ -206,22 +204,23 @@ end
     template = _ef_plasma()
     probe = _ef_probe(); collection = _ef_collection()
     e = GradientSmearing(template; leaf="n_e", width=0.5, nodes=7)
-    for (w, p2, probe2, collection2) in samples(e, template, probe, collection)
+    for (w, p2, probe2, collection2, lambda2) in samples(e, template, probe, collection, _EF_LAMBDA)
         @test p2.n_e > 0
         @test p2.electrons[1].n > 0
         @test p2.ions[1].n > 0
     end
 end
 
-@testset "EF12: ProbeOffset moves the probe, not the axis" begin
+@testset "EF12: WavelengthCalibration moves the axis, not the probe" begin
     template = _ef_plasma()
     probe = _ef_probe(); collection = _ef_collection()
     trace = PlasmaTrace(template; t_ns=[0.0])
-    # A 2 nm probe offset, well over one wavelength bin (~0.157 nm here), so the shifted
+    # A 2 nm axis offset, well over one wavelength bin (~0.157 nm here), so the shifted
     # feature is guaranteed to land in a different bin regardless of the spectrum's shape.
-    e = ProbeOffset(probe_offset_nm=2.0)
+    e = WavelengthCalibration(lambda_offset_nm=2.0)
     expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=_EF_LAMBDA, effects=(e,))
     @test expt.lambda === _EF_LAMBDA
+    @test expt.probe.lambda === probe.lambda
     P0 = spectrum(template, probe, collection, _EF_LAMBDA)
     P1 = ideal_streak(expt)[:, 1]
     i0, i1 = argmax(P0), argmax(P1)
@@ -290,7 +289,7 @@ end
 
     template = _ef_plasma()
     for e in (KSmearing(half_angle_deg=1.0), GradientSmearing(template; leaf="electrons.e.T", width=10.0),
-        ProbeOffset(probe_offset_nm=0.1))
+        WavelengthCalibration(lambda_offset_nm=0.1))
         @test stage(e) == :kernel
         @test islinear(e) == false
     end
@@ -350,7 +349,7 @@ end
     @test e2b.offsets != e2.offsets
     @test e2b.ref === e2.ref
 
-    e3 = ProbeOffset(probe_offset_nm=0.05)
+    e3 = WavelengthCalibration(lambda_offset_nm=0.05)
     @test reconstruct(e3, parameters(e3)).offset == e3.offset
 
     e4 = SpectralIRF(fwhm_nm=0.5)
@@ -377,7 +376,7 @@ end
     @test occursin("TemporalIRF", sprint(show, TemporalIRF(fwhm_ns=0.08)))
     @test occursin("KSmearing", sprint(show, KSmearing(half_angle_deg=2.0)))
     @test occursin("GradientSmearing", sprint(show, GradientSmearing(template; leaf="electrons.e.T", width=60.0)))
-    @test occursin("ProbeOffset", sprint(show, ProbeOffset(probe_offset_nm=0.05)))
+    @test occursin("WavelengthCalibration", sprint(show, WavelengthCalibration(lambda_offset_nm=0.05)))
     @test occursin("Sensitivity", sprint(show, Sensitivity(scale=2.0e-4)))
     @test occursin("ConstantBackground", sprint(show, ConstantBackground(level=25.0)))
 end
@@ -416,8 +415,8 @@ end
     for nodes in (1, 5, 7)
         e = GradientSmearing(template; leaf="electrons.e.T_eV", width=60.0, nodes=nodes)
         col = zeros(512)
-        for (w, p2, probe2, collection2) in samples(e, template, probe, collection)
-            col .+= w .* spectrum(p2, probe2, collection2, _GA_LAMBDA)
+        for (w, p2, probe2, collection2, lambdaq) in samples(e, template, probe, collection, _GA_LAMBDA)
+            col .+= w .* spectrum(p2, probe2, collection2, lambdaq)
         end
         @test all(col .=== refs[nodes])
     end

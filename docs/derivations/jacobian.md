@@ -24,8 +24,8 @@ matrix (identity when no `SpectralIRF` is present); `K_t` is the temporal convol
 wavelength-dependent response (all ones when no `Sensitivity` is present, `scale` alone when it
 carries no calibration curve); and `B` is the sum of every background's contribution. `P` itself
 is built bin by bin, `P[:, j] = _bin_kernel!(⋯, j)`, folding the in-kernel effects
-(`KSmearing`, `GradientSmearing`, `ProbeOffset`) into the physics evaluated at each bin — never
-touching the post-kernel chain.
+(`KSmearing`, `GradientSmearing`, `WavelengthCalibration`) into the physics evaluated at each bin
+— never touching the post-kernel chain.
 
 The residual is `r_k = (M[l,j] - D[l,j]) / σ[l,j]` at the `k`-th mask-true pixel, column-major
 order (`residuals.jl`, D16). Since `D` and `σ` do not depend on θ,
