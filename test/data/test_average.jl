@@ -442,11 +442,12 @@ end
 end
 
 # ------------------------------------------------------------------------------------------
-# AV14: the deck. A deck with [[data.regions]] builds a problem whose trace axis is the
-# averaged axis; both regions and t_range_ns is a loud error; a region's interval becomes a
-# FitInterval with the region's own bins; the round trip through effective_deck/read_deck
-# reproduces the trace axis bitwise and the FitInterval bins; deck.sections is never mutated by
-# build_problem; t_shift_ns without regions is a loud error.
+# AV14: the deck. A deck with [[fit.regions]] (moved from [[data.regions]] at chunk 7, D40
+# amendment 11) builds a problem whose trace axis is the averaged axis; both regions and
+# t_range_ns is a loud error; a region's interval becomes a FitInterval with the region's own
+# bins; the round trip through effective_deck/read_deck reproduces the trace axis bitwise and the
+# FitInterval bins; deck.sections is never mutated by build_problem; t_shift_ns without regions is
+# a loud error.
 # ------------------------------------------------------------------------------------------
 
 function _av_write_streak(path::AbstractString; nl=8, nt=12, lambda_lo=262.0, lambda_hi=264.5,
@@ -515,12 +516,12 @@ end
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
 
-        [[data.regions]]
+        [[fit.regions]]
         t_range_ns = [0.0, 5.5]
         nbins = 4
         interval = "pre"
 
-        [[data.regions]]
+        [[fit.regions]]
         t_range_ns = [5.5, 11.0]
         nbins = 3
         """
@@ -540,13 +541,13 @@ end
         @test pre_idx !== nothing
         @test problem.pspec.intervals[pre_idx].bins == 1:4
 
-        # both regions and t_range_ns: a loud error
+        # both regions and t_range_ns: a loud error (D40: the message names [[fit.regions]] now)
         bad_block = replace(data_block, "[data]" => "[data]\nt_range_ns = [0.0, 11.0]")
         bad_path = joinpath(dir, "bad1.toml")
         write(bad_path, _av_deck_text(outdir, bad_block))
-        @test_throws "both \"regions\" and \"t_range_ns\"" read_deck(bad_path)
+        @test_throws "and the deck gives [[fit.regions]]" read_deck(bad_path)
 
-        # t_shift_ns without regions: a loud error
+        # t_shift_ns without regions: a loud error (D40: the message names [[fit.regions]] now)
         no_regions_block = """
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -554,7 +555,7 @@ end
         """
         bad_path2 = joinpath(dir, "bad2.toml")
         write(bad_path2, _av_deck_text(outdir, no_regions_block))
-        @test_throws "without \"regions\"" read_deck(bad_path2)
+        @test_throws "without [[fit.regions]]" read_deck(bad_path2)
 
         # the round trip: build_problem -> effective_deck -> read_deck -> build_problem
         eff = effective_deck(deck, problem, optimizer)

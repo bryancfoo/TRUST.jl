@@ -20,9 +20,26 @@ within the same `"otis-result-2"`, by `scan/termination`** (Step 3.C.3 carried i
 dataset introduced before the phase closes is all Phase 3.C needs -- D35 forbids a *second* bump,
 not a dataset added inside the one it already made.
 
-Spec D34, D45, D35.
+**Bumped to `"otis-result-3"` at Step 4.A.3b (D40, chunk 7)**, one bump, carrying a `channels/`
+group: `channels/names` and, per channel, `weight`, `chi2`, `npixels`, `nparams`, `reduced_chi2`,
+`reduced_chi2_simple`, `lambda`, `model`, `effects/*`, and, only when `write_result` is given the
+problem, `residual` and `mask`. Every `otis-result-3` file has `channels/`, since every `FitResult`
+carries at least one `ChannelSummary` (D36); a shorthand fit writes `channels/main`.
+
+Spec D34, D45, D35, D40.
 """
-const RESULT_LAYOUT_VERSION = "otis-result-2"
+const RESULT_LAYOUT_VERSION = "otis-result-3"
+
+"""
+    _channel_problem(problem::FitProblem, c::Int) -> FitProblem
+    _channel_problem(problem::JointFitProblem, c::Int) -> FitProblem
+
+Channel `c`'s own `FitProblem` (D40 amendment 7): `problem` itself for a `FitProblem` (`c == 1`
+always, since a single-channel problem has one channel), `problem.channels[c]` for a
+`JointFitProblem`.
+"""
+_channel_problem(problem::FitProblem, ::Int) = problem
+_channel_problem(problem::JointFitProblem, c::Int) = problem.channels[c]
 
 """
     _near_bound_fraction(result::FitResult) -> Float64
@@ -90,25 +107,43 @@ function _variable_bins(v::FittedVariable, intervals::Vector{FitInterval}, nt::I
 end
 
 """
-    write_result(path, result::FitResult; deck = "", source = "fit",
+    write_result(path, result::FitResult; problem::Union{Nothing,AbstractFitProblem} = nothing,
+                 deck = "", source = "fit",
                  scan::Union{Nothing,WeightScanResult} = nothing) -> path
 
 Writes `result` (and, if given, `scan`) to `path` as a JLD2 file of plain numeric arrays and
-strings (`docs/derivations/data_layout.md` Section 3, spec D34): `layout_version`, a `meta`
+strings (`docs/derivations/data_layout.md` Section 3, spec D34, D40): `layout_version`, a `meta`
 group, the effective `deck` text, the axis, one group per fitted variable and per dependent, one
 group per leaf of the fitted trace, the `fit/*` scalars and vectors (including, since
-`otis-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`), the `trajectory/*` arrays,
-and, only when `scan !== nothing`, the `scan/*` arrays (including `scan/status` and
+`otis-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`; `fit/chi2` and
+`fit/npixels` are the **weighted total** and the **sum over channels** for a `JointFitProblem`
+result, D40), the `trajectory/*` arrays, `channels/names` and, per channel (D40), the six summary
+scalars, `lambda`, `model` and `effects/*`, and, only when `problem !== nothing`, `residual` and
+`mask`; and, only when `scan !== nothing`, the `scan/*` arrays (including `scan/status` and
 `scan/termination`, one string per requested weight each) and per-variable `scan/rss*` groups,
 including `scan/rss_unreg/<variable>`.
 
-Spec D34, D35.
+When `problem` is given, `problem.pspec === result.pspec` is required (a loud error otherwise,
+naming what to pass instead): `write_result` has no other way to know the problem it is given is
+the one `result` was actually fitted from, and the residual needs the problem's own `pixel_index`,
+`data` and `sigma`. Without a problem, `residual` and `mask` are omitted and `read_result` returns
+`nothing` for them -- the three `examples/fit_*.jl`, `test_result.jl` and `test_reproduce.jl` all
+called `write_result` this way before chunk 7 and stay legal (D40 item 9).
+
+Spec D34, D35, D40.
 """
-function write_result(path::AbstractString, result::FitResult; deck::AbstractString="",
+function write_result(path::AbstractString, result::FitResult;
+    problem::Union{Nothing,AbstractFitProblem}=nothing, deck::AbstractString="",
     source="fit", scan::Union{Nothing,WeightScanResult}=nothing)
     pspec = result.pspec
     nt = nbins(pspec.trace)
     unit_keys = _variable_unit_keys(pspec.bindings)
+
+    if problem !== nothing
+        problem.pspec === result.pspec || throw(ArgumentError(
+            "write_result: problem.pspec is not === result.pspec; pass the problem the result " *
+            "was fitted from"))
+    end
 
     jldopen(path, "w") do f
         f["layout_version"] = RESULT_LAYOUT_VERSION
@@ -168,6 +203,43 @@ function write_result(path::AbstractString, result::FitResult; deck::AbstractStr
         f["trajectory/chi2"] = Float64[row.chi2 for row in result.trajectory]
         f["trajectory/R"] = Float64[row.R for row in result.trajectory]
 
+        f["channels/names"] = String[c.name for c in result.channels]
+        for (c, summ) in enumerate(result.channels)
+            prefix = "channels/$(summ.name)"
+            f["$prefix/weight"] = Float64(summ.weight)
+            f["$prefix/chi2"] = Float64(summ.chi2)
+            f["$prefix/npixels"] = Int64(summ.npixels)
+            f["$prefix/nparams"] = Int64(summ.nparams)
+            f["$prefix/reduced_chi2"] = Float64(summ.reduced_chi2)
+            f["$prefix/reduced_chi2_simple"] = Float64(summ.reduced_chi2_simple)
+
+            expt = result.experiments[c]
+            f["$prefix/lambda"] = Vector{Float64}(expt.lambda)
+            model = Matrix{Float64}(measure(expt))
+            f["$prefix/model"] = model
+
+            for (k, e) in enumerate(expt.effects)
+                eprefix = "$prefix/effects/$k"
+                f["$eprefix/type"] = string(nameof(typeof(e)))
+                for (field, v) in pairs(parameters(e))
+                    f["$eprefix/$field"] = v isa Union{Tuple,AbstractVector} ?
+                        collect(Float64, v) : Float64(v)
+                end
+            end
+
+            if problem !== nothing
+                ch = _channel_problem(problem, c)
+                residual = fill(NaN, size(ch.data.image))
+                D = ch.data.image
+                sig = ch.sigma
+                for i in ch.pixel_index
+                    residual[i] = (model[i] - D[i]) / sig[i]
+                end
+                f["$prefix/residual"] = residual
+                f["$prefix/mask"] = UInt8.(ch.mask)
+            end
+        end
+
         if scan !== nothing
             f["scan/status"] = String[string(r.status) for r in scan.results]
             f["scan/termination"] = String[string(r.termination) for r in scan.results]
@@ -202,15 +274,20 @@ end
 
 Reads a result written by `write_result`, returning plain arrays and strings, like `read_trace`'s
 own `:arrays` mode: `(; layout_version, meta, deck, axis_name, axis, axis_unit,
-axis_boundary_unit, variables, dependents, leaves, fit, trajectory, scan)`. `variables` and
-`dependents` are `Dict{String,<:NamedTuple}` keyed by name; `leaves` is `Dict{String,Vector{Float64}}`
-keyed by SI leaf path; `fit` and `trajectory` are `NamedTuple`s of the file's own `fit/*` and
-`trajectory/*` datasets; `scan` is `nothing` when the file carries no `scan/*` group, else a
-`NamedTuple` (`rss`/`rss_normalized` themselves `Dict{String,Vector{Float64}}` and `rss_unreg`
-`Dict{String,Float64}`, empty when the file carries no ground truth). Throws, naming the version
-found and expected, if `layout_version` does not match `RESULT_LAYOUT_VERSION`.
+axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan)`. `variables`
+and `dependents` are `Dict{String,<:NamedTuple}` keyed by name; `leaves` is
+`Dict{String,Vector{Float64}}` keyed by SI leaf path; `fit` and `trajectory` are `NamedTuple`s of
+the file's own `fit/*` and `trajectory/*` datasets; `channels` (D40) is a `Vector{<:NamedTuple}`,
+one per channel in channel order, each `(; name, weight, chi2, npixels, nparams, reduced_chi2,
+reduced_chi2_simple, lambda, model, effects, residual, mask)` -- `effects` a `Vector` of
+`(; type::String, parameters::Dict{String,Any})` in index order, and `residual`/`mask` `nothing`
+when the file carries none (`write_result` was not given a problem); `scan` is `nothing` when the
+file carries no `scan/*` group, else a `NamedTuple` (`rss`/`rss_normalized` themselves
+`Dict{String,Vector{Float64}}` and `rss_unreg` `Dict{String,Float64}`, empty when the file carries
+no ground truth). Throws, naming the version found and expected, if `layout_version` does not
+match `RESULT_LAYOUT_VERSION`.
 
-Spec D34.
+Spec D34, D40.
 """
 function read_result(path::AbstractString)
     jldopen(path, "r") do f
@@ -264,6 +341,29 @@ function read_result(path::AbstractString)
             chi2=f["trajectory/chi2"], R=f["trajectory/R"],
         )
 
+        channels = NamedTuple[]
+        for nm in _require_dataset(f, "channels/names", path)
+            prefix = "channels/$nm"
+            effect_keys = _read_group(f, "$prefix/effects")
+            effects = NamedTuple[]
+            for k in sort(parse.(Int, effect_keys))
+                eprefix = "$prefix/effects/$k"
+                pnames = [n for n in _read_group(f, eprefix) if n != "type"]
+                params = Dict{String,Any}(n => f["$eprefix/$n"] for n in pnames)
+                push!(effects, (; type=f["$eprefix/type"], parameters=params))
+            end
+            has_residual = haskey(f, "$prefix/residual")
+            push!(channels, (
+                name=nm, weight=f["$prefix/weight"], chi2=f["$prefix/chi2"],
+                npixels=f["$prefix/npixels"], nparams=f["$prefix/nparams"],
+                reduced_chi2=f["$prefix/reduced_chi2"],
+                reduced_chi2_simple=f["$prefix/reduced_chi2_simple"],
+                lambda=f["$prefix/lambda"], model=f["$prefix/model"], effects=effects,
+                residual=has_residual ? f["$prefix/residual"] : nothing,
+                mask=has_residual ? f["$prefix/mask"] : nothing,
+            ))
+        end
+
         scan = nothing
         if haskey(f, "scan")
             rss = Dict{String,Vector{Float64}}(nm => f["scan/rss/$nm"] for nm in _read_group(f, "scan/rss"))
@@ -281,6 +381,6 @@ function read_result(path::AbstractString)
         end
 
         return (; layout_version=version, meta, deck, axis_name, axis, axis_unit,
-            axis_boundary_unit, variables, dependents, leaves, fit, trajectory, scan)
+            axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan)
     end
 end

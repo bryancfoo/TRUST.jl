@@ -123,6 +123,25 @@ const _RE_RESULT, _RE_SCAN = _re_fixture()
             for p in result.experiment.trace.paths
                 push!(expected, "leaves/$(string(p))/values")
             end
+            # channels/ (D40, chunk 7): every otis-result-3 file has it, "main" alone for a
+            # single-channel fit; write_result is given no problem here, so no residual/mask.
+            push!(expected, "channels/names")
+            for summ in result.channels
+                cprefix = "channels/$(summ.name)"
+                for k in ("weight", "chi2", "npixels", "nparams", "reduced_chi2",
+                          "reduced_chi2_simple", "lambda", "model")
+                    push!(expected, "$cprefix/$k")
+                end
+            end
+            for (c, summ) in enumerate(result.channels)
+                cprefix = "channels/$(summ.name)"
+                for (k, e) in enumerate(result.experiments[c].effects)
+                    push!(expected, "$cprefix/effects/$k/type")
+                    for field in keys(parameters(e))
+                        push!(expected, "$cprefix/effects/$k/$field")
+                    end
+                end
+            end
             @test got == expected
         end
     end
@@ -156,7 +175,7 @@ end
         write_result(path, result; deck="the effective deck", source="fit", scan=_RE_SCAN)
         r = read_result(path)
 
-        @test r.layout_version == "otis-result-2"
+        @test r.layout_version == "otis-result-3"
         @test r.deck == "the effective deck"
         @test r.axis_name == :t
         @test r.axis == pspec.axis
@@ -228,7 +247,7 @@ end
     mktempdir() do dir
         path = joinpath(dir, "result.jld2")
         write_result(path, _RE_RESULT)
-        @test read_result(path).layout_version == "otis-result-2"
+        @test read_result(path).layout_version == "otis-result-3"
 
         badpath = joinpath(dir, "bad.jld2")
         jldopen(badpath, "w") do f

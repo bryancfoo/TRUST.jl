@@ -661,7 +661,7 @@ end
         @test isfile(joinpath(outdir, "result.jld2"))
         @test isfile(joinpath(outdir, "effective_deck.toml"))
         r = read_result(joinpath(outdir, "result.jld2"))
-        @test r.layout_version == "otis-result-2"
+        @test r.layout_version == "otis-result-3"
     end
 end
 
@@ -822,5 +822,27 @@ end
         badpath = joinpath(dir, "dk18_bad.toml")
         write(badpath, deck_bad)
         @test_throws "key \"precondition\" in section \"optimizer.lbfgs\" must be true or false" read_deck(badpath)
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# DK19: the top-level known-key check (D40 item 1, chunk 7, Pitfall 9)
+# ------------------------------------------------------------------------------------------
+#
+# Before chunk 7, read_deck read the sections it knew by name and silently ignored everything
+# else, so a [channel.epw] table in an otis-deck-2 deck would be silently ignored and the fit
+# would run single-channel. The channel deck's own CD1 covers a [channel.x] table specifically;
+# this row covers a plain unknown top-level key on an otherwise-shorthand deck.
+
+@testset "DK19: an unknown top-level key is refused" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "data.jld2")
+        _dk_write_streak(datafile)
+        outdir = joinpath(dir, "out")
+
+        bad = _dk_minimal_deck(datafile, outdir) * "\n[bogus_section]\nx = 1.0\n"
+        badpath = joinpath(dir, "dk19_bad.toml")
+        write(badpath, bad)
+        @test_throws "unknown top-level key \"bogus_section\"" read_deck(badpath)
     end
 end

@@ -146,6 +146,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("deck")
         @safetestset "deck" begin include("config/test_deck.jl") end
     end
+    if _wanted("channel deck")
+        @safetestset "channel deck" begin include("config/test_channel_deck.jl") end
+    end
     if _wanted("noise")
         @safetestset "noise" begin include("instrument/test_noise.jl") end
     end

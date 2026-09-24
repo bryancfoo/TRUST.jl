@@ -63,10 +63,14 @@ function _sa_epw()
 
         deck0 = read_deck(joinpath(_SA_EXAMPLES_DIR, "epw_ablation.toml"))
         sections = deepcopy(deck0.sections)
+        # The regions moved to a shared [[fit.regions]] at chunk 7 (D40 amendment 10); this
+        # reproduces exactly what read_deck now does with the same regions and fraction.
         sections["data"] = OTIS._validate_data_section(Dict{String,Any}(
             "file" => sd_path,
             "lambda_range_nm" => [220.0, 260.0],
-            "regions" => [Dict{String,Any}("t_range_ns" => [2.0, 5.6], "nbins" => 32)]))
+            "min_usable_fraction" => 0.5))
+        sections["fit_regions"] = OTIS._validate_regions(
+            Any[Dict{String,Any}("t_range_ns" => [2.0, 5.6], "nbins" => 32)])
         deck = OTIS.Deck(deck0.deck_version, sections)
         problem, optimizer, start = OTIS.build_problem(deck)
         @info "SA1: problem built" npixels = problem.npixels naxis = length(problem.experiment.t)

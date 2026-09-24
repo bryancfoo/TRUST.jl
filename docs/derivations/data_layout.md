@@ -141,16 +141,30 @@ plain `Dict`/array data (spec D20's `NamedTuple`), and IO6's round-trip test com
 **Only the ground-truth trace is written in Phase 2** (`examples/`, Step 2.5); Step 3.6 built the
 result writer below (roadmap Step 2.4, amended; `dev/phase2_overall_summary.md` A7).
 
-## 3. The result layout, `otis-result-2`
+## 3. The result layout, `otis-result-3`
 
 **Bumped from `otis-result-1` at Step 3.C.2 (D35)**, one bump carrying `fit/termination`,
 `fit/near_bound_fraction` and (with a scan) `scan/status` together, and joined within the same
 version by `scan/termination` at Step 3.C.3 (carried item 2) -- adding a dataset inside a version
 introduced by this same phase, before the phase closes, is not the second bump D35 forbade.
 
+**Bumped from `otis-result-2` to `otis-result-3` at Step 4.A.3b (D40, chunk 7)**, one bump adding
+a `channels/` group: `channels/names`, a `Vector{String}` in channel order, and, per channel,
+`channels/<name>/weight`, `chi2` (unweighted), `npixels`, `nparams`, `reduced_chi2`,
+`reduced_chi2_simple`, `lambda`, `model` (`measure` of the fitted `experiments[c]`),
+`effects/<k>/type` and `effects/<k>/<field>` (`parameters(effect)` of the fitted experiment's
+`k`-th effect, in SI), and, only when `write_result` is given the problem, `residual`
+(`(M_c - D_c)/sigma_c`, `NaN` where the mask is false) and `mask` (`UInt8`). `fit/chi2` and
+`fit/npixels` at the top level are now the **weighted total** and the **sum over channels**
+(`Sigma_c w_c chi2_c` and `Sigma_c n_c`) for a joint fit -- this is what `otis-result-2`'s own
+comment below anticipated ("a later joint EPW/IAW fit ... turns this into a version bump"), with
+the group named `channels/`, not `datasets/`. **Every `otis-result-3` file has `channels/`**,
+since every `FitResult` carries at least one `ChannelSummary` (D36): a single-channel fit (the
+shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
+
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-result-2"` | yes |
+| `layout_version` | `String` | scalar, `"otis-result-3"` | yes |
 | `meta/source` | `String` | free text | yes |
 | `meta/created` | `String` | ISO-8601 UTC, e.g. `"2026-09-15T12:00:00.000Z"` | yes |
 | `meta/created_unix` | `Float64` | seconds since the Unix epoch | yes |
@@ -181,6 +195,15 @@ introduced by this same phase, before the phase closes, is not the second bump D
 | `fit/elapsed` | `Float64` | scalar, seconds | yes |
 | `trajectory/iteration` | `Int64` | `(n_iter)` | yes |
 | `trajectory/objective`, `trajectory/chi2`, `trajectory/R` | `Float64` | `(n_iter)` | yes |
+| `channels/names` | `String` | `(N_channels)`, channel order | yes |
+| `channels/<name>/weight`, `chi2`, `reduced_chi2`, `reduced_chi2_simple` | `Float64` | scalar | yes, one group per channel |
+| `channels/<name>/npixels`, `nparams` | `Int64` | scalar | yes |
+| `channels/<name>/lambda` | `Float64` | `(N_lambda,c)`, m | yes |
+| `channels/<name>/model` | `Float64` | `(N_lambda,c, N_t)`, `measure(experiments[c])` | yes |
+| `channels/<name>/effects/<k>/type` | `String` | scalar, the effect's type name | yes, one group per effect of that channel |
+| `channels/<name>/effects/<k>/<field>` | `Float64` | scalar, or `(n)` for a vector field | one per `parameters(effect)` entry |
+| `channels/<name>/residual` | `Float64` | `(N_lambda,c, N_t)`, `(M-D)/sigma`, `NaN` where masked | only when `write_result` is given the problem |
+| `channels/<name>/mask` | `UInt8` | `(N_lambda,c, N_t)` | only when `write_result` is given the problem |
 | `scan/status`, `scan/termination` | `String` | `(K)`, one entry per requested weight | with a scan |
 | `scan/weights` | `Float64` | `(K)` | only when a scan was written |
 | `scan/chi2`, `scan/R`, `scan/chi2_normalized`, `scan/R_normalized` | `Float64` | `(K)` | with a scan |
@@ -188,16 +211,55 @@ introduced by this same phase, before the phase closes, is not the second bump D
 | `scan/rss/<variable>`, `scan/rss_normalized/<variable>` | `Float64` | `(K)` | only with a known ground truth |
 | `scan/rss_unreg/<variable>` | `Float64` | scalar | only with a known ground truth |
 
-`fit/chi2`, `fit/npixels` and `meta/source` stay scalars: Phase 3 fits one dataset at a time, and
-a later joint EPW/IAW fit that needs per-dataset values turns this into a version bump
-(`layout_version` grows a `datasets/<name>/` group carrying its own `chi2`/`npixels`), not a
-silent break — the version string is what makes that possible, and it is why it is written even
-though nothing in Phase 3 reads it back for dispatch.
+**`fit/chi2` and `fit/npixels` are the weighted total and the channel sum** (Step 4.A.3b, D40):
+`fit/chi2 = Sigma_c w_c chi2_c` (what the optimizer minimized) and `fit/npixels = Sigma_c n_c`,
+`1` and `1` for a single-channel fit. This is the version bump the `otis-result-2` text above
+anticipated ("a later joint EPW/IAW fit ... turns this into a version bump"); the group is named
+`channels/`, not `datasets/`, and carries the per-channel `chi2`/`npixels` that text foresaw,
+alongside the fitted model, the effect parameters and, when the problem is given, the residual and
+mask.
 
 **`read_trace` gains an `as` keyword** (`:arrays`, unchanged and default, or `:trace`, spec D35),
 once the component registry (`conventions.md` 7.2) exists to look shape names up in; the trace
 layout itself, `TRACE_LAYOUT_VERSION` and `read_streak`/`write_streak`/`write_trace` are
 untouched.
+
+## 4. The deck's channel form, and the pooled axis (Step 4.A.3b, D40)
+
+**`otis-deck-2`, no further bump.** `read_deck` accepts two mutually exclusive forms of a deck.
+**The shorthand** has a bare `[data]`, `[geometry]` and optional `[instrument]`, exactly as every
+deck before chunk 7 -- the single-channel path is bitwise unchanged. **The channel form** has a
+root-level `channels = ["epw", "iaw"]` array (the channel order) and a `[channel.<name>]` table
+per name, each holding an optional `weight` (default `1.0`) and its own `data`, `geometry` and
+`instrument`. Mixing the two forms is a loud error, and so is a top-level key `read_deck` does not
+know (D40 item 1, Pitfall 9) -- a `[channel.epw]` table in a deck `read_deck` did not check for
+would otherwise be silently ignored and the fit would run single-channel.
+
+**The regions move to one shared `[[fit.regions]]`.** Two cameras average onto one time axis
+([OQ-34](../../dev/open_questions.md#oq-34), D39), so the averaging windows are declared once,
+under `[fit]`, rather than once per channel; a `regions` key left inside a `[data]` or
+`[channel.<name>.data]` table is refused, naming its new home. Per-camera keys (`file`,
+`t_shift_ns`/`t_shift_s`, `min_usable_fraction`) stay in each channel's own `data` table.
+
+**The pooled axis.** With one channel the fitted axis is that channel's own averaged `t̄`
+(`docs/derivations/` -- the averaging rule itself is unchanged, D14), bitwise identical to a deck
+without a channel form. With two or more channels, each output bin's time is the **pooled mean**
+of every channel's window mean, weighted by that channel's own window pixel count:
+
+```
+t̄_k = ( Σ_c |W_c,k| · t̄_c,k ) / ( Σ_c |W_c,k| )
+```
+
+with `|W_c,k|` read from each channel's own `regions_window_counts` meta key (Section 1 above).
+Every channel's averaged streak is then rebuilt on this one pooled axis before the `Experiment`s
+and the shared `ParameterSpec` are built, so that `FitProblem`'s `rtol = 1e-12` axis check holds
+for every channel against the one shared trace. The cost, accepted at the design stage: each
+channel's data are labelled with a time a few picoseconds from their own mean, inside a window
+usually a hundred picoseconds or more wide.
+
+**The result file's `channels/<name>` groups (Section 3 above) are keyed by this same channel
+order and these same names** -- the shorthand's one channel is always named `"main"`; a
+one-channel channel-form deck can name it anything the deck's `channels` list says.
 
 `write_result`/`read_result` (`src/data/result.jl`) are this layout's readers and writers, on the
 same footing as `write_streak`/`read_streak` and `write_trace`/`read_trace` above.

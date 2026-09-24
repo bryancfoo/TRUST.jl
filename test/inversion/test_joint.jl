@@ -427,7 +427,11 @@ end
     theta_aligned = flatten(pspec_aligned, ["scale_b2" => 5e-6])
 
     fitted_a2 = unflatten(working_a2, pspec_aligned, theta_aligned; channel=1)
-    @test isapprox(fitted_a2.effects[1].scale, 1e-6; rtol=1e-12)
+    @test fitted_a2.effects[1].scale == 1e-6
+
+    working_b2 = _mc_working(expt_b2, pspec_aligned)
+    fitted_b2 = unflatten(working_b2, pspec_aligned, theta_aligned; channel=2)
+    @test isapprox(fitted_b2.effects[1].scale, 5e-6; rtol=1e-12)
 end
 
 # ------------------------------------------------------------------------------------------

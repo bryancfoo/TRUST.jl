@@ -245,10 +245,14 @@ end
 # [data]
 # ------------------------------------------------------------------------------------------
 
-# The regions (D15) supersede t_range_ns, are averaged onto in data preparation (D13, D14) and
-# may each name a [fit.intervals] entry -- amended 2026-09-23 before chunk 5 with four loud
-# errors in place of a silent behaviour: see _validate_data_section's docstring.
-const _DATA_KEYS = ("file", "lambda_range_nm", "t_range_ns", "regions", "t_shift_ns", "t_shift_s",
+# The regions (D15) moved to a shared [[fit.regions]] at chunk 7 (D40 amendment 1): a [data]
+# table's own "regions" key is now refused, naming the new home. The four cross-section loud
+# errors of D15 (both regions and t_range_ns; a shift/fraction key without regions; a region's
+# interval clashing with [fit.intervals]; two or more channels without regions) all move to
+# read_deck itself (D40 amendment 2, item 10), since they need to see every channel's data table
+# and the shared [[fit.regions]] together. _validate_data_section keeps only the checks that are
+# purely local to one [data]/[channel.<n>.data] table.
+const _DATA_KEYS = ("file", "lambda_range_nm", "t_range_ns", "t_shift_ns", "t_shift_s",
     "min_usable_fraction")
 const _REGION_KEYS = ("t_range_ns", "t_range_s", "nbins", "interval")
 const _REGION_RANGE_KEYS = ("t_range_ns", "t_range_s")
@@ -256,31 +260,22 @@ const _REGION_RANGE_KEYS = ("t_range_ns", "t_range_s")
 """
     _validate_data_section(given::AbstractDict) -> Dict{String,Any}
 
-Validates `[data]` (D15, amended 2026-09-23). `regions` is stored as a `Vector{Dict{String,Any}}`,
-one per `[[data.regions]]` table, each carrying exactly the unit key the deck gave (a two-element
-`Any[Float64, Float64]`), `nbins::Int`, and `interval` filled with `""` when absent;
-`min_usable_fraction` is filled with `0.5` when `regions` is given and the key is absent; neither
-`t_shift` key is ever filled in (absent means zero to `average_regions`, and filling one next to
-the user's other unit keyword would make the effective deck re-read with both given).
+Validates one `[data]` or `[channel.<n>.data]` table (D15, moved to `[[fit.regions]]` at chunk 7,
+D40 amendment 1). A `"regions"` key is refused before the generic known-key check runs, naming its
+new home (`[[fit.regions]]`); the two-loud-errors-in-one-table check that remains local to this
+table is `t_shift_ns` and `t_shift_s` together (the unit table's own error, surfaced early here as
+well as later through `_si_value`). The cross-section loud errors -- both `regions` and
+`t_range_ns`; a shift/fraction key given without `[[fit.regions]]`; a region's interval clashing
+with `[fit.intervals]`; two or more channels without `[[fit.regions]]` -- and the
+`min_usable_fraction` default are `read_deck`'s own job now (D40 amendment 2, items 10-11), since
+none of them can be decided from one table alone.
 
-Four loud errors, each in place of a silent behaviour:
-
-1. Both `regions` and `t_range_ns` -- the roadmap's "regions supersede t_range_ns" would silently
-   ignore whichever is not honoured; `lambda_range_nm` is unaffected. **[propagate]** to
-   `roadmap.md` Step 4.A.2 (this document decides it, Level 3 does not choose it).
-2. `t_shift_ns` and `t_shift_s` together -- the unit table's own error, surfaced early here as
-   well as later through `_si_value`.
-3. A region table naming a key other than `t_range_ns`/`t_range_s`/`nbins`/`interval`, or naming
-   both/neither of the two range keys.
-4. `t_shift_ns`, `t_shift_s` or `min_usable_fraction` given without `regions` -- without regions
-   nothing is averaged, so the value would be silently ignored.
-
-(The fifth loud error of D15 -- a region naming an interval `[fit.intervals]` also declares -- is
-cross-section and is checked in `build_problem` instead.)
-
-Spec D15.
+Spec D15, D40.
 """
 function _validate_data_section(given::AbstractDict)
+    haskey(given, "regions") && throw(ArgumentError(
+        "read_deck: \"regions\" moved from [data] to [[fit.regions]] on 2026-09-23; write each " *
+        "region as a [[fit.regions]] table"))
     _check_known_keys(given, _DATA_KEYS, "data")
     haskey(given, "file") || throw(ArgumentError("read_deck: section \"data\" needs a \"file\" key"))
     given["file"] isa AbstractString || throw(ArgumentError(
@@ -295,53 +290,50 @@ function _validate_data_section(given::AbstractDict)
     (haskey(given, "t_shift_ns") && haskey(given, "t_shift_s")) && throw(ArgumentError(
         "read_deck: section \"data\" gives both \"t_shift_ns\" and \"t_shift_s\"; give exactly one"))
 
-    out = Dict{String,Any}(given)
+    return Dict{String,Any}(given)
+end
 
-    if haskey(given, "regions")
-        haskey(given, "t_range_ns") && throw(ArgumentError(
-            "read_deck: section \"data\" gives both \"regions\" and \"t_range_ns\"; regions " *
-            "supersede t_range_ns, and a deck whose stated time window would be silently " *
-            "ignored is refused instead"))
+"""
+    _validate_regions(given) -> Union{Nothing,Vector{Dict{String,Any}}}
 
-        regions_raw = given["regions"]
-        regions_raw isa AbstractVector || throw(ArgumentError(
-            "read_deck: \"data.regions\" must be an array of tables"))
-        regions_out = Vector{Dict{String,Any}}(undef, length(regions_raw))
-        for (i, entry) in enumerate(regions_raw)
-            entry isa AbstractDict || throw(ArgumentError(
-                "read_deck: \"data.regions[$i]\" must be a table"))
-            _check_known_keys(entry, _REGION_KEYS, "data.regions[$i]")
-            present = [k for k in _REGION_RANGE_KEYS if haskey(entry, k)]
-            length(present) == 1 || throw(ArgumentError(
-                "read_deck: \"data.regions[$i]\" needs exactly one of $_REGION_RANGE_KEYS"))
-            key = present[1]
-            rng = entry[key]
-            (rng isa AbstractVector && length(rng) == 2 && all(x -> x isa Real, rng)) ||
-                throw(ArgumentError(
-                    "read_deck: \"data.regions[$i].$key\" must be a two-element [lo, hi]"))
-            haskey(entry, "nbins") || throw(ArgumentError(
-                "read_deck: \"data.regions[$i]\" needs \"nbins\""))
-            entry["nbins"] isa Integer || throw(ArgumentError(
-                "read_deck: \"data.regions[$i].nbins\" must be an integer"))
-            interval = get(entry, "interval", "")
-            interval isa AbstractString || throw(ArgumentError(
-                "read_deck: \"data.regions[$i].interval\" must be a string"))
-            regions_out[i] = Dict{String,Any}(
-                key => Any[Float64(rng[1]), Float64(rng[2])],
-                "nbins" => Int(entry["nbins"]),
-                "interval" => String(interval))
-        end
-        out["regions"] = regions_out
-        out["min_usable_fraction"] = Float64(get(given, "min_usable_fraction", 0.5))
-    else
-        for k in ("t_shift_ns", "t_shift_s", "min_usable_fraction")
-            haskey(given, k) && throw(ArgumentError(
-                "read_deck: section \"data\" gives \"$k\" without \"regions\"; without " *
-                "regions nothing is averaged and the value would be silently ignored"))
-        end
+Validates `[[fit.regions]]` (D40 amendment 1, moved here from `_validate_data_section`'s old
+`"regions"` handling): `given` is `nothing` when the deck has no `[[fit.regions]]`, in which case
+this returns `nothing`; otherwise an array of tables, each carrying exactly the unit key given
+(`t_range_ns`|`t_range_s`, a two-element `Any[Float64, Float64]`), `nbins::Int`, and `interval`
+filled with `""` when absent -- the same shape `[[data.regions]]` stored through chunk 6.
+
+Spec D15, D40.
+"""
+function _validate_regions(given)
+    given === nothing && return nothing
+    given isa AbstractVector || throw(ArgumentError(
+        "read_deck: \"fit.regions\" must be an array of tables"))
+    regions_out = Vector{Dict{String,Any}}(undef, length(given))
+    for (i, entry) in enumerate(given)
+        entry isa AbstractDict || throw(ArgumentError(
+            "read_deck: \"fit.regions[$i]\" must be a table"))
+        _check_known_keys(entry, _REGION_KEYS, "fit.regions[$i]")
+        present = [k for k in _REGION_RANGE_KEYS if haskey(entry, k)]
+        length(present) == 1 || throw(ArgumentError(
+            "read_deck: \"fit.regions[$i]\" needs exactly one of $_REGION_RANGE_KEYS"))
+        key = present[1]
+        rng = entry[key]
+        (rng isa AbstractVector && length(rng) == 2 && all(x -> x isa Real, rng)) ||
+            throw(ArgumentError(
+                "read_deck: \"fit.regions[$i].$key\" must be a two-element [lo, hi]"))
+        haskey(entry, "nbins") || throw(ArgumentError(
+            "read_deck: \"fit.regions[$i]\" needs \"nbins\""))
+        entry["nbins"] isa Integer || throw(ArgumentError(
+            "read_deck: \"fit.regions[$i].nbins\" must be an integer"))
+        interval = get(entry, "interval", "")
+        interval isa AbstractString || throw(ArgumentError(
+            "read_deck: \"fit.regions[$i].interval\" must be a string"))
+        regions_out[i] = Dict{String,Any}(
+            key => Any[Float64(rng[1]), Float64(rng[2])],
+            "nbins" => Int(entry["nbins"]),
+            "interval" => String(interval))
     end
-
-    return out
+    return regions_out
 end
 
 function _crop_streak(sd::StreakData, lambda_range_nm, t_range_ns)
@@ -437,7 +429,7 @@ const _FIT_INTERVAL_KEYS = ("t_range_ns", "t_range_s")
 const _FIT_VARIABLE_KEYS = ("bounds", "init", "time_varying", "vary", "interval", "bindings")
 
 function _validate_fit_scalars(given::AbstractDict)
-    _check_known_keys(given, (_FIT_SCALAR_KEYS..., "intervals", "variables", "dependent"), "fit")
+    _check_known_keys(given, (_FIT_SCALAR_KEYS..., "intervals", "variables", "dependent", "regions"), "fit")
     sigma = get(given, "sigma", "supplied")
     sigma == "supplied" || throw(ArgumentError(
         "read_deck: \"fit.sigma\" must be \"supplied\"; sigma is frozen and supplied with the " *
@@ -774,21 +766,82 @@ end
 # read_deck
 # ------------------------------------------------------------------------------------------
 
+# The top-level known-key check D40 item 1 adds (Pitfall 9): a [channel.epw] table in a deck
+# read_deck did not know about would otherwise be silently ignored and the fit would run
+# single-channel. "channel" is the channel-form's table-of-tables; "channels" its order list.
+const _TOP_LEVEL_KEYS = ("deck_version", "channels", "channel", "data", "geometry", "instrument",
+    "fit", "plasma", "regularizer", "optimizer", "output")
+
+const _CHANNEL_TABLE_KEYS = ("weight", "data", "geometry", "instrument")
+
+const _CHANNEL_NAME_RE = r"^[a-z][a-z0-9_]*$"
+
+function _check_top_level_keys(raw::AbstractDict)
+    validset = Set(_TOP_LEVEL_KEYS)
+    for k in keys(raw)
+        k in validset || throw(ArgumentError(
+            "read_deck: unknown top-level key \"$k\"; valid keys are $(sort(collect(validset)))"))
+    end
+    return nothing
+end
+
+"""
+    _channel_list(sections::AbstractDict) -> Vector{Dict{String,Any}}
+
+Both deck forms as one shape (D40 amendment 3): the channel form's own `sections["channels"]`
+(one entry per `[channel.<name>]`, in `channels` order, each `{"name", "weight", "data",
+"geometry", "instrument"}`) when present, or, for the shorthand, one entry named `"main"` with
+weight `1.0` whose `"data"`/`"geometry"`/`"instrument"` are `sections["data"]`/`["geometry"]`/
+`["instrument"]` **by reference** -- `build_problem` must never write into any of them.
+"""
+function _channel_list(sections::AbstractDict)
+    haskey(sections, "channels") && return sections["channels"]
+    return Dict{String,Any}[Dict{String,Any}("name" => "main", "weight" => 1.0,
+        "data" => sections["data"], "geometry" => sections["geometry"],
+        "instrument" => sections["instrument"])]
+end
+
+"""
+    _in_channel(f, nm::AbstractString)
+
+Runs `f()` and, on an `ArgumentError`, re-throws it prefixed `"read_deck: in [channel.<nm>]: "`
+(D40 amendment 2, item 7), so a two-or-more-channel deck's error names which channel is at fault
+while every existing substring the wrapped validator produces still matches (the wrapped message's
+own leading `"read_deck: "` is not stripped -- D40 writes the prefix onto the message whole).
+"""
+function _in_channel(f, nm::AbstractString)
+    try
+        return f()
+    catch e
+        e isa ArgumentError || rethrow()
+        throw(ArgumentError("read_deck: in [channel.$nm]: " * e.msg))
+    end
+end
+
 """
     read_deck(path::AbstractString) -> Deck
 
-Reads and validates the TOML deck at `path` (spec D33): checks `deck_version` (a missing or
+Reads and validates the TOML deck at `path` (spec D33, D40): checks `deck_version` (a missing or
 unknown value is a loud error naming the version found and the one supported, DK16); checks every
-key of every section against the component that owns it (7.3, DK7); checks every numeric key's
-string value against the declared `[fit.variables]`/`[fit.dependent]` names (7.6, DK4-DK6); fills
-every option-struct field with its own default where the deck omits it (7.5, DK11). Returns a
-`Deck`, still inert -- build the actual `FitProblem` with `build_problem`.
+top-level key (D40 item 1, Pitfall 9); checks that the deck is in exactly one of the shorthand or
+channel forms (D40 item 2); checks every key of every section against the component that owns it
+(7.3, DK7); checks every numeric key's string value against the declared
+`[fit.variables]`/`[fit.dependent]` names (7.6, DK4-DK6); fills every option-struct field with its
+own default where the deck omits it (7.5, DK11); checks the four region cross-section rules and
+fills `min_usable_fraction`'s default (D40 items 10-11). Returns a `Deck`, still inert -- build the
+actual problem with `build_problem`.
 
-Sections are processed in the order D33 lists them: `[data]`, `[geometry]`, `[fit.intervals]`,
-`[fit.variables]`, `[fit.dependent]`, `[plasma]` (and its species tables), `[instrument]`,
-`[fit]`, `[regularizer]`, `[optimizer]`, `[output]`.
+**The shorthand** has a bare `[data]`, `[geometry]` and optional `[instrument]`, and no `channels`
+or `channel`; its three sections are stored exactly as before chunk 7, `sections["data"]`,
+`["geometry"]`, `["instrument"]`. **The channel form** has `channels` (the channel order, a
+non-empty array of distinct names each matching `^[a-z][a-z0-9_]*\$`) and `channel` (a table of
+`[channel.<name>]` tables, one per name in `channels`, each holding an optional `weight` and
+required `data`/`geometry` and optional `instrument`); it is stored as `sections["channels"]`, a
+`Vector{Dict{String,Any}}` in `channels` order (`_channel_list`). Mixing the two forms, or giving
+one half of the channel-form pair without the other, is a loud error. The regions live in a shared
+`sections["fit_regions"]` (`nothing`, or a `Vector` from `_validate_regions`) regardless of form.
 
-Spec D33.
+Spec D33, D40.
 """
 function read_deck(path::AbstractString)
     raw = TOML.parsefile(path)
@@ -798,13 +851,99 @@ function read_deck(path::AbstractString)
         (version === nothing ? "<missing>" : "\"$version\"") *
         "; this version of OTIS reads \"$DECK_VERSION\""))
 
+    _check_top_level_keys(raw)
+
+    has_channels_key = haskey(raw, "channels")
+    has_channel_key = haskey(raw, "channel")
+    bare_keys = sort([k for k in ("data", "geometry", "instrument") if haskey(raw, k)])
+
+    if (has_channels_key || has_channel_key) && !isempty(bare_keys)
+        throw(ArgumentError(
+            "read_deck: this deck mixes the channel form (\"channels\" and [channel.<name>]) " *
+            "with the bare section(s) $bare_keys; in the channel form, data, geometry and " *
+            "instrument go inside each [channel.<name>]"))
+    end
+
+    is_channel_form = has_channels_key || has_channel_key
+    if is_channel_form && !(has_channels_key && has_channel_key)
+        which = has_channels_key ? "\"channels\"" : "[channel.<name>]"
+        throw(ArgumentError(
+            "read_deck: the channel form needs both a \"channels\" list and [channel.<name>] " *
+            "tables; this deck has only $which"))
+    end
+
     sections = Dict{String,Any}()
+    channel_entries = Dict{String,Any}[]
+    channel_table = Dict{String,Any}()
 
-    haskey(raw, "data") || throw(ArgumentError("read_deck: \"$path\" is missing section \"data\""))
-    sections["data"] = _validate_data_section(raw["data"])
+    if is_channel_form
+        channels_raw = raw["channels"]
+        (channels_raw isa AbstractVector && !isempty(channels_raw) &&
+            all(x -> x isa AbstractString, channels_raw)) || throw(ArgumentError(
+            "read_deck: \"channels\" must be a non-empty array of channel names"))
+        names = String.(channels_raw)
+        for nm in names
+            occursin(_CHANNEL_NAME_RE, nm) || throw(ArgumentError(
+                "read_deck: channel name \"$nm\" must match ^[a-z][a-z0-9_]*\$"))
+        end
+        seen = Set{String}()
+        for nm in names
+            nm in seen && throw(ArgumentError(
+                "read_deck: channel name \"$nm\" appears more than once in \"channels\""))
+            push!(seen, nm)
+        end
 
-    haskey(raw, "geometry") || throw(ArgumentError("read_deck: \"$path\" is missing section \"geometry\""))
-    sections["geometry"] = _validate_geometry_section(raw["geometry"])
+        raw["channel"] isa AbstractDict || throw(ArgumentError("read_deck: \"channel\" must be a table"))
+        channel_table = raw["channel"]
+        table_names = Set(String.(keys(channel_table)))
+        name_set = Set(names)
+        missing_tables = sort(collect(setdiff(name_set, table_names)))
+        extra_tables = sort(collect(setdiff(table_names, name_set)))
+        (isempty(missing_tables) && isempty(extra_tables)) || throw(ArgumentError(
+            "read_deck: \"channels\" and the [channel.<name>] tables disagree: no table for " *
+            "$missing_tables; tables not listed in \"channels\": $extra_tables"))
+
+        for nm in names
+            chan_raw = channel_table[nm]
+            chan_raw isa AbstractDict || throw(ArgumentError("read_deck: \"channel.$nm\" must be a table"))
+            _check_known_keys(chan_raw, _CHANNEL_TABLE_KEYS, "channel.$nm")
+            haskey(chan_raw, "data") || throw(ArgumentError(
+                "read_deck: \"channel.$nm\" is missing section \"data\""))
+            haskey(chan_raw, "geometry") || throw(ArgumentError(
+                "read_deck: \"channel.$nm\" is missing section \"geometry\""))
+            weight = if haskey(chan_raw, "weight")
+                w = chan_raw["weight"]
+                w isa AbstractString && throw(ArgumentError(
+                    "read_deck: \"channel.$nm.weight\" must be a number, not a variable " *
+                    "reference; a channel's weight is fixed (OQ-35)"))
+                (w isa Real && isfinite(w) && w > 0) || throw(ArgumentError(
+                    "read_deck: \"channel.$nm.weight\" must be a finite number > 0; got $(repr(w))"))
+                Float64(w)
+            else
+                1.0
+            end
+            data_section = _in_channel(nm) do
+                _validate_data_section(chan_raw["data"])
+            end
+            geometry_section = _in_channel(nm) do
+                _validate_geometry_section(chan_raw["geometry"])
+            end
+            push!(channel_entries, Dict{String,Any}("name" => nm, "weight" => weight,
+                "data" => data_section, "geometry" => geometry_section))
+        end
+
+        if length(names) == 1 && channel_entries[1]["weight"] != 1.0
+            throw(ArgumentError(
+                "read_deck: a deck with one channel cannot set a weight " *
+                "($(channel_entries[1]["weight"])): a weight only scales a channel against the " *
+                "others, and alone it would silently rescale the regularizer"))
+        end
+    else
+        haskey(raw, "data") || throw(ArgumentError("read_deck: \"$path\" is missing section \"data\""))
+        sections["data"] = _validate_data_section(raw["data"])
+        haskey(raw, "geometry") || throw(ArgumentError("read_deck: \"$path\" is missing section \"geometry\""))
+        sections["geometry"] = _validate_geometry_section(raw["geometry"])
+    end
 
     fit_raw = get(raw, "fit", Dict{String,Any}())
     interval_names = Set{String}(keys(get(fit_raw, "intervals", Dict{String,Any}())))
@@ -817,11 +956,23 @@ function read_deck(path::AbstractString)
         nm => _validate_variable_entry(nm, entry, interval_names) for (nm, entry) in variables_raw)
     sections["fit_dependent"] = _validate_dependent_section(dependent_raw)
     sections["fit"] = _validate_fit_scalars(fit_raw)
+    sections["fit_regions"] = _validate_regions(get(fit_raw, "regions", nothing))
 
     haskey(raw, "plasma") || throw(ArgumentError("read_deck: \"$path\" is missing section \"plasma\""))
     sections["plasma"] = _validate_plasma_section(raw["plasma"], known_names)
 
-    sections["instrument"] = _validate_instrument_section(get(raw, "instrument", Dict{String,Any}()), known_names)
+    if is_channel_form
+        for entry in channel_entries
+            nm = entry["name"]
+            instrument_raw = get(channel_table[nm], "instrument", Dict{String,Any}())
+            entry["instrument"] = _in_channel(nm) do
+                _validate_instrument_section(instrument_raw, known_names)
+            end
+        end
+        sections["channels"] = channel_entries
+    else
+        sections["instrument"] = _validate_instrument_section(get(raw, "instrument", Dict{String,Any}()), known_names)
+    end
 
     sections["regularizer"] = haskey(raw, "regularizer") ?
         _validate_regularizer_section(raw["regularizer"]) : nothing
@@ -829,6 +980,53 @@ function read_deck(path::AbstractString)
     sections["optimizer"] = _validate_optimizer_section(get(raw, "optimizer", Dict{String,Any}()))
 
     sections["output"] = haskey(raw, "output") ? _validate_output_section(raw["output"]) : nothing
+
+    # D40 items 10-11: the four cross-section loud errors, then min_usable_fraction's default,
+    # over every channel's own data table (the shorthand counts as one channel, "data").
+    regions_given = sections["fit_regions"] !== nothing
+    data_by_where = is_channel_form ?
+        [("channel.$(e["name"]).data", e["data"]) for e in channel_entries] :
+        [("data", sections["data"])]
+
+    for (where, data) in data_by_where
+        (haskey(data, "t_range_ns") && regions_given) && throw(ArgumentError(
+            "read_deck: section \"$where\" gives \"t_range_ns\", and the deck gives " *
+            "[[fit.regions]]; regions supersede t_range_ns, and a deck whose stated time window " *
+            "would be silently ignored is refused instead"))
+        for k in ("t_shift_ns", "t_shift_s", "min_usable_fraction")
+            (haskey(data, k) && !regions_given) && throw(ArgumentError(
+                "read_deck: section \"$where\" gives \"$k\" without [[fit.regions]]; without " *
+                "regions nothing is averaged and the value would be silently ignored"))
+        end
+    end
+
+    if regions_given
+        for region in sections["fit_regions"]
+            interval = region["interval"]
+            isempty(interval) && continue
+            haskey(sections["fit_intervals"], interval) && throw(ArgumentError(
+                "read_deck: [[fit.regions]] names interval \"$interval\", which [fit.intervals] " *
+                "also declares"))
+        end
+    end
+
+    nchannels_declared = is_channel_form ? length(channel_entries) : 1
+    (nchannels_declared >= 2 && !regions_given) && throw(ArgumentError(
+        "read_deck: a deck with $nchannels_declared channels needs [[fit.regions]]: two cameras " *
+        "never share a time axis, so both are averaged onto one (OQ-34)"))
+
+    if regions_given
+        for (where, data) in data_by_where
+            if haskey(data, "min_usable_fraction")
+                v = data["min_usable_fraction"]
+                v isa Real || throw(ArgumentError(
+                    "read_deck: \"$where.min_usable_fraction\" must be a number"))
+                data["min_usable_fraction"] = Float64(v)
+            else
+                data["min_usable_fraction"] = 0.5
+            end
+        end
+    end
 
     return Deck(DECK_VERSION, sections)
 end
@@ -1100,48 +1298,98 @@ end
 # ------------------------------------------------------------------------------------------
 
 """
-    build_problem(deck::Deck) -> (FitProblem, AbstractOptimizer, Vector{Float64})
+    build_problem(deck::Deck) -> (AbstractFitProblem, AbstractOptimizer, Vector{Float64})
 
-Builds the actual Julia objects a validated `Deck` describes (spec D33): reads and crops the data
-(`[data]`), builds the probe and collection (`[geometry]`, fixed), the named intervals and fitted
-variables (`[fit.intervals]`, `[fit.variables]`), the template plasma and the instrument chain
-(`[plasma]`, `[instrument]`, every `_VarRef` substituted by its placeholder value and recorded as a
-binding), the `Experiment`, the `ParameterSpec` (which resolves every binding for real, D9, and
-rebuilds the trace with the union of leaves), the regularizer (`[regularizer]`) and the optimizer
-(`[optimizer]`). Returns the `FitProblem`, the optimizer, and the start vector `flatten(pspec)`.
+Builds the actual Julia objects a validated `Deck` describes (spec D33, D40): for each channel of
+`_channel_list(deck.sections)`, in order, reads and crops its data (`[data]`/`[channel.<n>.data]`),
+averages it onto `[[fit.regions]]` when given, and builds its probe and collection
+(`[geometry]`/`[channel.<n>.geometry]`, fixed). With one channel the trace axis is that channel's
+own averaged `t̄` (D14), bitwise unchanged from before chunk 7; with two or more it is the pooled
+mean of every channel's window counts (D39), and every channel's data is rebuilt on it. Builds the
+named intervals and fitted variables (`[fit.intervals]`, `[fit.variables]`, shared), the template
+plasma (`[plasma]`, shared) and each channel's own instrument chain
+(`[instrument]`/`[channel.<n>.instrument]`, every `_VarRef` substituted by its placeholder value
+and recorded as a binding -- the shorthand's five-element target, the channel form's named-tuple
+target carrying `channel`), one shared `ParameterSpec` over every channel's `Experiment` (which
+resolves every binding for real, D9, and rebuilds the trace with the union of leaves), the shared
+regularizer (`[regularizer]`) and the optimizer (`[optimizer]`). Returns a plain `FitProblem` for
+one channel or a `JointFitProblem` for two or more, the optimizer, and the start vector
+`flatten(pspec)`.
 
-Spec D33.
+Spec D33, D40.
 """
 function build_problem(deck::Deck)
     s = deck.sections
-    data0 = read_streak(s["data"]["file"])
-    regions_given = haskey(s["data"], "regions")
-    data1 = _crop_streak(data0, get(s["data"], "lambda_range_nm", nothing),
-        regions_given ? nothing : get(s["data"], "t_range_ns", nothing))
+    is_channel_form = haskey(s, "channels")
+    chan_list = _channel_list(s)
+    nchannels = length(chan_list)
 
     # Route B's master axis, the data averaged onto it rather than the model mapped to the
-    # detector's bins (OQ-34, decided 2026-09-21; D13-D16). Only the time axis is averaged, and
-    # this is the only place average_regions is called from the deck.
-    regions = regions_given ? _build_averaging_regions(s["data"]["regions"]) : AveragingRegion[]
-    data = regions_given ? average_regions(data1, regions; _averaging_kwargs(s["data"])...) : data1
+    # detector's bins (OQ-34, decided 2026-09-21; D13-D16, D39). Only the time axis is averaged,
+    # and this is the only place average_regions is called from the deck.
+    regions_given = s["fit_regions"] !== nothing
+    regions = regions_given ? _build_averaging_regions(s["fit_regions"]) : AveragingRegion[]
 
-    probe, collection = _build_geometry(s["geometry"])
+    chan_data = Vector{StreakData}(undef, nchannels)
+    chan_probe = Vector{Any}(undef, nchannels)
+    chan_collection = Vector{Any}(undef, nchannels)
+    for c in 1:nchannels
+        chan = chan_list[c]
+        data0 = read_streak(chan["data"]["file"])
+        data1 = _crop_streak(data0, get(chan["data"], "lambda_range_nm", nothing),
+            regions_given ? nothing : get(chan["data"], "t_range_ns", nothing))
+        chan_data[c] = regions_given ?
+            average_regions(data1, regions; _averaging_kwargs(chan["data"])...) : data1
+        chan_probe[c], chan_collection[c] = _build_geometry(chan["geometry"])
+    end
 
-    axis = data.t
+    # D39: with one channel the axis is that channel's own t̄, the very expression used before
+    # chunk 7 (Pitfall 27). With two or more, the pooled mean over every channel's window counts,
+    # a plain loop in channel order (never `sum` over a generator, so the summation order is
+    # fixed and reproducible).
+    axis = if nchannels == 1
+        chan_data[1].t
+    else
+        n_out = length(chan_data[1].t)
+        a = Vector{Float64}(undef, n_out)
+        for k in 1:n_out
+            num = 0.0
+            den = 0
+            for c in 1:nchannels
+                wc = chan_data[c].meta["regions_window_counts"]
+                num += wc[k] * chan_data[c].t[k]
+                den += wc[k]
+            end
+            a[k] = num / den
+        end
+        a
+    end
+
+    for c in 1:nchannels
+        d = chan_data[c]
+        chan_data[c] = StreakData(; lambda_m=d.lambda, t_s=axis, image=d.image, sigma=d.sigma,
+            mask=d.mask, meta=d.meta)
+    end
+
+    for c in 1:nchannels
+        d = chan_data[c]
+        (d.mask !== nothing && !any(d.mask)) && throw(ArgumentError(
+            "build_problem: channel \"$(chan_list[c]["name"])\" has no usable pixel (its mask " *
+            "excludes every pixel)"))
+    end
+
     axis_unit = Symbol(s["fit"]["axis_unit"])
     factor = axis_unit === :ns ? 1e-9 : 1.0
 
-    # D15 amendment 1: a region naming an interval [fit.intervals] also declares is a loud error;
-    # otherwise the region's own interval is synthesized into a LOCAL copy of fit_intervals, never
-    # into deck.sections (effective_deck re-serializes deck.sections as they stand, D15 amendment).
+    # D15 amendment 1, D40 (correction): the interval-conflict check now runs in read_deck, over
+    # the shared [[fit.regions]]; build_problem keeps only the local synthesis, into a LOCAL copy
+    # of fit_intervals, never into deck.sections (effective_deck re-serializes deck.sections as
+    # they stand).
     fit_intervals = s["fit_intervals"]
     if !isempty(regions)
         synthesized = Dict{String,Any}()
         for region in regions
             isempty(region.interval) && continue
-            haskey(fit_intervals, region.interval) && throw(ArgumentError(
-                "read_deck: \"data.regions\" names interval \"$(region.interval)\", which " *
-                "\"fit.intervals\" also declares"))
             synthesized[region.interval] = Dict{String,Any}("t_range_s" => Any[region.lo, region.hi])
         end
         fit_intervals = merge(fit_intervals, synthesized)
@@ -1170,38 +1418,59 @@ function build_problem(deck::Deck)
 
     template, bindings_plasma = _build_template(s["plasma"], vals)
 
-    pending = Tuple{String,Any,Symbol,Int,Float64,String}[]
-    effects = AbstractInstrumentEffect[]
-    for key in ("k_smearing", "gradient_smearing", "wavelength_calibration", "spectral_irf", "temporal_irf",
-                "sensitivity")
-        haskey(s["instrument"], key) || continue
-        regname = _INSTRUMENT_SINGLE_REGISTRY_NAME[key]
-        push!(effects, _build_effect_and_pending!(pending, regname, s["instrument"][key], vals, template))
-    end
-    for bg in get(s["instrument"], "background", Any[])
-        bg_fields = Dict(k => v for (k, v) in bg if k != "type")
-        push!(effects, _build_effect_and_pending!(pending, bg["type"], bg_fields, vals, template))
+    pending_by_channel = Vector{Vector{Tuple{String,Any,Symbol,Int,Float64,String}}}(undef, nchannels)
+    effects_by_channel = Vector{Tuple}(undef, nchannels)
+    for c in 1:nchannels
+        chan = chan_list[c]
+        pending = Tuple{String,Any,Symbol,Int,Float64,String}[]
+        effects = AbstractInstrumentEffect[]
+        for key in ("k_smearing", "gradient_smearing", "wavelength_calibration", "spectral_irf",
+                    "temporal_irf", "sensitivity")
+            haskey(chan["instrument"], key) || continue
+            regname = _INSTRUMENT_SINGLE_REGISTRY_NAME[key]
+            push!(effects, _build_effect_and_pending!(pending, regname, chan["instrument"][key], vals, template))
+        end
+        for bg in get(chan["instrument"], "background", Any[])
+            bg_fields = Dict(k => v for (k, v) in bg if k != "type")
+            push!(effects, _build_effect_and_pending!(pending, bg["type"], bg_fields, vals, template))
+        end
+        pending_by_channel[c] = pending
+        effects_by_channel[c] = Tuple(effects)
     end
 
     trace0 = PlasmaTrace(template; axis_name=:t, t_s=axis, leaves=())
-    expt0 = Experiment(; trace=trace0, probe=probe, collection=collection, lambda_m=data.lambda,
-        effects=Tuple(effects))
+    expt0s = [Experiment(; trace=trace0, probe=chan_probe[c], collection=chan_collection[c],
+        lambda_m=chan_data[c].lambda, effects=effects_by_channel[c]) for c in 1:nchannels]
 
     bindings_instrument = Pair{String,Any}[]
-    for (nm, effect, field, elem, factor, unit_key) in pending
-        idx = findfirst(e -> e === effect, expt0.effects)
-        target = (idx, field, elem, factor, unit_key)
-        push!(bindings_instrument, nm => target)
+    for c in 1:nchannels
+        for (nm, effect, field, elem, fac, unit_key) in pending_by_channel[c]
+            idx = findfirst(e -> e === effect, expt0s[c].effects)
+            target = is_channel_form ?
+                (channel=c, effect=idx, field=field, element=elem, factor=fac, unit_key=unit_key) :
+                (idx, field, elem, fac, unit_key)
+            push!(bindings_instrument, nm => target)
+        end
     end
 
-    pspec = ParameterSpec(expt0; variables=vars, dependents=dep_pairs, intervals=ivals,
+    pspec = ParameterSpec(Tuple(expt0s); variables=vars, dependents=dep_pairs, intervals=ivals,
         bindings=vcat(bindings_plasma, bindings_instrument), axis_unit=axis_unit)
 
-    working_expt = Experiment(; trace=pspec.trace, probe=expt0.probe, collection=expt0.collection,
-        lambda_m=expt0.lambda, effects=expt0.effects, prefactor=expt0.prefactor)
+    working = [Experiment(; trace=pspec.trace, probe=expt0s[c].probe, collection=expt0s[c].collection,
+        lambda_m=expt0s[c].lambda, effects=expt0s[c].effects, prefactor=expt0s[c].prefactor)
+        for c in 1:nchannels]
 
     regularizer = _build_regularizer(s["regularizer"], pspec)
-    problem = FitProblem(working_expt, pspec, data; regularizer=regularizer, scheduler=:auto)
+
+    problem = if nchannels == 1
+        FitProblem(working[1], pspec, chan_data[1]; regularizer=regularizer, scheduler=:auto,
+            channel=1, name=chan_list[1]["name"])
+    else
+        weights = Float64[c["weight"] for c in chan_list]
+        fitprobs = Tuple(FitProblem(working[c], pspec, chan_data[c]; scheduler=:auto, channel=c,
+            name=chan_list[c]["name"]) for c in 1:nchannels)
+        JointFitProblem(fitprobs; weights=weights, regularizer=regularizer)
+    end
 
     optimizer = _build_optimizer(s["optimizer"])
     start = flatten(pspec)
@@ -1212,42 +1481,68 @@ end
 # effective_deck
 # ------------------------------------------------------------------------------------------
 
-function _binding_description(b::Binding)
+"""
+    _binding_description(b::Binding, channel_names::Union{Nothing,Vector{String}} = nothing)
+
+One binding's text under `[fit.variables.<name>].bindings` (D9, D10, D40 amendment 5).
+`channel_names === nothing` in the shorthand: the text is unchanged from before chunk 7. In the
+channel form, an `:effect` binding's text gains the prefix `channel.<channel_names[b.channel]>.`
+(`channel.iaw.instrument.effect[3].offset (unit_key=lambda_offset_nm)`); a `:leaf` binding's text
+never changes, since every channel shares one plasma.
+"""
+function _binding_description(b::Binding, channel_names::Union{Nothing,Vector{String}}=nothing)
     b.kind === :leaf && return string(b.path) * (isempty(b.unit_key) ? "" : " (unit_key=$(b.unit_key))")
     suffix = b.element == 0 ? "" : "[$(b.element)]"
-    return "instrument.effect[$(b.effect)].$(b.field)$suffix" *
+    prefix = channel_names === nothing ? "" : "channel.$(channel_names[b.channel])."
+    return "$(prefix)instrument.effect[$(b.effect)].$(b.field)$suffix" *
            (isempty(b.unit_key) ? "" : " (unit_key=$(b.unit_key))")
 end
 
 """
-    effective_deck(deck::Deck, problem::FitProblem, optimizer::AbstractOptimizer) -> String
+    effective_deck(deck::Deck, problem::AbstractFitProblem, optimizer::AbstractOptimizer) -> String
 
-The effective configuration (`conventions.md` 7.5, spec D33): `deck`'s own validated sections
-(every default already filled by `read_deck`), re-serialized as TOML, with `deck_version` written
-first and three things the input deck does not say added: every variable's resolved binding(s)
-(under its own `[fit.variables.<name>]` table, `bindings`, one string per binding, D9's
-leaf-path-and-unit-keyword or effect-parameter form), every dependent's expression text (already
-present, verbatim, under `[fit.dependent]`), and the axis unit (`[fit].axis_unit`, already filled
-in by `read_deck`'s own default). A fit is reproducible from this string alone (7.5): re-reading it
-with `read_deck` succeeds and yields the same `Deck` (DK1).
+The effective configuration (`conventions.md` 7.5, spec D33, D40 amendment 5): `deck`'s own
+validated sections (every default already filled by `read_deck`), re-serialized as TOML, with
+`deck_version` written first and three things the input deck does not say added: every variable's
+resolved binding(s) (under its own `[fit.variables.<name>]` table, `bindings`, one string per
+binding, D9's leaf-path-and-unit-keyword or effect-parameter form, channel-prefixed in the channel
+form), every dependent's expression text (already present, verbatim, under `[fit.dependent]`), and
+the axis unit (`[fit].axis_unit`, already filled in by `read_deck`'s own default). The shorthand
+writes exactly what it always has, plus `[[fit.regions]]` when given; the channel form writes
+`channels`, `channel` (one table per name, weight always explicit) and no bare `data`, `geometry`
+or `instrument`. A fit is reproducible from this string alone (7.5): re-reading it with `read_deck`
+succeeds and yields the same `Deck` (DK1, CD6).
 
-Spec D33.
+Spec D33, D40.
 """
-function effective_deck(deck::Deck, problem::FitProblem, ::AbstractOptimizer)
+function effective_deck(deck::Deck, problem::AbstractFitProblem, ::AbstractOptimizer)
     s = deck.sections
     out = Dict{String,Any}()
     out["deck_version"] = deck.deck_version
-    out["data"] = s["data"]
-    out["geometry"] = s["geometry"]
+
+    is_channel_form = haskey(s, "channels")
+    channel_names = nothing
+    if is_channel_form
+        names = String[c["name"] for c in s["channels"]]
+        channel_names = names
+        out["channels"] = names
+        out["channel"] = Dict{String,Any}(
+            c["name"] => Dict{String,Any}("weight" => c["weight"], "data" => c["data"],
+                "geometry" => c["geometry"], "instrument" => c["instrument"])
+            for c in s["channels"])
+    else
+        out["data"] = s["data"]
+        out["geometry"] = s["geometry"]
+        out["instrument"] = s["instrument"]
+    end
     out["plasma"] = s["plasma"]
-    out["instrument"] = s["instrument"]
     s["regularizer"] === nothing || (out["regularizer"] = s["regularizer"])
     out["optimizer"] = s["optimizer"]
     s["output"] === nothing || (out["output"] = s["output"])
 
     bindings_by_name = Dict{String,Vector{String}}()
     for b in problem.pspec.bindings
-        push!(get!(bindings_by_name, b.name, String[]), _binding_description(b))
+        push!(get!(bindings_by_name, b.name, String[]), _binding_description(b, channel_names))
     end
     variables = Dict{String,Any}()
     for (nm, entry) in s["fit_variables"]
@@ -1255,10 +1550,12 @@ function effective_deck(deck::Deck, problem::FitProblem, ::AbstractOptimizer)
         v["bindings"] = haskey(bindings_by_name, nm) ? Any[bindings_by_name[nm]...] : String[]
         variables[nm] = v
     end
-    out["fit"] = Dict{String,Any}(
+    fit_out = Dict{String,Any}(
         "sigma" => s["fit"]["sigma"], "axis_unit" => s["fit"]["axis_unit"],
         "intervals" => s["fit_intervals"], "variables" => variables,
         "dependent" => s["fit_dependent"])
+    s["fit_regions"] === nothing || (fit_out["regions"] = s["fit_regions"])
+    out["fit"] = fit_out
 
     toml_value = _to_toml_value(out)
     buf = IOBuffer()
@@ -1274,14 +1571,16 @@ end
     fit(path::AbstractString) -> FitResult
     fit(deck::Deck) -> FitResult
 
-The driver (spec D33, `conventions.md` 6.6): reads the deck (if given a path), builds the
-`FitProblem` and the optimizer (`build_problem`), pins BLAS to one thread (`pin_blas_threads()`,
-called exactly once -- `fit` is the driver `conventions.md` 6.6 has been waiting for since Phase
-2), solves, writes the result and the effective deck into `[output].dir`
-(`<dir>/result.jld2`, `<dir>/effective_deck.toml`, creating the directory if needed), and returns
-the `FitResult`.
+The driver (spec D33, D40, `conventions.md` 6.6): reads the deck (if given a path), builds the
+problem and the optimizer (`build_problem`; a plain `FitProblem` for one channel, a
+`JointFitProblem` for two or more), pins BLAS to one thread (`pin_blas_threads()`, called exactly
+once -- `fit` is the driver `conventions.md` 6.6 has been waiting for since Phase 2), solves,
+writes the result and the effective deck into `[output].dir` (`<dir>/result.jld2`,
+`<dir>/effective_deck.toml`, creating the directory if needed), and returns the `FitResult`.
+`write_result` is always given the problem, so `fit`'s own result files always carry a residual and
+a mask per channel.
 
-Spec D33.
+Spec D33, D40.
 """
 function fit(deck::Deck)
     deck.sections["output"] === nothing && throw(ArgumentError(
@@ -1292,7 +1591,7 @@ function fit(deck::Deck)
     dir = deck.sections["output"]["dir"]
     mkpath(dir)
     eff = effective_deck(deck, problem, optimizer)
-    write_result(joinpath(dir, "result.jld2"), result; deck=eff, source="fit")
+    write_result(joinpath(dir, "result.jld2"), result; problem=problem, deck=eff, source="fit")
     open(joinpath(dir, "effective_deck.toml"), "w") do io
         write(io, eff)
     end
