@@ -53,21 +53,32 @@ end
 
 """
     _with_weight(problem::FitProblem, weight::Real) -> FitProblem
+    _with_weight(jp::JointFitProblem, weight::Real) -> JointFitProblem
 
 `problem`, with its `Regularizer`'s global weight (Lambda) replaced by `weight` and every term
 otherwise unchanged -- the one thing `weight_scan` (D31) varies from one fit to the next.
 Requires `problem.regularizer !== nothing`. Not part of D31's own signature; Level 3's helper,
 flagged under rule 11 zero, the mechanism the whole scan is built from.
+
+**One method per type (Step 4.A.3a, D34)**: the `JointFitProblem` method keeps the same channels
+and weights and replaces only the shared regularizer.
 """
 function _with_weight(problem::FitProblem, weight::Real)
     reg = problem.regularizer
     newreg = Regularizer(reg.terms, Float64(weight), reg.nrows)
     return FitProblem(problem.experiment, problem.pspec, problem.data, newreg, problem.mask,
-        problem.npixels, problem.sigma, problem.pixel_index, problem.scheduler)
+        problem.npixels, problem.sigma, problem.pixel_index, problem.scheduler, problem.channel,
+        problem.name)
+end
+
+function _with_weight(jp::JointFitProblem, weight::Real)
+    reg = jp.regularizer
+    newreg = Regularizer(reg.terms, Float64(weight), reg.nrows)
+    return JointFitProblem(jp.channels, jp.weights, jp.pspec, newreg, jp.npixels, jp.row_ranges)
 end
 
 """
-    weight_scan(problem::FitProblem, weights::AbstractVector{<:Real}, optimizer::AbstractOptimizer;
+    weight_scan(problem::AbstractFitProblem, weights::AbstractVector{<:Real}, optimizer::AbstractOptimizer;
                 start = flatten(problem.pspec), truth = nothing) -> WeightScanResult
 
 The L-curve as a diagnostic (foo2026 Section IV.A, Fig. 1; [OQ-19](../../dev/open_questions.md#oq-19)).
@@ -100,7 +111,7 @@ spawns a process or a thread (WS10).
 
 Spec D31.
 """
-function weight_scan(problem::FitProblem, weights::AbstractVector{<:Real}, optimizer::AbstractOptimizer;
+function weight_scan(problem::AbstractFitProblem, weights::AbstractVector{<:Real}, optimizer::AbstractOptimizer;
     start::AbstractVector=flatten(problem.pspec),
     truth::Union{Nothing,Dict{String,Vector{Float64}}}=nothing)
     problem.regularizer === nothing && throw(ArgumentError(

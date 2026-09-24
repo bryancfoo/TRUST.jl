@@ -334,7 +334,12 @@ must share one `factor` (D9's tightening of `conventions.md` 7.6). The two kinds
 that `ParameterSpec.bindings` can be one homogeneous `Vector`; the fields the other kind does not
 use hold harmless placeholders (`0`, `Symbol("")`, an unused dummy `LeafPath`), never read.
 
-Spec D9.
+`channel` (Step 4.A.3a, D32) is meaningful only for an `:effect` binding: which channel's
+`Experiment` the binding's `effect` index counts into (`_resolve_bindings` writes `0` for a
+`:leaf` binding, since every channel shares the one plasma). The ten-argument constructor below
+sets `channel = 1`, so a hand-built `Binding` from before this chunk keeps compiling.
+
+Spec D9, D32.
 """
 struct Binding
     name::String
@@ -347,7 +352,11 @@ struct Binding
     element::Int
     factor::Float64
     unit_key::String
+    channel::Int
 end
+
+Binding(name, slot, kind, path, row, effect, field, element, factor, unit_key) =
+    Binding(name, slot, kind, path, row, effect, field, element, factor, unit_key, 1)
 
 const _DUMMY_LEAF_PATH = LeafPath(["_"])
 
@@ -368,7 +377,8 @@ function _check_unit_factor!(name_factor::Dict{String,Tuple{Float64,String}}, na
 end
 
 """
-    _resolve_bindings(bindings_input, variables, names, nvar, dep_tv, template, trace, effects) -> Vector{Binding}
+    _resolve_bindings(bindings_input, variables, names, nvar, dep_tv, template, trace,
+                      effects_by_channel) -> Vector{Binding}
 
 Resolve every `name => target` pair into a `Binding`, checking, in order: the name is a declared
 variable or dependent; a probe/collection key is refused naming `WavelengthCalibration`; the target leaf or
@@ -377,11 +387,21 @@ effect parameter exists; the one-conversion-factor rule (D9); the scalar-instrum
 for a leaf the trace does not yet tabulate; `ParameterSpec`'s constructor fills it in after the
 trace rebuild.
 
-Spec D9.
+`effects_by_channel` is a `Tuple` of each channel's `Experiment.effects` (length 1 outside a joint
+spec). `target` may be (Step 4.A.3a, D32): a leaf key string (unchanged, `channel = 0`, D32: every
+channel shares the plasma); one of the three original `Tuple` forms `(effect, field)`,
+`(effect, field, element)` or `(effect, field, element, factor, unit_key)` (unchanged, `channel =
+1`, resolved against `effects_by_channel[1]`); or a `NamedTuple` with required `channel`, `effect`
+and `field` and optional `element` (`0`), `factor` (`1.0`) and `unit_key` (`""`), resolved against
+`effects_by_channel[target.channel]` -- an unknown key, a missing required key, or a channel
+outside `1:length(effects_by_channel)` is a loud error naming the variable (PM29's three errors).
+
+Spec D9, D32.
 """
 function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
                             names::Dict{String,Int}, nvar::Int, dep_tv::AbstractVector{Bool},
-                            template::Plasma, trace::PlasmaTrace, effects::Tuple)
+                            template::Plasma, trace::PlasmaTrace, effects_by_channel::Tuple)
+    nchannels = length(effects_by_channel)
     pairs_list = collect(bindings_input)
     bindings = Vector{Binding}(undef, length(pairs_list))
     name_factor = Dict{String,Tuple{Float64,String}}()
@@ -411,13 +431,44 @@ function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
             end
             leaf_owner[si_path] = name
             row = _leaf_row(trace, path)
-            bindings[i] = Binding(name, slot, :leaf, path, row, 0, Symbol(""), 0, factor, unit_key)
+            bindings[i] = Binding(name, slot, :leaf, path, row, 0, Symbol(""), 0, factor, unit_key, 0)
+        elseif target isa NamedTuple
+            allowed_keys = (:channel, :effect, :field, :element, :factor, :unit_key)
+            for k in keys(target)
+                k in allowed_keys || throw(ArgumentError(
+                    "binding \"$name\": unknown key :$k in the named-tuple target; valid keys are $allowed_keys"))
+            end
+            (haskey(target, :channel) && haskey(target, :effect) && haskey(target, :field)) || throw(ArgumentError(
+                "binding \"$name\": the named-tuple target requires :channel, :effect and :field"))
+            channel = Int(target.channel)
+            (1 <= channel <= nchannels) || throw(ArgumentError(
+                "binding \"$name\": channel $channel is out of range 1:$nchannels"))
+            effect_idx = Int(target.effect)
+            field = Symbol(target.field)
+            element = haskey(target, :element) ? Int(target.element) : 0
+            factor = haskey(target, :factor) ? Float64(target.factor) : 1.0
+            unit_key = haskey(target, :unit_key) ? String(target.unit_key) : ""
+            effects = effects_by_channel[channel]
+            (1 <= effect_idx <= length(effects)) || throw(ArgumentError(
+                "binding \"$name\": effect index $effect_idx is out of range 1:$(length(effects)) for channel $channel"))
+            e = effects[effect_idx]
+            pnt = parameters(e)
+            isempty(pnt) && throw(ArgumentError(
+                "\"$name\" cannot be bound to $(typeof(e).name.name): it has no fittable parameters"))
+            haskey(pnt, field) || throw(ArgumentError(
+                "\"$name\": $(typeof(e).name.name) has no parameter \"$field\"; valid names are $(keys(pnt))"))
+            is_tv = slot <= nvar ? variables[slot].time_varying : dep_tv[slot-nvar]
+            is_tv && throw(ArgumentError(
+                "\"$name\" is time-varying and cannot be bound to an instrument parameter"))
+            _check_unit_factor!(name_factor, name, factor, unit_key)
+            bindings[i] = Binding(name, slot, :effect, _DUMMY_LEAF_PATH, 0, effect_idx, field, element, factor, unit_key, channel)
         else
             effect_idx = Int(target[1])
             field = Symbol(target[2])
             element = length(target) >= 3 ? Int(target[3]) : 0
             factor = length(target) >= 4 ? Float64(target[4]) : 1.0
             unit_key = length(target) >= 5 ? String(target[5]) : ""
+            effects = effects_by_channel[1]
             (1 <= effect_idx <= length(effects)) || throw(ArgumentError(
                 "binding \"$name\": effect index $effect_idx is out of range 1:$(length(effects))"))
             e = effects[effect_idx]
@@ -430,7 +481,7 @@ function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
             is_tv && throw(ArgumentError(
                 "\"$name\" is time-varying and cannot be bound to an instrument parameter"))
             _check_unit_factor!(name_factor, name, factor, unit_key)
-            bindings[i] = Binding(name, slot, :effect, _DUMMY_LEAF_PATH, 0, effect_idx, field, element, factor, unit_key)
+            bindings[i] = Binding(name, slot, :effect, _DUMMY_LEAF_PATH, 0, effect_idx, field, element, factor, unit_key, 1)
         end
     end
     return bindings
@@ -507,7 +558,7 @@ function _rebuild_trace_with_bindings(trace::PlasmaTrace, bindings::Vector{Bindi
     for (i, b) in enumerate(bindings)
         if b.kind === :leaf
             new_bindings[i] = Binding(b.name, b.slot, b.kind, b.path, row_of[string(b.path)],
-                b.effect, b.field, b.element, b.factor, b.unit_key)
+                b.effect, b.field, b.element, b.factor, b.unit_key, b.channel)
         else
             new_bindings[i] = b
         end
@@ -645,36 +696,52 @@ function _probe_initial_values(variables::Vector{FittedVariable}, dependents::Tu
 end
 
 """
+    ParameterSpec(expts::Tuple{Vararg{Experiment}}; variables, dependents = (), intervals = (),
+                  bindings, axis_unit::Symbol = :ns)
     ParameterSpec(expt::Experiment; variables, dependents = (), intervals = (), bindings,
                   axis_unit::Symbol = :ns)
 
-Build the parameter layer over `expt`. `variables` an iterable of `FittedVariable`; `dependents`
-an iterable of `name => expression_text` pairs; `intervals` an iterable of `FitInterval`;
-`bindings` an iterable of `name => target` pairs, `target` a boundary leaf key string
-(`"electrons.e.T_eV"`) or an `(effect_index, field)` / `(effect_index, field, element)` tuple.
-`axis_unit` (`:ns` or `:s`) is the unit `t` means inside a dependent and the regularizer's
-derivatives are taken in (D8) -- **not given an explicit keyword by D10's abbreviated
-constructor signature; Level 3's addition, flagged under rule 11 zero** (chunk 4 report), since
-`PlasmaTrace` itself does not retain which boundary keyword built its axis.
+Build the parameter layer over one or more channels' experiments (Step 4.A.3a, D32); the
+single-`Experiment` form is `ParameterSpec((expt,); ...)`, bitwise. `variables` an iterable of
+`FittedVariable`; `dependents` an iterable of `name => expression_text` pairs; `intervals` an
+iterable of `FitInterval`; `bindings` an iterable of `name => target` pairs, `target` a boundary
+leaf key string (`"electrons.e.T_eV"`, meaning channel 0 -- every channel shares the plasma), one
+of the original `(effect_index, field)` / `(effect_index, field, element)` /
+`(effect_index, field, element, factor, unit_key)` tuples (meaning channel 1), or a `NamedTuple`
+`(channel, effect, field[, element, factor, unit_key])` naming any channel (D32). `axis_unit`
+(`:ns` or `:s`) is the unit `t` means inside a dependent and the regularizer's derivatives are
+taken in (D8) -- **not given an explicit keyword by D10's abbreviated constructor signature;
+Level 3's addition, flagged under rule 11 zero** (chunk 4 report), since `PlasmaTrace` itself does
+not retain which boundary keyword built its axis.
+
+Every `expts[c].trace` must be `=== expts[1].trace` (D32: one trace object, OQ-33) -- a loud error
+naming `c` otherwise.
 
 Order of construction (D10): validate the variables; resolve the intervals (already done by the
 caller, D5); parse the dependents and topologically sort them (D7, D8), checking interval reads
-(D39); resolve every binding (D9); rebuild the trace with the union of leaves (D9); build the
-index map (D11); probe-evaluate the dependents at the initial values over every bin (D7 item 4,
-PM26).
+(D39); resolve every binding against the shared trace and each channel's own effects (D9, D32);
+rebuild the trace with the union of leaves (D9); build the index map (D11); probe-evaluate the
+dependents at the initial values over every bin (D7 item 4, PM26).
 
-Spec D10.
+Spec D10, D32.
 """
-function ParameterSpec(expt::Experiment; variables, dependents=(), intervals=(), bindings,
-                        axis_unit::Symbol=:ns)
+function ParameterSpec(expts::Tuple{Vararg{Experiment}}; variables, dependents=(), intervals=(),
+                        bindings, axis_unit::Symbol=:ns)
+    isempty(expts) && throw(ArgumentError("ParameterSpec: at least one experiment is required"))
     haskey(_AXIS_UNIT_KEYS, axis_unit) || throw(ArgumentError(
         "ParameterSpec: axis_unit must be :ns or :s; got :$axis_unit"))
     factor = Float64(getfield(getfield(ACCEPTED_UNITS, :t), _AXIS_UNIT_KEYS[axis_unit]))
 
+    trace0 = expts[1].trace
+    for c in 2:length(expts)
+        expts[c].trace === trace0 || throw(ArgumentError(
+            "ParameterSpec: experiment $c's trace is not === experiment 1's; every channel must " *
+            "share one trace object"))
+    end
+
     vars = collect(FittedVariable, variables)
     ivals = collect(FitInterval, intervals)
     nvar = length(vars)
-    trace0 = expt.trace
     nt = nbins(trace0)
 
     seen_names = Set{String}()
@@ -695,7 +762,7 @@ function ParameterSpec(expt::Experiment; variables, dependents=(), intervals=(),
     dep_tv = _time_varying_transitively(vars, dep_tuple, nvar)
 
     resolved_bindings = _resolve_bindings(bindings, vars, names, nvar, dep_tv, trace0.template,
-        trace0, expt.effects)
+        trace0, Tuple(e.effects for e in expts))
 
     trace, resolved_bindings = _rebuild_trace_with_bindings(trace0, resolved_bindings)
 
@@ -708,6 +775,12 @@ function ParameterSpec(expt::Experiment; variables, dependents=(), intervals=(),
     return ParameterSpec(vars, dep_tuple, ivals, resolved_bindings, names,
         nvar + ndep, Vector{FT}(trace.axis), axis_boundary, String(axis_unit), offsets, widths,
         bin_entries, bin_slots, global_entries, global_slots, ntheta, trace)
+end
+
+function ParameterSpec(expt::Experiment; variables, dependents=(), intervals=(), bindings,
+                        axis_unit::Symbol=:ns)
+    return ParameterSpec((expt,); variables=variables, dependents=dependents, intervals=intervals,
+        bindings=bindings, axis_unit=axis_unit)
 end
 
 # ------------------------------------------------------------------------------------------
@@ -860,10 +933,18 @@ function _rebuild_effect(e::AbstractInstrumentEffect, bs::Vector{Binding}, vals:
 end
 
 """
-    unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector) -> Experiment
+    unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector; channel::Int = 1) -> Experiment
 
 Undo the transform, evaluate the dependents bin by bin, write the trace table's rows and each
 bound effect through `reconstruct`, and return the resulting `Experiment` (D12).
+
+**`channel` (Step 4.A.3a, D33) selects which channel's effects `expt` is rebuilt against**: leaf
+bindings are applied exactly as today (every channel shares the plasma, D32), but only `:effect`
+bindings with `b.channel == channel` rebuild `expt`'s effects -- so a variable bound only into
+another channel never touches this one's, silently and by construction. `channel = 1` alone for a
+single-channel fit. **Every `unflatten(problem.experiment, problem.pspec, ...)` call on a
+`FitProblem` must pass `channel = problem.channel`** (Pitfall 23); the calls in `src/` are listed
+in the chunk 6 report.
 
 **`expt` must be built from `pspec.trace`** -- the same `PlasmaTrace` object `ParameterSpec`'s
 constructor produced (including any leaves it added), typically `Experiment(; trace = pspec.trace,
@@ -880,7 +961,7 @@ afterwards still must not (TR14, XP13).
 
 Spec D12.
 """
-function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector)
+function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector; channel::Int=1)
     length(theta) == pspec.ntheta || throw(ArgumentError(
         "unflatten: theta has length $(length(theta)), but this ParameterSpec has ntheta = $(pspec.ntheta)"))
     T = eltype(theta)
@@ -922,7 +1003,7 @@ function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector
         end
     end
 
-    has_effect_binding = any(b -> b.kind === :effect, pspec.bindings)
+    has_effect_binding = any(b -> b.kind === :effect && b.channel == channel, pspec.bindings)
     widened = work_trace !== pspec.trace
 
     if !has_effect_binding && !widened
@@ -931,7 +1012,7 @@ function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector
 
     new_effects = ntuple(length(expt.effects)) do ei
         e = expt.effects[ei]
-        bs = Binding[b for b in pspec.bindings if b.kind === :effect && b.effect == ei]
+        bs = Binding[b for b in pspec.bindings if b.kind === :effect && b.effect == ei && b.channel == channel]
         isempty(bs) ? e : _rebuild_effect(e, bs, vals)
     end
 

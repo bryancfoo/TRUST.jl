@@ -715,3 +715,49 @@ end
     end
     @info "JT17 worst relative error" worst worst_col
 end
+
+# ------------------------------------------------------------------------------------------
+# JT18 (Step 4.A.3a, chunk 6, A19): a variable bound only into channel 2 has an identically zero
+# column in channel 1's Jacobian and is in neither of its global index lists (D33, Pitfall 24).
+# ------------------------------------------------------------------------------------------
+
+function _jt18_experiments()
+    trace = PlasmaTrace(_jt_kb_template(); t_ns=[0.0, 1.0, 2.0, 3.0])
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60.0, k_model=:exact)
+    lambda_m = _JT_KB_LAMBDA_NM .* 1e-9
+    expt_a = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_m,
+        effects=(WavelengthCalibration(lambda_offset_nm=0.02), SpectralIRF(fwhm_nm=0.08)))
+    expt_b = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_m,
+        effects=(WavelengthCalibration(lambda_offset_nm=0.03), SpectralIRF(fwhm_nm=0.10)))
+    return expt_a, expt_b
+end
+
+@testset "JT18: a variable bound only into channel 2 is invisible to channel 1's Jacobian (D33)" begin
+    expt_a, expt_b = _jt18_experiments()
+    calib_idx = findfirst(e -> e isa WavelengthCalibration, expt_a.effects)
+
+    v_TD = FittedVariable("T_D"; bounds=(50.0, 800.0), init=200.0, time_varying=true)
+    v_dlam_b = FittedVariable("dlam_b"; bounds=(-0.2e-9, 0.2e-9), init=0.02e-9)
+
+    pspec = ParameterSpec((expt_a, expt_b); variables=[v_TD, v_dlam_b],
+        bindings=["T_D" => "ions.D.T_eV",
+            "dlam_b" => (channel=2, effect=calib_idx, field=:offset)])
+
+    working_a = _jt_working(expt_a, pspec)
+    theta0 = flatten(pspec)
+    data_a = _jt_data(working_a, pspec, theta0)
+    problem_a = FitProblem(working_a, pspec, data_a; channel=1, name="a")
+    theta = _jt_perturb(theta0, 0.02)
+
+    dlam_idx = pspec.offsets[findfirst(v -> v.name == "dlam_b", pspec.variables)]
+
+    Jac = jacobian(problem_a, theta)
+    @test !(dlam_idx in Jac.kernel_global_idx)
+    @test !(dlam_idx in Jac.chain_global_idx)
+
+    ntheta = pspec.ntheta
+    J_ideal, J_dense = _jt_dense_transcription(Jac, problem_a, ntheta)
+    @test all(iszero, @view J_ideal[:, dlam_idx])
+    @test all(iszero, @view J_dense[:, dlam_idx])
+end

@@ -398,6 +398,70 @@ end
     @test occursin("different units", err.msg)
 end
 
+# ------------------------------------------------------------------------------------------
+# PM29 (Step 4.A.3a, chunk 6, A19): ParameterSpec over a tuple of experiments, the named-tuple
+# binding target, its three errors, and Binding.channel (D32).
+# ------------------------------------------------------------------------------------------
+
+@testset "PM29: ParameterSpec over two experiments, the named-tuple target, its three errors, Binding.channel (D32)" begin
+    trace = PlasmaTrace(_pm_template(); t_ns=[0.0])
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60.0, k_model=:exact)
+    lambda_m = collect(range(262.0, 264.5; length=24)) .* 1e-9
+    expt_a = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_m,
+        effects=(Sensitivity(scale=1.0e-6),))
+    expt_b = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_m,
+        effects=(WavelengthCalibration(lambda_offset_nm=0.02),))
+
+    v_Te = FittedVariable("T_e"; bounds=(50.0, 1500.0), init=400.0)
+    v_scale = FittedVariable("scale_a"; bounds=(1e-7, 1e-5), init=1e-6)
+    v_dlam = FittedVariable("dlam_b"; bounds=(-0.2, 0.2), init=0.02)
+
+    # ParameterSpec((expt,); ...) is bitwise ParameterSpec(expt; ...) (D32).
+    pspec1 = ParameterSpec((expt_a,); variables=[v_Te], bindings=["T_e" => "electrons.e.T_eV"])
+    pspec2 = ParameterSpec(expt_a; variables=[v_Te], bindings=["T_e" => "electrons.e.T_eV"])
+    @test flatten(pspec1) == flatten(pspec2)
+    @test only(pspec1.bindings).channel == only(pspec2.bindings).channel == 0
+
+    pspec = ParameterSpec((expt_a, expt_b); variables=[v_Te, v_scale, v_dlam],
+        bindings=["T_e" => "electrons.e.T_eV",
+            "scale_a" => (channel=1, effect=1, field=:scale),
+            "dlam_b" => (channel=2, effect=1, field=:offset)])
+
+    b_leaf = only(b for b in pspec.bindings if b.name == "T_e")
+    @test b_leaf.kind === :leaf
+    @test b_leaf.channel == 0   # every channel shares the plasma (D32)
+
+    b_scale = only(b for b in pspec.bindings if b.name == "scale_a")
+    @test b_scale.channel == 1
+
+    b_dlam = only(b for b in pspec.bindings if b.name == "dlam_b")
+    @test b_dlam.channel == 2
+
+    # error 1: an unknown key in the named-tuple target
+    @test_throws r"unknown key" ParameterSpec((expt_a, expt_b); variables=[v_scale],
+        bindings=["scale_a" => (channel=1, effect=1, field=:scale, bogus=1)])
+
+    # error 2: a missing required key
+    @test_throws r"requires :channel, :effect and :field" ParameterSpec((expt_a, expt_b); variables=[v_scale],
+        bindings=["scale_a" => (effect=1, field=:scale)])
+
+    # error 3: a channel out of range
+    @test_throws r"out of range 1:2" ParameterSpec((expt_a, expt_b); variables=[v_scale],
+        bindings=["scale_a" => (channel=3, effect=1, field=:scale)])
+
+    # a mismatched trace across channels is refused (D32)
+    other_trace = PlasmaTrace(_pm_template(); t_ns=[0.0])
+    expt_c = Experiment(trace=other_trace, probe=probe, collection=collection, lambda_m=lambda_m,
+        effects=(Sensitivity(scale=1.0e-6),))
+    @test_throws r"is not === experiment 1's" ParameterSpec((expt_a, expt_c); variables=[v_Te],
+        bindings=["T_e" => "electrons.e.T_eV"])
+
+    # the ten-argument Binding constructor keeps compiling and sets channel = 1 (BF3, D32)
+    old_style = OTIS.Binding("x", 1, :effect, OTIS._DUMMY_LEAF_PATH, 0, 1, :scale, 0, 1.0, "")
+    @test old_style.channel == 1
+end
+
 @testset "PM18: the bound-proximity flag" begin
     a, b = 0.0, 100.0
     @test _near_bound(a + 5e-4 * (b - a), a, b)

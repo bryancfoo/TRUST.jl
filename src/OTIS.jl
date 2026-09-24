@@ -102,6 +102,9 @@ export AbstractRegularizerTerm, RegularizerTerm, Regularizer
 # inversion (3.4a)
 export objective, FitResult
 
+# inversion (4.A.3a): the multi-channel problem
+export AbstractFitProblem, JointFitProblem, ChannelSummary
+
 # inversion (3.4b)
 export AbstractOptimizer, LBFGS, LevenbergMarquardt, NoisyGradientDescent, OptimizerSequence, solve
 

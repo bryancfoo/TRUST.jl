@@ -37,7 +37,7 @@ shared pass `LevenbergMarquardt` and `NoisyGradientDescent` each build their own
 (`jtvp!`) and their trajectory's `chi2`/`R` split from, without a second residual pass. Not part
 of D28/D29's own signatures; Level 3's helper, flagged under rule 11 zero.
 """
-function _residuals_jacobian(problem::FitProblem, theta::AbstractVector)
+function _residuals_jacobian(problem::AbstractFitProblem, theta::AbstractVector)
     r = _full_residuals(problem, theta)
     Jac = jacobian(problem, theta)
     return r, Jac
@@ -50,7 +50,7 @@ end
 theta)` -- exactly `chi2(problem, theta)` (D16), read off `r` rather than recomputed with a
 second `measure` pass.
 """
-_chi2_from_r(problem::FitProblem, r::AbstractVector) = sum(abs2, view(r, 1:problem.npixels))
+_chi2_from_r(problem::AbstractFitProblem, r::AbstractVector) = sum(abs2, view(r, 1:problem.npixels))
 
 """
     _R_value(problem, theta) -> Real
@@ -60,7 +60,7 @@ otherwise (D25: Λ-free). `r_full`'s own regularizer rows already carry `sqrt(Λ
 cannot be read off `r` the way `chi2` can and needs this separate, but cheap (no `measure` call),
 evaluation.
 """
-function _R_value(problem::FitProblem, theta::AbstractVector)
+function _R_value(problem::AbstractFitProblem, theta::AbstractVector)
     problem.regularizer === nothing && return 0.0
     return _regularizer_value(problem.regularizer, problem.pspec, theta)
 end
@@ -71,7 +71,7 @@ end
 `(chi2(problem, theta), _R_value(problem, theta))`, for an optimizer (`LBFGS`) that does not
 already have `r_full` in hand at the iterate being recorded.
 """
-_chi2_and_R(problem::FitProblem, theta::AbstractVector) = (chi2(problem, theta), _R_value(problem, theta))
+_chi2_and_R(problem::AbstractFitProblem, theta::AbstractVector) = (chi2(problem, theta), _R_value(problem, theta))
 
 """
     _eval_all!(g, problem, theta) -> (objective, chi2, R)
@@ -82,7 +82,7 @@ inlined here so `NoisyGradientDescent`'s own step can also read off `chi2` and `
 trajectory, which the opaque `_objective_and_gradient!` does not expose. Not part of D29's own
 signature; Level 3's helper, flagged under rule 11 zero.
 """
-function _eval_all!(g::AbstractVector, problem::FitProblem, theta::AbstractVector)
+function _eval_all!(g::AbstractVector, problem::AbstractFitProblem, theta::AbstractVector)
     r, Jac = _residuals_jacobian(problem, theta)
     jtvp!(g, problem, Jac, r)
     g .*= 2
@@ -134,8 +134,15 @@ recorded value at the same iterate -- so it must be threaded through, not rebuil
 get (Step 3.C.1, D13); `LBFGS` and `OptimizerSequence` pass their own. Not part of D26-D30's own
 signatures; Level 3's helper, shared by all four `solve` methods below and flagged under rule 11
 zero.
+
+**Widened to `problem::AbstractFitProblem` (Step 4.A.3a, D36)**: `values`/`near_bound`/`Rval`/
+`term_values`/`weight` are unchanged, since they read only `pspec`/`theta`/`reg`; `c2 =
+chi2(problem, theta)` is the weighted total for a `JointFitProblem` (Pitfall 26); `experiments[c] =
+unflatten(ch.experiment, pspec, theta; channel = ch.channel)` for every channel (`(problem,)` for
+a plain `FitProblem`), and one `ChannelSummary` per channel from `_channel_nparams` (D36) -- no
+Jacobian call.
 """
-function _build_result(problem::FitProblem, theta::AbstractVector{Float64}, objective_value::Float64,
+function _build_result(problem::AbstractFitProblem, theta::AbstractVector{Float64}, objective_value::Float64,
     trajectory::Vector{_TRAJECTORY_ROW}, converged::Bool, status::Symbol, iterations::Int,
     f_calls::Int, g_calls::Int, elapsed::Float64, name::AbstractString; termination::Symbol=:none)
     pspec = problem.pspec
@@ -167,11 +174,27 @@ function _build_result(problem::FitProblem, theta::AbstractVector{Float64}, obje
     end
     c2 = chi2(problem, theta)
 
-    fitted = unflatten(problem.experiment, pspec, theta)
+    channels_tuple = problem isa JointFitProblem ? problem.channels : (problem,)
+    weights_vec = problem isa JointFitProblem ? problem.weights : [1.0]
 
-    return FitResult(Vector{Float64}(theta), fitted, pspec, values, near_bound, c2, Rval,
+    experiments = ntuple(length(channels_tuple)) do c
+        ch = channels_tuple[c]
+        unflatten(ch.experiment, pspec, theta; channel=ch.channel)
+    end
+
+    channel_summaries = ChannelSummary[]
+    for (c, ch) in enumerate(channels_tuple)
+        chi2_c = chi2(ch, theta)
+        p_c = _channel_nparams(pspec, ch.channel)
+        n_c = ch.npixels
+        reduced = n_c > p_c ? chi2_c / (n_c - p_c) : NaN
+        reduced_simple = n_c == 0 ? NaN : chi2_c / n_c
+        push!(channel_summaries, ChannelSummary(ch.name, weights_vec[c], chi2_c, n_c, p_c, reduced, reduced_simple))
+    end
+
+    return FitResult(Vector{Float64}(theta), experiments[1], pspec, values, near_bound, c2, Rval,
         objective_value, weight, term_values, problem.npixels, trajectory, converged, status,
-        termination, iterations, f_calls, g_calls, elapsed, String(name))
+        termination, iterations, f_calls, g_calls, elapsed, String(name), experiments, channel_summaries)
 end
 
 # ------------------------------------------------------------------------------------------
@@ -306,7 +329,7 @@ addition, on the same footing as `g_trace` above, flagged under rule 11 zero.
 
 Spec D27, D13, D30, D31, D34, D36, D37.
 """
-function solve(problem::FitProblem, opt::LBFGS; start::AbstractVector=flatten(problem.pspec),
+function solve(problem::AbstractFitProblem, opt::LBFGS; start::AbstractVector=flatten(problem.pspec),
     g_trace::Union{Nothing,Vector}=nothing, precond_trace::Union{Nothing,Vector}=nothing)
     t0 = time()
     y0 = Vector{Float64}(start)
@@ -491,9 +514,15 @@ With `precond === nothing` every one of those becomes `z === gnew`/`p0 === -gvec
 bitwise the unpreconditioned CGLS above. A preconditioner that changes the converged `delta` (to
 more than solver-noise tolerance) is a bug (PC4); one that only changes `niter` is the point.
 
-Spec D28, D37.
+**`problem`/`Jac` widened (Step 4.A.3a, D34)**: `Jac` is untyped rather than pinned to
+`FitJacobian`, since `_cgls` merely passes the pair through to `jvp!`/`jtvp!`, which dispatch on
+whichever matching `(FitProblem, FitJacobian)` or `(JointFitProblem, JointFitJacobian)` pair is
+actually passed. Left untyped rather than `Jac::Union{FitJacobian,JointFitJacobian}` since a third
+problem type would otherwise need editing this signature too.
+
+Spec D28, D37, D34.
 """
-function _cgls(problem::FitProblem, Jac::FitJacobian, r::AbstractVector, gvec::AbstractVector,
+function _cgls(problem::AbstractFitProblem, Jac, r::AbstractVector, gvec::AbstractVector,
     mu::Real, tol::Real, maxiter::Integer; precond::Union{Nothing,AbstractVector}=nothing)
     ntheta = length(gvec)
     delta = zeros(Float64, ntheta)
@@ -581,7 +610,7 @@ under rule 11 zero, the same footing as `jacobian`'s own `chunk` keyword (chunk 
 
 Spec D28.
 """
-function solve(problem::FitProblem, opt::LevenbergMarquardt;
+function solve(problem::AbstractFitProblem, opt::LevenbergMarquardt;
     start::AbstractVector=flatten(problem.pspec),
     cgls_iterations::Union{Nothing,Vector{Int}}=nothing,
     mu_trace::Union{Nothing,Vector{Float64}}=nothing)
@@ -748,7 +777,7 @@ bounds, which replaying the update formula in a test can't do (Pitfall 13).
 
 Spec D29.
 """
-function solve(problem::FitProblem, opt::NoisyGradientDescent;
+function solve(problem::AbstractFitProblem, opt::NoisyGradientDescent;
     start::AbstractVector=flatten(problem.pspec),
     y_trace::Union{Nothing,Vector}=nothing)
     t0 = time()
@@ -828,7 +857,7 @@ trajectory entry is the first member's **best**, not its last.
 
 Spec D30.
 """
-function solve(problem::FitProblem, opt::OptimizerSequence;
+function solve(problem::AbstractFitProblem, opt::OptimizerSequence;
     start::AbstractVector=flatten(problem.pspec))
     t0 = time()
     combined = _TRAJECTORY_ROW[]

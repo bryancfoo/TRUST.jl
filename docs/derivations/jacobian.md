@@ -224,3 +224,68 @@ For the full-size EPW problem (512 × 256) with three trace variables and two sc
 A dense `J` would be `131072 × 770` doubles ≈ 807 MB. The 512 × 256 EPW problem's actual measured
 sizes are in the chunk 6 hand-off report (`dev/reports/phase3_report.md`), alongside `D43`'s other
 measurements.
+
+## 7. The joint products (Phase 4.A, Step 4.A.3a, D34)
+
+A `JointFitProblem` holds one `FitProblem` per channel `c = 1 … C` sharing one `ParameterSpec`
+and, at most, one `Regularizer`. Each channel's own residual rows are `r_c = (M_c − D_c)/σ_c`
+over its own `pixel_index`, exactly as a single-channel `FitProblem` computes them (D15, D16) --
+**a channel's `FitJacobian` is built by the unmodified single-channel `jacobian` function**, with
+only the channel filter of Section 3's box (below) telling it which of `pspec.bindings` are its
+own. Writing `w_c` for the channel's weight (`1.0` unless the deck or the caller says otherwise,
+OQ-35):
+
+```
+r_full = [ √w_1 r_1 ; … ; √w_C r_C ; √(Λ w_t) (op (u − ref))_r / N_r … ]
+𝒪      = Σ_c w_c χ²_c + Λ R
+J·v    = [ √w_1 J_1 v ; … ; √w_C J_C v ; J_R v ]
+Jᵀ·w   = Σ_c √w_c J_cᵀ w_c + J_Rᵀ w_R
+```
+
+`J_R`/`J_Rᵀ` are the regularizer's own closed-form rows (Section 4), computed once by
+`_regularizer_closed_form(jp.regularizer, jp.pspec, θ)` -- **the same call a single-channel
+problem's own `jacobian` makes**, so the regularizer's contribution to every product is bit-for-
+bit the code already proven in Sections 1-5, run once instead of once per channel.
+
+**Five rules keep this both correct and bitwise-compatible with the single-channel code**
+(D34; `src/inversion/residuals.jl`, `src/inversion/jacobian.jl`):
+
+1. A channel with `n_c = 0` (fully masked) is skipped in every product. This is an optimization,
+   never a correctness requirement: every one of that channel's contributions is `+0.0` regardless
+   (`(M−D)/σ` is `+0.0` when `M == D`, and nothing here forms a signed zero any other way), so
+   including a masked channel's zero contribution would not change a single bit -- skipping it
+   only saves the wasted `measure`/IRF work.
+2. `jvp!`/`residuals!` write each live channel directly into its own disjoint row range
+   (`jp.row_ranges[c]`), so there is no "first vs. later channel" question there. `jtvp!` and
+   `_gauss_newton_diagonal` accumulate into **one shared** output, so the **first contributing
+   channel writes directly and later ones accumulate through a temporary** -- again an
+   optimization (one fewer `fill!`), not a correctness requirement, since `0.0 + x === x` for
+   every finite, non-negative-zero `x` that arises here.
+3. `√w_c` is applied only when `w_c ≠ 1.0` (`1.0 * x === x` for every `x`), so a channel with the
+   default weight contributes rows and columns that are **bit-identical** to the single-channel
+   `FitProblem`'s own.
+4. The regularizer's part of every product is computed by exactly the single-channel code
+   (above), never re-derived, so a change of order or reassociation cannot creep in between the
+   two.
+5. Where two channels both contribute to one sum (`jtvp!`, `_gauss_newton_diagonal`, and the
+   pixel count `Σ n_c`), they are visited in `jp.channels`'s own order, so a result depends only
+   on that order, never on anything incidental to how the caller built the tuple.
+
+**Why the masked-channel test (D35) is bitwise.** With `w_c = 1` and every channel but one (say
+channel 1) fully masked: channel 1's own contribution to every product above is produced by
+calling channel 1's `FitProblem` methods with the *exact* arguments (`experiment`, `pspec`, `data`,
+`theta`) a plain single-channel `FitProblem` over the same channel would use, and rule 3 means no
+`√w` multiplication ever touches those values; every masked channel contributes nothing (rule 1);
+and the regularizer's rows are the same closed-form call either way (rule 4). So `θ*`, `χ²` and
+every product the optimizers touch are bit-for-bit the single-channel answer -- Pitfall 22 and
+Pitfall 28 exist because *any* deviation from this (a regularizer re-derived per channel, a
+`√1.0` actually multiplied, a masked channel's zero written through a different code path) reads
+as "close enough" in every other test and only shows up as a flipped bit here.
+
+**The per-channel diagnostics (D36).** `ChannelSummary.chi2` is the channel's own *unweighted*
+`chi2(channel, θ)` (never the weighted row scaling above), and `FitResult.chi2`/the optimizer's
+own `𝒪` are the *weighted* total `Σ w_c χ²_c` -- the two are deliberately different numbers
+(Pitfall 26). `nparams` (`p_c`) is read off `pspec.bindings` alone: `pspec.ntheta` minus the
+global (scalar) entries whose variable's bindings are *every one* an `:effect` binding of a
+different channel; a per-bin entry always counts, since a time-varying variable can only reach
+the one shared plasma every channel sees.

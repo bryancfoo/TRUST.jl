@@ -29,7 +29,7 @@ it, rightly omits, since a minimizer wants only the mode, never a normalized den
 
 Spec D26.
 """
-function objective(problem::FitProblem, theta::AbstractVector)
+function objective(problem::AbstractFitProblem, theta::AbstractVector)
     return sum(abs2, _full_residuals(problem, theta))
 end
 
@@ -49,7 +49,7 @@ theta)` (OB3): the residual vector and the Jacobian are computed the same way fr
 
 Spec D26.
 """
-function _objective_and_gradient!(g::AbstractVector, problem::FitProblem, theta::AbstractVector)
+function _objective_and_gradient!(g::AbstractVector, problem::AbstractFitProblem, theta::AbstractVector)
     r = _full_residuals(problem, theta)
     Jac = jacobian(problem, theta)
     jtvp!(g, problem, Jac, r)
@@ -58,8 +58,59 @@ function _objective_and_gradient!(g::AbstractVector, problem::FitProblem, theta:
 end
 
 # ------------------------------------------------------------------------------------------
-# FitResult
+# ChannelSummary, FitResult
 # ------------------------------------------------------------------------------------------
+
+"""
+    ChannelSummary
+
+One channel's own diagnostics from a `FitResult` (Step 4.A.3a, D36): `name` and `weight` (`w_c`,
+`1.0` for a single-channel fit); `chi2`, the **unweighted** `chi2(channel_problem, theta)`
+(Pitfall 26 -- `FitResult.chi2` is the weighted total `sum(w_c * chi2_c)`, what the optimizer
+minimized); `npixels`, the channel's own pixel count; `nparams` (`p_c`), the count of `theta`
+entries this channel's Jacobian touches: `pspec.ntheta` minus the global entries whose variable
+has at least one binding, **every** one of which is an `:effect` binding of a different channel
+(a per-bin entry always counts, since a time-varying variable can only reach the shared plasma);
+`reduced_chi2 = chi2 / (npixels - nparams)`, `NaN` when `npixels <= nparams`; `reduced_chi2_simple
+= chi2 / npixels`, `NaN` when `npixels == 0`.
+
+For a single-channel fit (the 20-argument `FitResult` constructor, D36) `nparams == ntheta`, since
+no binding of a one-channel spec belongs to "a different channel".
+
+Spec D36.
+"""
+struct ChannelSummary
+    name::String
+    weight::Float64
+    chi2::Float64
+    npixels::Int
+    nparams::Int
+    reduced_chi2::Float64
+    reduced_chi2_simple::Float64
+end
+
+"""
+    _channel_nparams(pspec::ParameterSpec, channel::Int) -> Int
+
+`p_c` (D36): `pspec.ntheta` minus the count of **global** entries (`pspec.global_entries`, one per
+scalar fitted variable) whose variable has at least one binding and every one of whose bindings is
+an `:effect` binding of a channel other than `channel`. A variable with no binding at all is not
+excluded (there is nothing to prove it belongs elsewhere); a per-bin entry is never excluded, since
+a time-varying variable reaches only the shared plasma, every channel's own. Computed from the
+bindings alone, with no Jacobian call.
+
+Spec D36.
+"""
+function _channel_nparams(pspec::ParameterSpec, channel::Int)
+    excluded = 0
+    for (k, _) in enumerate(pspec.global_entries)
+        i = pspec.global_slots[k]
+        bs = [b for b in pspec.bindings if b.slot == i]
+        isempty(bs) && continue
+        all(b -> b.kind === :effect && b.channel != channel, bs) && (excluded += 1)
+    end
+    return pspec.ntheta - excluded
+end
 
 """
     FitResult{FT<:Real,E<:Experiment,P<:ParameterSpec}
@@ -67,19 +118,22 @@ end
 The outcome of one fit (D26): everything chunks 9 to 13 fill in or read back out.
 
 - `theta`: the minimizer, in the unconstrained `y` an optimizer works in.
-- `experiment`: `unflatten(problem.experiment, pspec, theta)`, the fitted model.
+- `experiment`: `unflatten(problem.experiment, pspec, theta)`, the fitted model; `experiments[1]`
+  (Step 4.A.3a, D36).
 - `pspec`: the `ParameterSpec` the fit was run against.
 - `values`: **every fitted variable and every dependent**, by name, as its fitted trace in its
   own unit (a scalar variable's entry is a length-1 vector; a user who fits `logn` reads `ne_cm3`
   here too, D26).
 - `near_bound`: D13's bound-proximity flag, one `BitVector` per **variable** (never a dependent,
   which has no bound of its own), aligned with `values[name]`.
-- `chi2`: the data term, `sum(abs2, residuals(problem, theta))`.
+- `chi2`: the data term -- for a `JointFitProblem` the **weighted** total `sum(w_c * chi2_c)`,
+  what the optimizer minimized (Pitfall 26); `sum(abs2, residuals(problem, theta))` for one
+  channel.
 - `R`: the regularizer's value, **excluding** `Lambda` (D25).
 - `objective`: `chi2 + weight * R` (`==  objective(problem, theta)`).
 - `weight`: `Lambda`, the global regularizer weight the fit ran at (`0.0` with no regularizer).
 - `term_values`: `w_term * ‖op N(u-ref)‖²` per regularizer term, in term order; sums to `R`.
-- `npixels`: `problem.npixels`.
+- `npixels`: `problem.npixels` (the sum over channels for a `JointFitProblem`).
 - `trajectory`: one entry per recorded iteration, `(iteration, objective, chi2, R)`.
 - `converged`, `status`, `iterations`, `f_calls`, `g_calls`: the optimizer's own report.
 - `termination`: Optim's own finer status for `LBFGS` (`Symbol(string(Optim.termination_code(res)))`,
@@ -88,8 +142,16 @@ The outcome of one fit (D26): everything chunks 9 to 13 fill in or read back out
   written to the result file at this step (D17).
 - `elapsed`: wall time of the fit, in seconds.
 - `optimizer`: a short description of what ran, e.g. `"lbfgs"` or `"noisy_descent_lbfgs"`.
+- `experiments` (Step 4.A.3a, D36): one fitted `Experiment` per channel, in channel order --
+  `(experiment,)` for a single-channel fit.
+- `channels` (Step 4.A.3a, D36): one `ChannelSummary` per channel, in channel order -- a single
+  `ChannelSummary("main", 1.0, chi2, npixels, pspec.ntheta, ...)` for a single-channel fit.
 
-Spec D26, D13.
+**The 20-argument positional constructor (every field above except `experiments` and `channels`)
+stays**, as an outer method filling `experiments = (experiment,)` and one `"main"` summary (D36):
+`test_objective.jl`'s OB5/OB6 and `test_reproduce.jl`'s hand-built `FitResult`s keep compiling.
+
+Spec D26, D13, D36.
 """
 struct FitResult{FT<:Real,E<:Experiment,P<:ParameterSpec}
     theta::Vector{FT}
@@ -112,6 +174,23 @@ struct FitResult{FT<:Real,E<:Experiment,P<:ParameterSpec}
     g_calls::Int
     elapsed::Float64
     optimizer::String
+    experiments::Tuple
+    channels::Vector{ChannelSummary}
+end
+
+function FitResult(theta::AbstractVector, experiment::Experiment, pspec::ParameterSpec,
+    values::Dict{String,Vector{Float64}}, near_bound::Dict{String,BitVector}, chi2, R, objective,
+    weight::Real, term_values::Vector{Float64}, npixels::Int, trajectory::Vector, converged::Bool,
+    status::Symbol, termination::Symbol, iterations::Int, f_calls::Int, g_calls::Int,
+    elapsed::Real, optimizer::AbstractString)
+    p_main = pspec.ntheta
+    reduced = npixels > p_main ? chi2 / (npixels - p_main) : NaN
+    reduced_simple = npixels == 0 ? NaN : chi2 / npixels
+    main_summary = ChannelSummary("main", 1.0, Float64(chi2), npixels, p_main, Float64(reduced),
+        Float64(reduced_simple))
+    return FitResult(theta, experiment, pspec, values, near_bound, chi2, R, objective, weight,
+        term_values, npixels, trajectory, converged, status, termination, iterations, f_calls,
+        g_calls, elapsed, optimizer, (experiment,), ChannelSummary[main_summary])
 end
 
 # --- show (spec D40, D26) ---
@@ -140,6 +219,13 @@ function Base.show(io::IO, ::MIME"text/plain", result::FitResult)
     @printf(io, "  weight (Lambda): %.6g\n", result.weight)
     @printf(io, "  objective: %.6g\n", result.objective)
     @printf(io, "  elapsed: %.6g s\n", result.elapsed)
+    if length(result.channels) > 1
+        println(io, "  channels: ", length(result.channels))
+        for c in result.channels
+            @printf(io, "    %s: weight = %.6g, chi2 = %.6g, npixels = %d, chi2/n = %.6g, chi2/(n-p) = %.6g\n",
+                c.name, c.weight, c.chi2, c.npixels, c.reduced_chi2_simple, c.reduced_chi2)
+        end
+    end
     for v in result.pspec.variables
         nb = get(result.near_bound, v.name, nothing)
         (nb === nothing || !any(nb)) && continue

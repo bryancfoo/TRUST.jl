@@ -298,3 +298,39 @@ end
     data = StreakData(lambda_m=working.lambda, t_s=working.t, image=image, sigma=sig, mask=mask)
     @test_throws r"the mask excludes every pixel" FitProblem(working, pspec, data)
 end
+
+# ------------------------------------------------------------------------------------------
+# RS11 (Step 4.A.3a, chunk 6, A19): FitProblem's channel, name and allow_empty_mask, and the
+# name check (D31).
+# ------------------------------------------------------------------------------------------
+
+@testset "RS11: FitProblem's channel, name, allow_empty_mask, and the name check (D31)" begin
+    expt = _rs_p2()
+    pspec = _rs_pspec_p2(expt)
+    working = _rs_working(expt, pspec)
+    theta0 = flatten(pspec)
+    data = _rs_data(working, pspec, theta0)
+
+    # defaults: channel 1, name "main"
+    problem = FitProblem(working, pspec, data)
+    @test problem.channel == 1
+    @test problem.name == "main"
+
+    # channel and name are settable
+    problem2 = FitProblem(working, pspec, data; channel=2, name="iaw")
+    @test problem2.channel == 2
+    @test problem2.name == "iaw"
+
+    # the name check
+    @test_throws r"name must match" FitProblem(working, pspec, data; name="Bad-Name")
+    @test_throws r"name must match" FitProblem(working, pspec, data; name="1abc")
+
+    # allow_empty_mask is the only way a zero-pixel problem exists
+    mask = falses(size(data.image))
+    data_masked = StreakData(lambda_m=working.lambda, t_s=working.t, image=data.image,
+        sigma=data.sigma, mask=mask)
+    @test_throws r"the mask excludes every pixel" FitProblem(working, pspec, data_masked)
+    problem_empty = FitProblem(working, pspec, data_masked; allow_empty_mask=true, channel=2, name="b")
+    @test problem_empty.npixels == 0
+    @test isempty(problem_empty.pixel_index)
+end

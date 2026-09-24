@@ -375,3 +375,29 @@ end
     @test bytes <= 1.05 * pieces
     @test bytes < dense_J_bytes
 end
+
+# ------------------------------------------------------------------------------------------
+# OB9 (Step 4.A.3a, chunk 6, A19): the 20-argument FitResult constructor's filled fields --
+# experiments = (experiment,) and one "main" ChannelSummary with nparams == ntheta (D36).
+# ------------------------------------------------------------------------------------------
+
+@testset "OB9: the 20-argument FitResult constructor fills experiments and one main channel (D36)" begin
+    problem, theta = _ob_p1_problem()
+    pspec = problem.pspec
+    fitted = unflatten(problem.experiment, pspec, theta)
+    c2 = chi2(problem, theta)
+
+    result = FitResult(theta, fitted, pspec, Dict{String,Vector{Float64}}(), Dict{String,BitVector}(),
+        c2, 0.0, c2, 0.0, Float64[], problem.npixels,
+        NamedTuple{(:iteration, :objective, :chi2, :R),NTuple{4,Float64}}[],
+        true, :gradient_norm, :none, 0, 0, 0, 0.0, "test")
+
+    @test result.experiments == (fitted,)
+    @test length(result.channels) == 1
+    main = only(result.channels)
+    @test main.name == "main"
+    @test main.weight == 1.0
+    @test main.chi2 == c2
+    @test main.npixels == problem.npixels
+    @test main.nparams == pspec.ntheta
+end

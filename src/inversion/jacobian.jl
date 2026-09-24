@@ -142,17 +142,21 @@ _rebuild_bound_effect(e::WavelengthCalibration, bs::Tuple, vals) =
                     dispersion_scale=_bound_value(bs, :dispersion_scale, e.dispersion_scale, vals)))
 
 """
-    _collect_kernel_bindings(pspec, expt, nkernel_eff) -> Tuple
+    _collect_kernel_bindings(pspec, expt, nkernel_eff; channel = 1) -> Tuple
 
 One inner `Tuple` of `Binding`s per kernel-stage effect (`expt.effects[1:nkernel_eff]`, the same
 front block `_kernel_effects` returns), empty for an unbound effect, bindings in `pspec.bindings`
 order (D11(b), amended 2026-09-23). Factored out of `jacobian` so that JT16 exercises the exact
 code `jacobian` itself calls, not a copy of it.
+
+**`channel` (Step 4.A.3a, D33, Pitfall 24) keeps only `:effect` bindings of this channel**: a
+variable bound only into another channel is not collected here, so it never seeds a dual and
+never appears in this channel's Jacobian.
 """
-function _collect_kernel_bindings(pspec::ParameterSpec, expt::Experiment, nkernel_eff::Int)
+function _collect_kernel_bindings(pspec::ParameterSpec, expt::Experiment, nkernel_eff::Int; channel::Int=1)
     per_effect = [Binding[] for _ in 1:nkernel_eff]
     for b in pspec.bindings
-        if b.kind === :effect && 1 <= b.effect <= nkernel_eff && _chain_order(expt.effects[b.effect]) == 1
+        if b.kind === :effect && b.channel == channel && 1 <= b.effect <= nkernel_eff && _chain_order(expt.effects[b.effect]) == 1
             push!(per_effect[b.effect], b)
         end
     end
@@ -420,6 +424,7 @@ function _build_chain_globals(problem::FitProblem, expt::Experiment, theta::Abst
 
     for b in pspec.bindings
         b.kind === :effect || continue
+        b.channel == problem.channel || continue
         e = expt.effects[b.effect]
         co = _chain_order(e)
         co in 2:5 || continue
@@ -493,12 +498,12 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
     nt = nbins(pspec.trace)
     nlambda = length(problem.experiment.lambda)
 
-    expt = unflatten(problem.experiment, pspec, theta)
+    expt = unflatten(problem.experiment, pspec, theta; channel=problem.channel)
 
     kernel_effects0 = _kernel_effects(expt)
     nkernel_eff = length(kernel_effects0)
 
-    kernel_bindings = _collect_kernel_bindings(pspec, expt, nkernel_eff)
+    kernel_bindings = _collect_kernel_bindings(pspec, expt, nkernel_eff; channel=problem.channel)
 
     kernel_global_var = Int[]
     for i in 1:nvar
@@ -509,7 +514,7 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
             b.slot == i || continue
             if b.kind === :leaf
                 affects_P = true
-            elseif b.kind === :effect && 1 <= b.effect <= nkernel_eff && _chain_order(expt.effects[b.effect]) == 1
+            elseif b.kind === :effect && b.channel == problem.channel && 1 <= b.effect <= nkernel_eff && _chain_order(expt.effects[b.effect]) == 1
                 affects_P = true
             end
         end
@@ -560,6 +565,150 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
 
     return FitJacobian{FT}(blocks, kernel_globals, chain_globals, kernel_global_idx,
         chain_global_idx, response, Klambda, Kt, reg_rows, reg_cols, reg_coeffs)
+end
+
+# ------------------------------------------------------------------------------------------
+# JointFitJacobian and the joint products (Step 4.A.3a, chunk 6 of Phase 4.A, D34)
+# ------------------------------------------------------------------------------------------
+
+"""
+    JointFitJacobian{FT<:Real,CH<:Tuple}
+
+`jacobian(jp::JointFitProblem, theta)`'s result (D34): `channels`, one `FitJacobian` per channel
+(`jacobian(jp.channels[c], theta; chunk)`, **a masked channel included**, since a `FitJacobian`
+does not depend on the mask -- only `jvp!`/`jtvp!`/`_gauss_newton_diagonal` read `pixel_index`),
+and the joint problem's own regularizer triples `reg_rows`/`reg_cols`/`reg_coeffs` from
+`_regularizer_closed_form(jp.regularizer, jp.pspec, theta)`, exactly as `jacobian(::FitProblem)`
+fills them, empty with no regularizer. Each channel's own `FitJacobian` carries empty regularizer
+arrays, since a `JointFitProblem`'s constructor requires every channel's own `regularizer ===
+nothing` (D31).
+
+Unexported (D34's own wording).
+
+Spec D34.
+"""
+struct JointFitJacobian{FT<:Real,CH<:Tuple}
+    channels::CH
+    reg_rows::Vector{Int}
+    reg_cols::Vector{Int}
+    reg_coeffs::Vector{FT}
+end
+
+"""
+    jacobian(jp::JointFitProblem, theta::AbstractVector; chunk = JACOBIAN_CHUNK) -> JointFitJacobian
+
+Spec D34.
+"""
+function jacobian(jp::JointFitProblem, theta::AbstractVector{FT};
+    chunk::Integer=JACOBIAN_CHUNK) where {FT<:Real}
+    channel_jacs = ntuple(length(jp.channels)) do c
+        jacobian(jp.channels[c], theta; chunk=chunk)
+    end
+    if jp.regularizer === nothing
+        reg_rows, reg_cols, reg_coeffs = Int[], Int[], FT[]
+    else
+        _, reg_rows, reg_cols, reg_coeffs_f64 = _regularizer_closed_form(jp.regularizer, jp.pspec, theta)
+        reg_coeffs = FT.(reg_coeffs_f64)
+    end
+    return JointFitJacobian{FT,typeof(channel_jacs)}(channel_jacs, reg_rows, reg_cols, reg_coeffs)
+end
+
+"""
+    jvp!(out, jp::JointFitProblem, J::JointFitJacobian, v::AbstractVector) -> out
+
+`out = J_full * v` (D34): for each channel with `n_c > 0`, `jvp!` into `out`'s own
+`jp.row_ranges[c]` by **exactly** `FitProblem`'s own method, scaled by `sqrt(w_c)` unless `w_c ==
+1.0`; then the regularizer rows at `jp.npixels .+ rows`, `FitProblem`'s own loop over `J`'s
+triples.
+
+Spec D34.
+"""
+function jvp!(out::AbstractVector, jp::JointFitProblem, J::JointFitJacobian{FT}, v::AbstractVector) where {FT}
+    for (c, ch) in enumerate(jp.channels)
+        ch.npixels == 0 && continue
+        oc = view(out, jp.row_ranges[c])
+        jvp!(oc, ch, J.channels[c], v)
+        w = jp.weights[c]
+        w == 1.0 || (oc .*= sqrt(w))
+    end
+    if jp.regularizer !== nothing
+        nrows = jp.regularizer.nrows
+        fill!(view(out, (jp.npixels+1):(jp.npixels+nrows)), zero(FT))
+        @inbounds for m in eachindex(J.reg_rows)
+            out[jp.npixels+J.reg_rows[m]] += J.reg_coeffs[m] * v[J.reg_cols[m]]
+        end
+    end
+    return out
+end
+
+"""
+    jtvp!(out, jp::JointFitProblem, J::JointFitJacobian, w::AbstractVector) -> out
+
+`out = transpose(J_full) * w` (D34): with `w_c` the (possibly `sqrt(w_c)`-scaled, D34 rule 3)
+view of `w` over channel `c`'s own rows, the **first contributing channel** (`n_c > 0`) writes its
+`jtvp!` directly into `out`; later contributing channels accumulate through a temporary (D34 rule
+2 -- economy, not correctness: with no contributing channel `out` is `fill!`ed with zero). Then
+the regularizer contribution, `FitProblem`'s own loop over `J`'s triples.
+
+Spec D34.
+"""
+function jtvp!(out::AbstractVector, jp::JointFitProblem, J::JointFitJacobian{FT}, w::AbstractVector) where {FT}
+    first_done = false
+    tmp = similar(out)
+    for (c, ch) in enumerate(jp.channels)
+        ch.npixels == 0 && continue
+        wc = view(w, jp.row_ranges[c])
+        wcv = jp.weights[c] == 1.0 ? wc : sqrt(jp.weights[c]) .* wc
+        if !first_done
+            jtvp!(out, ch, J.channels[c], wcv)
+            first_done = true
+        else
+            jtvp!(tmp, ch, J.channels[c], wcv)
+            out .+= tmp
+        end
+    end
+    first_done || fill!(out, zero(FT))
+
+    if jp.regularizer !== nothing
+        @inbounds for m in eachindex(J.reg_rows)
+            out[J.reg_cols[m]] += J.reg_coeffs[m] * w[jp.npixels+J.reg_rows[m]]
+        end
+    end
+    return out
+end
+
+"""
+    _gauss_newton_diagonal(jp::JointFitProblem, J::JointFitJacobian) -> Vector{Float64}
+
+`d = diag(J_fullᵀ J_full)` in `y` (D34): the **first contributing channel**'s
+`_gauss_newton_diagonal(ch, J.channels[c])` (`FitProblem`'s own method), times `w_c` unless `w_c ==
+1.0` (rows scale by `sqrt(w)`, their squares by `w`, Pitfall 25), writes `d` directly; later
+contributing channels accumulate. Then `d[col] += coeff^2` over `J`'s own regularizer triples,
+`FitProblem`'s own loop.
+
+Spec D34.
+"""
+function _gauss_newton_diagonal(jp::JointFitProblem, J::JointFitJacobian)
+    d = zeros(Float64, jp.pspec.ntheta)
+    first_done = false
+    for (c, ch) in enumerate(jp.channels)
+        ch.npixels == 0 && continue
+        dc = _gauss_newton_diagonal(ch, J.channels[c])
+        w = jp.weights[c]
+        wdc = w == 1.0 ? dc : w .* dc
+        if !first_done
+            d .= wdc
+            first_done = true
+        else
+            d .+= wdc
+        end
+    end
+
+    @inbounds for m in eachindex(J.reg_rows)
+        d[J.reg_cols[m]] += Float64(J.reg_coeffs[m])^2
+    end
+
+    return d
 end
 
 # ------------------------------------------------------------------------------------------
@@ -682,7 +831,7 @@ forms `J` densely to do it (JT10).
 
 Spec D20, D25, D26.
 """
-function gradient!(g::AbstractVector, problem::FitProblem, theta::AbstractVector)
+function gradient!(g::AbstractVector, problem::AbstractFitProblem, theta::AbstractVector)
     r = _full_residuals(problem, theta)
     Jac = jacobian(problem, theta)
     jtvp!(g, problem, Jac, r)

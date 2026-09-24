@@ -224,3 +224,57 @@ is fitted once and used at every bin regardless of which bin is being evaluated.
 
 Every line above is reproduced exactly by PM22, written out by hand against the same six-bin,
 three-variable problem before the code that builds it, per the chunk's own trap 1.
+
+## 5. The channel on a binding, and `unflatten`'s channel (Phase 4.A, Step 4.A.3a, D32, D33)
+
+`ParameterSpec` may be built over several channels' `Experiment`s at once,
+`ParameterSpec((expt_1, …, expt_C); …)` (`ParameterSpec(expt; …)` is `ParameterSpec((expt,); …)`,
+bitwise), one experiment per channel, all sharing **one** trace object (checked at construction: a
+mismatched trace is a loud error naming which channel). A leaf binding still means exactly what it
+always has — the shared plasma every channel reads — but an **effect** binding must now also say
+*which* channel's `Experiment.effects` its `effect` index counts into, since two channels each have
+their own effect chain and their own numbering.
+
+`Binding.channel` carries this: **`0` for a `:leaf` binding** (a leaf reaches every channel, so the
+channel field is meaningless for it and is never read), and **the target channel for an `:effect`
+binding**. Three target forms resolve it:
+
+- the three original tuples, `(effect, field)` / `(effect, field, element)` /
+  `(effect, field, element, factor, unit_key)`, are unchanged and always mean **channel 1** —
+  a single-channel spec never writes anything else, so every existing hand-built binding and every
+  deck-driven one keeps compiling and keeps meaning what it always meant;
+- the new `NamedTuple` form, `(channel = c, effect = i, field = :f[, element, factor, unit_key])`,
+  names its channel explicitly and is the only form a joint spec's channel-2-and-beyond bindings
+  use; an unknown key, a missing `channel`/`effect`/`field`, or a `channel` outside
+  `1:length(expts)` is a loud error naming the variable (PM29's three errors).
+
+A variable may be bound into **more than one channel** — the same field of the same effect
+*index* in two different channels is two different parameters and is legal (D32); the same field
+of the same effect index **within one channel** is still refused by `_rebuild_effect`'s
+`only(matching)`, exactly as before. The one-conversion-factor rule (Section 3) is unchanged and
+reads **per variable name**, so a variable bound into both channels' `Sensitivity.scale` (a shared
+gain) is one factor, checked across every one of its bindings regardless of channel.
+
+**`unflatten(expt, pspec, theta; channel = 1)`** applies every `:leaf` binding exactly as before
+(the shared plasma does not care which channel is asking), but only the `:effect` bindings with
+`b.channel == channel` rebuild `expt`'s own effects — so calling `unflatten` on channel 2's
+`Experiment` with `channel = 2` sees only channel 2's own effect bindings, and channel 1's
+`scale`/background/calibration bindings are simply never looked at, by construction, not by a
+value happening to be absent. **Every call to `unflatten` on a `FitProblem`'s own experiment must
+pass `channel = problem.channel`** (Pitfall 23): the two production call sites are
+`residuals!`/`jvp!`'s underlying `residuals!(r, problem::FitProblem, theta)`
+(`src/inversion/residuals.jl`) and `jacobian(problem::FitProblem, theta)`
+(`src/inversion/jacobian.jl`); `_build_result` (`src/inversion/optimizers.jl`) calls it once per
+channel of whichever problem it was given, `channel = ch.channel` for each. Missing the keyword
+anywhere silently reads as "channel 1", which applies a channel-2 binding to channel 1's effect of
+the same index whenever the two happen to share a field name, and raises a `parameters`-layer
+error (or does nothing at all) when they do not — the trap is silent precisely when it looks most
+innocuous, which is why MC8 and the chunk 6 discrimination check's revert (a) exist.
+
+The Jacobian's own channel filter (`src/inversion/jacobian.jl`) mirrors `unflatten`'s in three
+places, all gated on the same `b.channel == channel` test: `_collect_kernel_bindings` (which
+kernel-stage effect bindings seed the per-bin dual pass), the kernel-global selection loop (which
+scalar variables get a `kernel_globals` column at all), and `_build_chain_globals` (which chain-
+stage bindings get a closed-form column). A variable bound only into another channel therefore
+never becomes a global of this channel's Jacobian: its column is identically zero because nothing
+ever writes to it, not because something computes zero and writes it (JT18).
