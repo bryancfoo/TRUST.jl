@@ -219,6 +219,29 @@ anticipated ("a later joint EPW/IAW fit ... turns this into a version bump"); th
 alongside the fitted model, the effect parameters and, when the problem is given, the residual and
 mask.
 
+**`laplace/` and `calibration_scan/` groups, inside the same `otis-result-3` (Step 4.A.4a, D47).**
+Neither is a version bump: D17 forbids a *second* bump within the phase, not a dataset added
+inside the one bump already made, and both groups are written only when `write_result` is given
+the matching keyword, so an old `otis-result-3` file (chunk 7's, with neither group) still reads
+back exactly as before -- `read_result`'s `laplace`/`calibration_scan` fields are `nothing` when
+the file carries no such group. **`laplace` must satisfy `laplace.theta == result.theta` exactly**
+(a loud error otherwise, naming the mismatch): `write_result` has no other way to know the
+`LaplaceResult` it is given was computed at the θ `result` itself reports. The `p x p` covariances
+are never written (13 MB at `p = 1280`); only the per-variable σ and the near-bound flag are.
+
+| Dataset | Type | Shape | Required |
+|---|---|---|---|
+| `laplace/decrease` | `Float64` | scalar | only with `laplace` |
+| `laplace/variables/<name>/sigma_post`, `sigma_samp` | `Float64` | `(N_t)` or `(1)`, `NaN` kept | yes, one group per fitted variable |
+| `laplace/variables/<name>/near_bound` | `UInt8` | `(N_t)` or `(1)` | yes |
+| `calibration_scan/shifts_nm` | `Float64` | `(N_shifts)` | only with `calibration_scan` |
+| `calibration_scan/channel` | `Int64` | scalar | yes |
+| `calibration_scan/base_offset_nm` | `Float64` | scalar | yes |
+| `calibration_scan/chi2`, `objective`, `decrease` | `Float64` | `(N_shifts)` | yes |
+| `calibration_scan/status` | `String` | `(N_shifts)` | yes |
+| `calibration_scan/variables/<name>/delta` | `Float64` | `(N_t or 1, N_shifts)` | yes, one group per variable |
+| `calibration_scan/variables/<name>/s_sys` | `Float64` | `(N_t)` or `(1)` | yes |
+
 **`read_trace` gains an `as` keyword** (`:arrays`, unchanged and default, or `:trace`, spec D35),
 once the component registry (`conventions.md` 7.2) exists to look shape names up in; the trace
 layout itself, `TRACE_LAYOUT_VERSION` and `read_streak`/`write_streak`/`write_trace` are

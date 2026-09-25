@@ -31,6 +31,7 @@ include("inversion/regularizer.jl")       # new (3.3): AbstractRegularizerTerm, 
 include("inversion/objective.jl")         # new (3.4a): objective, FitResult
 include("inversion/optimizers.jl")        # new (3.4b): AbstractOptimizer, the four optimizers, solve
 include("inversion/weight_scan.jl")       # new (3.5): weight_scan, WeightScanResult
+include("inversion/uncertainty.jl")       # new (4.A.4a): normal_matrices, gn_decrease, polish, laplace, calibration_scan
 include("config/options.jl")              # new (3.6a): option structs, spec D32
 include("config/registry.jl")             # new (3.6a): component registries, spec D32
 include("data/result.jl")                 # new (3.6a): write_result/read_result, spec D34
@@ -110,6 +111,10 @@ export AbstractOptimizer, LBFGS, LevenbergMarquardt, NoisyGradientDescent, Optim
 
 # inversion (3.5)
 export weight_scan, WeightScanResult
+
+# inversion (4.A.4a): the uncertainty reports
+export polish, gn_decrease, normal_matrices, laplace, LaplaceResult, calibration_scan,
+       CalibrationScanResult
 
 # plotting stubs (2.4 declares them, 2.6 gives Makie methods)
 export streakplot, streakplot!, spectrumplot, spectrumplot!,

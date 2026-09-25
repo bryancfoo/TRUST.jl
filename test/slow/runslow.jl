@@ -17,4 +17,5 @@ using Test
     @safetestset "foo2026 reproductions (cut-down)" begin include("test_reproduce.jl") end
     @safetestset "streak averaging (slow)" begin include("test_average.jl") end
     @safetestset "two-channel problem (slow)" begin include("test_two_channel.jl") end
+    @safetestset "uncertainty (slow)" begin include("test_uncertainty.jl") end
 end

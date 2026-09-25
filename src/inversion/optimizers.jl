@@ -596,9 +596,12 @@ curvature of `JᵀJ` along one direction `u` drawn from `Xoshiro(opt.seed)` (`s 
 
 Termination, checked before each trial step: `‖grad_y O‖_inf <= opt.g_abstol` gives
 `:gradient_norm`; after an accepted step, `‖delta‖ <= opt.x_reltol * (‖y‖ + opt.x_reltol)` gives
-`:x_tolerance`; exhausting `opt.iterations` gives `:iterations`. Every **accepted** iterate
-appends `(k, 𝒪, chi2, R)` to the trajectory, `k` the outer loop's own counter, so a run with
-rejected steps has gaps in `k`.
+`:x_tolerance`; exhausting `opt.iterations` gives `:iterations`. **A rejected step whose predicted
+reduction `pred` is at or below round-off (`2*pred <= 1e-12 * max(2F, 1.0)`) also gives
+`:f_tolerance`** (D44): without this, a start already at a minimum (a restart at its own converged
+theta) rejects every trial step forever, doubling `mu` without bound until an overflowed `mu`
+reaches CGLS as a `NaN`. Every **accepted** iterate appends `(k, 𝒪, chi2, R)` to the trajectory,
+`k` the outer loop's own counter, so a run with rejected steps has gaps in `k`.
 
 `cgls_iterations`, given a `Vector{Int}`, has one entry per attempted outer iteration (accepted
 or not) pushed onto it: the number of CGLS iterations that trial step took (D43 item 9's
@@ -685,6 +688,15 @@ function solve(problem::AbstractFitProblem, opt::LevenbergMarquardt;
                 break
             end
         else
+            if 2 * pred <= 1e-12 * max(2 * F, 1.0)
+                # The model predicts no decrease above round-off (D44): every trial step from
+                # here is rejected and mu would otherwise double without bound (33 rejections
+                # reach mu = 9e161 on the MC fixture, and the next CGLS's 2000-iteration cap
+                # returns a NaN). theta is already a minimum to CGLS's own precision.
+                status = :f_tolerance
+                converged = true
+                break
+            end
             mu *= nu
             nu *= 2.0
         end

@@ -109,19 +109,35 @@ end
 """
     write_result(path, result::FitResult; problem::Union{Nothing,AbstractFitProblem} = nothing,
                  deck = "", source = "fit",
-                 scan::Union{Nothing,WeightScanResult} = nothing) -> path
+                 scan::Union{Nothing,WeightScanResult} = nothing,
+                 laplace::Union{Nothing,LaplaceResult} = nothing,
+                 calibration_scan::Union{Nothing,CalibrationScanResult} = nothing) -> path
 
-Writes `result` (and, if given, `scan`) to `path` as a JLD2 file of plain numeric arrays and
-strings (`docs/derivations/data_layout.md` Section 3, spec D34, D40): `layout_version`, a `meta`
-group, the effective `deck` text, the axis, one group per fitted variable and per dependent, one
-group per leaf of the fitted trace, the `fit/*` scalars and vectors (including, since
-`otis-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`; `fit/chi2` and
-`fit/npixels` are the **weighted total** and the **sum over channels** for a `JointFitProblem`
-result, D40), the `trajectory/*` arrays, `channels/names` and, per channel (D40), the six summary
-scalars, `lambda`, `model` and `effects/*`, and, only when `problem !== nothing`, `residual` and
-`mask`; and, only when `scan !== nothing`, the `scan/*` arrays (including `scan/status` and
-`scan/termination`, one string per requested weight each) and per-variable `scan/rss*` groups,
-including `scan/rss_unreg/<variable>`.
+Writes `result` (and, if given, `scan`, `laplace` and `calibration_scan`) to `path` as a JLD2 file
+of plain numeric arrays and strings (`docs/derivations/data_layout.md` Section 3, spec D34, D40,
+D47): `layout_version`, a `meta` group, the effective `deck` text, the axis, one group per fitted
+variable and per dependent, one group per leaf of the fitted trace, the `fit/*` scalars and
+vectors (including, since `otis-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`;
+`fit/chi2` and `fit/npixels` are the **weighted total** and the **sum over channels** for a
+`JointFitProblem` result, D40), the `trajectory/*` arrays, `channels/names` and, per channel
+(D40), the six summary scalars, `lambda`, `model` and `effects/*`, and, only when `problem !==
+nothing`, `residual` and `mask`; and, only when `scan !== nothing`, the `scan/*` arrays (including
+`scan/status` and `scan/termination`, one string per requested weight each) and per-variable
+`scan/rss*` groups, including `scan/rss_unreg/<variable>`.
+
+**`laplace` (D47), only when given**: `laplace/decrease`, and, per variable,
+`laplace/variables/<name>/sigma_post`, `.../sigma_samp` (`Vector{Float64}`, `NaN` kept) and
+`.../near_bound` (`UInt8`) -- **not** the `p x p` covariances (13 MB at `p = 1280`). Must satisfy
+`laplace.theta == result.theta` exactly, else a loud error (`write_result` has no other way to
+know `laplace` was computed at the θ `result` reports).
+
+**`calibration_scan` (D47), only when given**: `calibration_scan/shifts_nm`, `channel`,
+`base_offset_nm`, `chi2`, `objective`, `decrease` and `status` (strings), and, per variable,
+`calibration_scan/variables/<name>/delta` (`Matrix`) and `.../s_sys`.
+
+Both groups are written inside `otis-result-3` (D17 forbids a *second* bump within the phase, not
+a dataset added inside the one bump already made); **RE1's exact key set is unchanged**, since
+neither group is written without its keyword.
 
 When `problem` is given, `problem.pspec === result.pspec` is required (a loud error otherwise,
 naming what to pass instead): `write_result` has no other way to know the problem it is given is
@@ -130,11 +146,13 @@ the one `result` was actually fitted from, and the residual needs the problem's 
 `nothing` for them -- the three `examples/fit_*.jl`, `test_result.jl` and `test_reproduce.jl` all
 called `write_result` this way before chunk 7 and stay legal (D40 item 9).
 
-Spec D34, D35, D40.
+Spec D34, D35, D40, D47.
 """
 function write_result(path::AbstractString, result::FitResult;
     problem::Union{Nothing,AbstractFitProblem}=nothing, deck::AbstractString="",
-    source="fit", scan::Union{Nothing,WeightScanResult}=nothing)
+    source="fit", scan::Union{Nothing,WeightScanResult}=nothing,
+    laplace::Union{Nothing,LaplaceResult}=nothing,
+    calibration_scan::Union{Nothing,CalibrationScanResult}=nothing)
     pspec = result.pspec
     nt = nbins(pspec.trace)
     unit_keys = _variable_unit_keys(pspec.bindings)
@@ -143,6 +161,11 @@ function write_result(path::AbstractString, result::FitResult;
         problem.pspec === result.pspec || throw(ArgumentError(
             "write_result: problem.pspec is not === result.pspec; pass the problem the result " *
             "was fitted from"))
+    end
+
+    if laplace !== nothing
+        laplace.theta == result.theta || throw(ArgumentError(
+            "write_result: laplace was computed at a different θ than result.theta"))
     end
 
     jldopen(path, "w") do f
@@ -260,6 +283,31 @@ function write_result(path::AbstractString, result::FitResult;
                 f["scan/rss_unreg/$name"] = Float64(v)
             end
         end
+
+        if laplace !== nothing
+            f["laplace/decrease"] = Float64(laplace.decrease)
+            for (name, sp) in laplace.sigma_post
+                prefix = "laplace/variables/$name"
+                f["$prefix/sigma_post"] = Vector{Float64}(sp)
+                f["$prefix/sigma_samp"] = Vector{Float64}(laplace.sigma_samp[name])
+                f["$prefix/near_bound"] = UInt8.(laplace.near_bound[name])
+            end
+        end
+
+        if calibration_scan !== nothing
+            f["calibration_scan/shifts_nm"] = Vector{Float64}(calibration_scan.shifts_nm)
+            f["calibration_scan/channel"] = Int64(calibration_scan.channel)
+            f["calibration_scan/base_offset_nm"] = Float64(calibration_scan.base_offset_nm)
+            f["calibration_scan/chi2"] = Vector{Float64}(calibration_scan.chi2)
+            f["calibration_scan/objective"] = Vector{Float64}(calibration_scan.objective)
+            f["calibration_scan/decrease"] = Vector{Float64}(calibration_scan.decrease)
+            f["calibration_scan/status"] = String[string(s) for s in calibration_scan.status]
+            for (name, m) in calibration_scan.delta
+                prefix = "calibration_scan/variables/$name"
+                f["$prefix/delta"] = Matrix{Float64}(m)
+                f["$prefix/s_sys"] = Vector{Float64}(calibration_scan.s_sys[name])
+            end
+        end
     end
     return path
 end
@@ -274,20 +322,30 @@ end
 
 Reads a result written by `write_result`, returning plain arrays and strings, like `read_trace`'s
 own `:arrays` mode: `(; layout_version, meta, deck, axis_name, axis, axis_unit,
-axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan)`. `variables`
-and `dependents` are `Dict{String,<:NamedTuple}` keyed by name; `leaves` is
-`Dict{String,Vector{Float64}}` keyed by SI leaf path; `fit` and `trajectory` are `NamedTuple`s of
-the file's own `fit/*` and `trajectory/*` datasets; `channels` (D40) is a `Vector{<:NamedTuple}`,
-one per channel in channel order, each `(; name, weight, chi2, npixels, nparams, reduced_chi2,
-reduced_chi2_simple, lambda, model, effects, residual, mask)` -- `effects` a `Vector` of
-`(; type::String, parameters::Dict{String,Any})` in index order, and `residual`/`mask` `nothing`
-when the file carries none (`write_result` was not given a problem); `scan` is `nothing` when the
-file carries no `scan/*` group, else a `NamedTuple` (`rss`/`rss_normalized` themselves
-`Dict{String,Vector{Float64}}` and `rss_unreg` `Dict{String,Float64}`, empty when the file carries
-no ground truth). Throws, naming the version found and expected, if `layout_version` does not
-match `RESULT_LAYOUT_VERSION`.
+axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan, laplace,
+calibration_scan)`. `variables` and `dependents` are `Dict{String,<:NamedTuple}` keyed by name;
+`leaves` is `Dict{String,Vector{Float64}}` keyed by SI leaf path; `fit` and `trajectory` are
+`NamedTuple`s of the file's own `fit/*` and `trajectory/*` datasets; `channels` (D40) is a
+`Vector{<:NamedTuple}`, one per channel in channel order, each `(; name, weight, chi2, npixels,
+nparams, reduced_chi2, reduced_chi2_simple, lambda, model, effects, residual, mask)` -- `effects`
+a `Vector` of `(; type::String, parameters::Dict{String,Any})` in index order, and `residual`/
+`mask` `nothing` when the file carries none (`write_result` was not given a problem); `scan` is
+`nothing` when the file carries no `scan/*` group, else a `NamedTuple` (`rss`/`rss_normalized`
+themselves `Dict{String,Vector{Float64}}` and `rss_unreg` `Dict{String,Float64}`, empty when the
+file carries no ground truth).
 
-Spec D34, D40.
+**`laplace` (D47)**: `nothing` when the file carries no `laplace/*` group, else `(; decrease,
+sigma_post, sigma_samp, near_bound)`, `sigma_post`/`sigma_samp`/`near_bound` each
+`Dict{String,Vector}` keyed by variable name.
+
+**`calibration_scan` (D47)**: `nothing` when the file carries no `calibration_scan/*` group, else
+`(; shifts_nm, channel, base_offset_nm, chi2, objective, decrease, status, delta, s_sys)`,
+`delta`/`s_sys` each `Dict{String,<:AbstractArray}` keyed by variable name.
+
+Throws, naming the version found and expected, if `layout_version` does not match
+`RESULT_LAYOUT_VERSION`.
+
+Spec D34, D40, D47.
 """
 function read_result(path::AbstractString)
     jldopen(path, "r") do f
@@ -380,7 +438,40 @@ function read_result(path::AbstractString)
             )
         end
 
+        laplace = nothing
+        if haskey(f, "laplace")
+            sigma_post = Dict{String,Vector{Float64}}()
+            sigma_samp = Dict{String,Vector{Float64}}()
+            near_bound = Dict{String,Vector{UInt8}}()
+            for nm in _read_group(f, "laplace/variables")
+                prefix = "laplace/variables/$nm"
+                sigma_post[nm] = f["$prefix/sigma_post"]
+                sigma_samp[nm] = f["$prefix/sigma_samp"]
+                near_bound[nm] = f["$prefix/near_bound"]
+            end
+            laplace = (decrease=f["laplace/decrease"], sigma_post=sigma_post, sigma_samp=sigma_samp,
+                near_bound=near_bound)
+        end
+
+        calibration_scan = nothing
+        if haskey(f, "calibration_scan")
+            delta = Dict{String,Matrix{Float64}}()
+            s_sys = Dict{String,Vector{Float64}}()
+            for nm in _read_group(f, "calibration_scan/variables")
+                prefix = "calibration_scan/variables/$nm"
+                delta[nm] = f["$prefix/delta"]
+                s_sys[nm] = f["$prefix/s_sys"]
+            end
+            calibration_scan = (
+                shifts_nm=f["calibration_scan/shifts_nm"], channel=f["calibration_scan/channel"],
+                base_offset_nm=f["calibration_scan/base_offset_nm"], chi2=f["calibration_scan/chi2"],
+                objective=f["calibration_scan/objective"], decrease=f["calibration_scan/decrease"],
+                status=f["calibration_scan/status"], delta=delta, s_sys=s_sys,
+            )
+        end
+
         return (; layout_version=version, meta, deck, axis_name, axis, axis_unit,
-            axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan)
+            axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan,
+            laplace, calibration_scan)
     end
 end

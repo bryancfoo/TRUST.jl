@@ -435,3 +435,139 @@ end
         @test_throws "as must be :arrays or :trace" read_trace(path; as=:bogus)
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# RE12, RE13 (A19, D47): laplace/ and calibration_scan/ inside otis-result-3. A joint,
+# two-channel fixture, built here (not shared across the @safetestset boundary): channel b
+# carries an unbound WavelengthCalibration, chunk 9's own uncertainty fixture (D35's MC fixture,
+# copied, dlam_b removed).
+# ------------------------------------------------------------------------------------------
+
+function _re12_template()
+    return Plasma(; n_e_cm3=3e19,
+        electrons=[electrons(T_eV=400.0)],
+        ions=[ion(name="D", mass_amu=2.014, charge=1, T_eV=200.0, u_kms=0.0)])
+end
+
+function _re12_experiments()
+    trace = PlasmaTrace(_re12_template(); t_ns=[0.0, 1.0, 2.0, 3.0])
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60.0, k_model=:exact)
+    lambda_a = collect(range(262.9, 263.6; length=16)) .* 1e-9
+    lambda_b = collect(range(262.2, 262.9; length=12)) .* 1e-9
+    expt_a = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_a,
+        effects=(SpectralIRF(fwhm_nm=0.08), Sensitivity(scale=1.0e-6), ConstantBackground(level=20.0)))
+    expt_b = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda_b,
+        effects=(WavelengthCalibration(lambda_offset_nm=0.01), SpectralIRF(fwhm_nm=0.12),
+            Sensitivity(scale=2.0e-6), ConstantBackground(level=15.0)))
+    return expt_a, expt_b
+end
+
+function _re12_pspec(expt_a::Experiment, expt_b::Experiment)
+    sens_a = findfirst(e -> e isa Sensitivity, expt_a.effects)
+    bg_a = findfirst(e -> e isa ConstantBackground, expt_a.effects)
+    sens_b = findfirst(e -> e isa Sensitivity, expt_b.effects)
+    bg_b = findfirst(e -> e isa ConstantBackground, expt_b.effects)
+
+    v_TD = FittedVariable("T_D"; bounds=(50.0, 800.0), init=200.0, time_varying=true)
+    v_Te = FittedVariable("T_e"; bounds=(100.0, 800.0), init=400.0)
+    v_scale_a = FittedVariable("scale_a"; bounds=(1e-7, 1e-5), init=1e-6)
+    v_scale_b = FittedVariable("scale_b"; bounds=(1e-7, 1e-5), init=1e-6)
+    v_bg = FittedVariable("bg"; bounds=(1.0, 60.0), init=20.0)
+
+    return ParameterSpec((expt_a, expt_b);
+        variables=[v_TD, v_Te, v_scale_a, v_scale_b, v_bg],
+        bindings=["T_D" => "ions.D.T_eV", "T_e" => "electrons.e.T_eV",
+            "scale_a" => (channel=1, effect=sens_a, field=:scale),
+            "scale_b" => (channel=2, effect=sens_b, field=:scale),
+            "bg" => (channel=1, effect=bg_a, field=:level),
+            "bg" => (channel=2, effect=bg_b, field=:level)])
+end
+
+function _re12_working(expt::Experiment, pspec::ParameterSpec)
+    return Experiment(; trace=pspec.trace, probe=expt.probe, collection=expt.collection,
+        lambda_m=expt.lambda, effects=expt.effects, prefactor=expt.prefactor)
+end
+
+_re12_regularizer(pspec::ParameterSpec) = Regularizer(
+    [RegularizerTerm(pspec; select=["T_D"], operator=:D2, normalization=:unit, weight=1.0)];
+    weight=1e-3)
+
+function _re12_joint_and_star()
+    expt_a, expt_b = _re12_experiments()
+    pspec = _re12_pspec(expt_a, expt_b)
+    reg = _re12_regularizer(pspec)
+    working_a = _re12_working(expt_a, pspec)
+    working_b = _re12_working(expt_b, pspec)
+    theta0 = flatten(pspec)
+    rng = Xoshiro(20260923)
+    truth_a = unflatten(working_a, pspec, theta0; channel=1)
+    data_a = synthesize(truth_a, GaussianNoise(a=1.0, b=0.02); rng=rng)
+    truth_b = unflatten(working_b, pspec, theta0; channel=2)
+    data_b = synthesize(truth_b, GaussianNoise(a=1.0, b=0.02); rng=rng)
+    ch_a = FitProblem(working_a, pspec, data_a; channel=1, name="a")
+    ch_b = FitProblem(working_b, pspec, data_b; channel=2, name="b")
+    jp = JointFitProblem((ch_a, ch_b); weights=[0.3, 2.0], regularizer=reg)
+    theta_start = theta0 .+ 0.02 .* (1:length(theta0))
+    r = solve(jp, LevenbergMarquardt(); start=theta_start)
+    pol = polish(jp, r)
+    return jp, pol.result
+end
+
+const _RE12_JP, _RE12_RESULT = _re12_joint_and_star()
+
+@testset "RE12: write_result with laplace (D47)" begin
+    lap = laplace(_RE12_JP, _RE12_RESULT.theta)
+    mktempdir() do dir
+        path = joinpath(dir, "result.jld2")
+        write_result(path, _RE12_RESULT; deck="d", laplace=lap)
+
+        jldopen(path, "r") do f
+            for (name, v) in _walk_leaf_values(f, "laplace")
+                @test v isa Union{AbstractArray{<:Real},AbstractArray{<:AbstractString},AbstractString,Real}
+            end
+        end
+
+        r = read_result(path)
+        @test r.laplace !== nothing
+        @test r.laplace.decrease == lap.decrease
+        for name in keys(lap.sigma_post)
+            @test isequal(r.laplace.sigma_post[name], lap.sigma_post[name])
+            @test isequal(r.laplace.sigma_samp[name], lap.sigma_samp[name])
+            @test r.laplace.near_bound[name] == UInt8.(lap.near_bound[name])
+        end
+
+        r2 = solve(_RE12_JP, LevenbergMarquardt(); start=_RE12_RESULT.theta .+ 0.01)
+        wrong_lap = laplace(_RE12_JP, polish(_RE12_JP, r2).result.theta)
+        @test_throws r"different θ than result.theta" write_result(path, _RE12_RESULT; laplace=wrong_lap)
+    end
+end
+
+@testset "RE13: write_result with calibration_scan (D47)" begin
+    scan = calibration_scan(_RE12_JP, _RE12_RESULT.theta, [-0.01, 0.0, 0.01]; channel=2)
+    mktempdir() do dir
+        path = joinpath(dir, "result.jld2")
+        write_result(path, _RE12_RESULT; deck="d", calibration_scan=scan)
+
+        jldopen(path, "r") do f
+            for (name, v) in _walk_leaf_values(f, "calibration_scan")
+                @test v isa Union{AbstractArray{<:Real},AbstractArray{<:AbstractString},AbstractString,Real}
+            end
+        end
+
+        r = read_result(path)
+        cs = r.calibration_scan
+        @test cs !== nothing
+        @test cs.shifts_nm == scan.shifts_nm
+        @test cs.channel == scan.channel
+        @test cs.base_offset_nm == scan.base_offset_nm
+        @test isequal(cs.chi2, scan.chi2)
+        @test isequal(cs.objective, scan.objective)
+        @test isequal(cs.decrease, scan.decrease)
+        @test cs.status == string.(scan.status)
+        for name in keys(scan.delta)
+            @test isequal(cs.delta[name], scan.delta[name])
+            @test isequal(cs.s_sys[name], scan.s_sys[name])
+        end
+    end
+end
