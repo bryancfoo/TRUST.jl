@@ -48,6 +48,23 @@ model (OQ-14) — and it is visibly right-skewed rather than symmetric, because 
 the streak's pixels sit at or near the background level, where Poisson statistics are furthest
 from Gaussian; both are the model behaving as documented, not a rendering artefact.
 
+## `two_channel_fit.png`
+
+![Two-channel joint fit](two_channel_fit.png)
+
+*No counterpart in foo2026.* Phase 4.A Step 4.A.3c (spec D41): the synthetic two-channel problem
+— the EPW ablation plasma plus a time-varying deuterium temperature, seen by an EPW camera
+(220–260 nm, blind to `T_D`) and an IAW camera (262–264.5 nm, only weakly sensitive to `n_e`)
+through one probe and one collection. Four panels (`n_e`, `T_e`, `m_e`, `T_D` against `t`), each
+against the truth, for the joint fit and for each single-channel fit with every variable still
+free: the EPW-only fit reproduces `n_e`, `T_e` and `m_e` but lets `T_D` wander to its bound; the
+IAW-only fit reproduces `T_D` but lets `T_e` and `m_e` wander; the joint fit recovers all four.
+**Generated separately from the five above**, by
+[`make_two_channel_figure.jl`](make_two_channel_figure.jl), which reads the three result files
+`examples/fit_two_channel.jl` writes (`runs/two_channel/{joint,epw,iaw}/result.jld2`) rather than
+synthesizing anything itself — run `examples/two_channel.jl` and `examples/fit_two_channel.jl`
+first. Not part of `make_figures.jl`/`FIGURE_NAMES` (FG1 asserts exactly five files).
+
 ## Regenerating
 
 ```
@@ -57,3 +74,11 @@ julia --project=examples/figures examples/figures/make_figures.jl
 
 These five PNGs are committed and regenerated only when the physics, the profiles or the
 plotting API change — not routinely, and never hand-edited (`conventions.md` 10.4).
+`two_channel_fit.png` is regenerated the same way, but by its own script, after
+`examples/fit_two_channel.jl` has written its three result files:
+
+```
+julia --project=. examples/two_channel.jl
+julia --project=. examples/fit_two_channel.jl
+julia --project=examples/figures examples/figures/make_two_channel_figure.jl
+```

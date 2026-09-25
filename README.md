@@ -87,7 +87,14 @@ variation, over a nine-bin pre-shock interval, is likewise not smoothed by regul
 regularization, consistent with a short-interval noise-floor effect rather than a solver defect.
 Step 3.8 adds `WarpMap` and `dewarp`, the OMEGA streak's geometric correction, built and tested
 against a synthetic warp; no real OMEGA streak was available this chunk, so a first fit of one
-has not been run. Phase 4, the extensions, is next. The roadmap is kept outside this tree.
+has not been run. Phase 4 (the extensions) is under way: a fit can now be driven by a
+multi-channel deck (`channels`/`[channel.<name>]`), joining several streaks that share one plasma
+into one `JointFitProblem`. `examples/two_channel.jl` and `examples/fit_two_channel.jl`
+synthesize a two-camera EPW/IAW streak pair from one plasma — an EPW camera that sees density,
+temperature and the super-Gaussian exponent but is blind to the ion temperature, and an IAW
+camera the other way round — and fit it jointly and single-channel; `examples/figures/two_channel_fit.png`
+is the committed figure showing each channel pinning what the other barely sees. The roadmap is
+kept outside this tree.
 
 ## Installing and testing
 

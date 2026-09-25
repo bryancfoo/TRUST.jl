@@ -565,6 +565,10 @@ end
                     @test isnan(summ.residual[idx])
                 end
             end
+            # Carried (chunk 7's review): the stored model is the right channel's own -- a
+            # write_result that stored the wrong channel's model would still pass the check
+            # above, since it recomputes (model - D)/sigma from that SAME stored model.
+            @test isapprox(summ.residual[ch.pixel_index], residuals(ch, result.theta); rtol=1e-12)
         end
 
         a_summ = r.channels[findfirst(c -> c.name == "a", r.channels)]

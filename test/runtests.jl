@@ -74,6 +74,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("joint fit")
         @safetestset "joint fit" begin include("inversion/test_joint.jl") end
     end
+    if _wanted("two-channel problem")
+        @safetestset "two-channel problem" begin include("inversion/test_two_channel.jl") end
+    end
     if _wanted("regularizer")
         @safetestset "regularizer" begin include("inversion/test_regularizer.jl") end
     end

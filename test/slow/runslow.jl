@@ -16,4 +16,5 @@ using Test
     @safetestset "figure gallery" begin include("test_figures.jl") end
     @safetestset "foo2026 reproductions (cut-down)" begin include("test_reproduce.jl") end
     @safetestset "streak averaging (slow)" begin include("test_average.jl") end
+    @safetestset "two-channel problem (slow)" begin include("test_two_channel.jl") end
 end
