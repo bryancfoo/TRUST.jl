@@ -221,24 +221,34 @@ end
 end
 
 @testset "SG17: _upper_gamma dispatch" begin
+    # The oracle is an independent BigFloat quadrature, in SG18's own form (Phase 4.A
+    # remediation round 2, D49, conventions.md 8.2: a library special function is never its own
+    # oracle -- the original oracle here was gamma(a0, t0) itself, which could not see the
+    # SpecialFunctions 2.9.0 expint fault D49 fixes, since (a0, t0) = (0.7, 1.3) lies outside
+    # every fault window regardless.
     a0, t0 = 0.7, 1.3
+    ref = setprecision(BigFloat, 128) do
+        Float64(quadgk(s -> s^(big(a0) - 1) * exp(-s), big(t0), big(t0) + 1, big(Inf);
+                       rtol = big(1e-25), atol = big(1e-60))[1])
+    end
+
     v_plain = _upper_gamma(a0, t0)
     @test isfinite(v_plain)
-    @test isapprox(v_plain, gamma(a0, t0); rtol = 1e-14)
+    @test isapprox(v_plain, ref; rtol = 1e-14)
 
     da = ForwardDiff.Dual{:TagA}(a0, 1.0)
     dt = ForwardDiff.Dual{:TagA}(t0, 1.0)
     v_both = _upper_gamma(da, dt)
     @test isfinite(ForwardDiff.value(v_both))
-    @test isapprox(ForwardDiff.value(v_both), gamma(a0, t0); rtol = 1e-14)
+    @test isapprox(ForwardDiff.value(v_both), ref; rtol = 1e-14)
 
     v_da = _upper_gamma(da, t0)
     @test isfinite(ForwardDiff.value(v_da))
-    @test isapprox(ForwardDiff.value(v_da), gamma(a0, t0); rtol = 1e-14)
+    @test isapprox(ForwardDiff.value(v_da), ref; rtol = 1e-14)
 
     v_dt = _upper_gamma(a0, dt)
     @test isfinite(ForwardDiff.value(v_dt))
-    @test isapprox(ForwardDiff.value(v_dt), gamma(a0, t0); rtol = 1e-14)
+    @test isapprox(ForwardDiff.value(v_dt), ref; rtol = 1e-14)
 
     nested = ForwardDiff.derivative(
         aa -> ForwardDiff.derivative(tt -> _upper_gamma(aa, tt), t0), a0)
@@ -569,4 +579,60 @@ end
             @test typeof(mo32) === Float64
         end
     end
+end
+
+# --- Phase 4.A remediation round 2 (2026-09-25): D49, phi's incomplete gamma from gamma_inc ---
+
+# An independent Gamma(a, t) oracle (conventions.md 8.2): quadgk directly on the integral
+# definition, never SpecialFunctions' own incomplete gamma in either form (gamma(a,t) or
+# gamma_inc), so it cannot share the SpecialFunctions 2.9.0 expint fault D49 routes around.
+_sg22_oracle(a, t) = quadgk(s -> s^(a - 1) * exp(-s), t, t + 1, Inf; rtol = 1e-13)[1]
+
+@testset "SG22: phi against an independent Gamma(a, t) oracle, through both call paths (Phase 4.A remediation 2, 2026-09-25)" begin
+    # The four named points sit inside SpecialFunctions 2.9.0's expint fault windows (D49); f.C
+    # and f.x0 are complete-gamma values (checked by SG1, SG3), so using them here still checks
+    # only the incomplete Gamma.
+    named = ((4.135458073856614, 1.3524), (4.045, 1.345), (5.25, 1.42), (6.0, 1.45))
+    for (m, x) in named
+        f = SuperGaussian(m)
+        ref = f.C * _sg22_oracle(2 / m, abs(x / f.x0)^m)
+
+        v_plain = f(x)
+        @test isapprox(v_plain, ref; rtol = 1e-12)
+
+        v_dual = ForwardDiff.value(SuperGaussian(ForwardDiff.Dual{:SG22}(m, 1.0))(x))
+        @test isapprox(v_dual, ref; rtol = 1e-12)
+    end
+
+    # The grid: 261 x 146 = 38 106 points, worst relative error tracked per path rather than one
+    # @test per point (conventions.md rule against a meaningless per-point assertion count).
+    worst_plain = 0.0
+    worst_plain_pt = (NaN, NaN)
+    worst_dual = 0.0
+    worst_dual_pt = (NaN, NaN)
+    for m in 1.5:0.025:8.0
+        f = SuperGaussian(m)
+        fd = SuperGaussian(ForwardDiff.Dual{:SG22}(m, 1.0))
+        for x in 0.1:0.02:3.0
+            t = abs(x / f.x0)^m
+            raw = _sg22_oracle(2 / m, t)
+            raw <= 1e-200 && continue
+            ref = f.C * raw
+
+            err_plain = abs(f(x) - ref) / abs(ref)
+            if err_plain > worst_plain
+                worst_plain = err_plain
+                worst_plain_pt = (m, x)
+            end
+
+            err_dual = abs(ForwardDiff.value(fd(x)) - ref) / abs(ref)
+            if err_dual > worst_dual
+                worst_dual = err_dual
+                worst_dual_pt = (m, x)
+            end
+        end
+    end
+    @info "SG22 grid worst relative error" worst_plain worst_plain_pt worst_dual worst_dual_pt
+    @test worst_plain <= 1e-12
+    @test worst_dual <= 1e-12
 end

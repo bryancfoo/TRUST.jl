@@ -2,7 +2,7 @@
 # F(v) ∝ exp(-|v/v_m|^m), NOT exp(-|x|^m) (a different, lighter-tailed shape, Phase 4).
 # See docs/derivations/supergaussian.md.
 
-using SpecialFunctions: gamma, digamma
+using SpecialFunctions: gamma, gamma_inc, digamma
 using QuadGK: quadgk
 import ForwardDiff
 
@@ -247,9 +247,10 @@ dual in `m` (`_sg_nested_dual`, above); and `m` or `|x|` outside `SG_DM_TABLE`'s
 the table object itself, never duplicated ([OQ-31](../../dev/open_questions.md#oq-31) item 3).
 
 **The fast assembly**, with `m0`, `x0v`, `Cv` and `xv` all plain floats of the primal type: `val`
-is `φ` at the primal `(x0v, Cv, m0)` in closed form (never through `_upper_gamma`, so no
-quadrature runs on this path at all); `dx` is `dφ/dx` in the same closed form `dfdx` uses,
-never the chain rule through `Γ` ([OQ-9](../../dev/open_questions.md#oq-9) trap 1: that path is
+is `φ` at the primal `(x0v, Cv, m0)`, through `_upper_gamma`'s plain `(Real, Real)` method so that
+φ's value has one source (D49, 2026-09-25) — that method is `gamma_inc(a, t)[2] * gamma(a)`, not a
+quadrature, so no quadrature runs on this path at all; `dx` is `dφ/dx` in the same closed form
+`dfdx` uses, never the chain rule through `Γ` ([OQ-9](../../dev/open_questions.md#oq-9) trap 1: that path is
 `∞·0` at `x = 0`); `dm` is `∂φ/∂m` read out of `SG_DM_TABLE`'s slice by one Clenshaw evaluation
 in `|x|`. **The last line is the whole trick and is not a flourish**: `x - xv` has value exactly
 zero and partials exactly `x`'s, and `f.m - m0` likewise for `m`, so the returned expression has
@@ -278,7 +279,7 @@ function _sg_call(f::SuperGaussian{D,L,LM}, x::Real) where {D<:ForwardDiff.Dual,
     x0v = ForwardDiff.value(f.x0)
     Cv = ForwardDiff.value(f.C)
     xv = _primal_value(x)
-    val = iszero(xv) ? Cv * gamma(2 / m0) : Cv * gamma(2 / m0, (ax / x0v)^m0)
+    val = iszero(xv) ? Cv * gamma(2 / m0) : Cv * _upper_gamma(2 / m0, (ax / x0v)^m0)
     dx = iszero(xv) ? zero(val) : -(m0 * Cv / x0v^2) * xv * exp(-(ax / x0v)^m0)
     dm = _sg_table_eval(SG_DM_TABLE, f.dm_slice, ax)
     return val + dx * (x - xv) + dm * (f.m - m0)
@@ -466,11 +467,22 @@ Base.show(io::IO, f::SuperGaussian) = print(io, "SuperGaussian(m = ", f.m, ")")
 
 The upper incomplete gamma function `Γ(a,t) = ∫_t^∞ s^{a−1} e^{−s} ds`, with a hand-written dual
 rule (spec D5, design (a)): `SpecialFunctions.gamma(a,t)` has no method for `ForwardDiff.Dual`
-arguments, so the both-dual method combines the value from `gamma(a,t)`, the a-partial from the
+arguments, so the both-dual method combines the value from `gamma_inc`, the a-partial from the
 quadrature `_dgamma_da`, and the t-partial from the elementary `∂Γ(a,t)/∂t = −t^{a−1}e^{−t}`
 (guarded at `t = 0`, where that elementary form is singular for `a < 1`, since `t = 0` there is
 never actually reached with a nonzero t-partial — the call method's own `x = 0` guard routes
 around this method entirely).
+
+**The value comes from `gamma_inc(a, t)[2] * gamma(a)`, not `SpecialFunctions.gamma(a, t)`
+directly** (D49, 2026-09-25): `gamma(a, t)` (SpecialFunctions 2.9.0) computes `t^a *
+expint(1 - a, t)`, and `expint`'s "ν near an integer" branch (`src/expint.jl`) is up to 5.3% wrong
+in windows of `t` whenever `a` sits near a half-integer — 227 of 1301 sampled `m ∈ [1.5, 8]` hit a
+fault window somewhere in `x ∈ [0.8, 2.2]`. `gamma_inc(a, t)` returns the regularized `(P, Q)` pair
+by a different algorithm (DiDonato and Morris) and agrees with a `quadgk` oracle to 1.5e-14 worst
+case over `m ∈ [1.5, 8] × x ∈ [0.1, 3]`; SG22 is the regression that checks it, through both call
+paths. **A library special function is never its own test oracle** (`conventions.md` 8.2): SG17
+originally compared this function's value against `gamma(a, t)` itself and so could not see the
+fault.
 
 **The a-partial is computed only when `a` actually carries partials** (corrected 2026-09-08,
 round 4, from Level 1's review): `(a::Real, t::Dual)` has its own body below, the t-partial alone,
@@ -499,7 +511,7 @@ recursion once the arguments share a type).
 
 PACM's incomplete gamma; spec D5; `docs/derivations/supergaussian.md`.
 """
-_upper_gamma(a::Real, t::Real) = gamma(a, t)
+_upper_gamma(a::Real, t::Real) = gamma_inc(a, t)[2] * gamma(a)
 
 function _upper_gamma(a::D, t::D) where {D<:ForwardDiff.Dual}
     a0 = ForwardDiff.value(a)

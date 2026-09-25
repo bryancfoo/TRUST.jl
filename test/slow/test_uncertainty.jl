@@ -76,18 +76,8 @@ end
     elapsed = time() - t0
     @info "CS4: calibration_scan elapsed (5 points)" elapsed per_point = elapsed / length(shifts)
 
-    # KNOWN FAILURE, reported not fixed (chunk 9 hand-off, dev/reports/phase4A_report.md): the
-    # -0.1 nm point's warm-started LM solve settles into an extremely narrow (~1e-5 wide in x)
-    # downward notch in chi2 at logn's bin-27 entry -- verified structural, not an optimizer-seed
-    # artefact: 8 different LevenbergMarquardt seeds and LBFGS all land within a factor of ~2 of
-    # each other's residual Gauss-Newton decrease (0.0031-0.0083), never below tol, and
-    # `maxsteps = 30` does not help since `polish`'s own first step already finds no decreasing
-    # direction at any tested alpha down to 1/2^20. Not a bug in normal_matrices/gn_decrease/
-    # polish/calibration_scan (each independently verified correct, UN1-UN6): a property of this
-    # 96-parameter, weakly-regularized (weight = 2e-4) fit's own noise realization and landscape.
-    # CLAUDE.md: "a fit that does not reach its stated accuracy is a finding... do not tune inits,
-    # bounds, weights, the regularizer or the optimizer to make it pass" -- so this row is left
-    # exactly as D46/Section 10.1 states it and is expected to fail here.
+    # Fixed by D49 (Phase 4.A remediation round 2, 2026-09-25): the -0.1 nm point's stall was a
+    # forward-model bug, not the optimizer -- see dev/phase4A_instructions.md Section 10.1R.
     @test all(scan.decrease .<= 1e-6)
     zero_idx = findfirst(iszero, scan.shifts_nm)
     @test scan.results[zero_idx].theta == theta_star

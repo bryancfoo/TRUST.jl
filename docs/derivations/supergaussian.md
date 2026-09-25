@@ -187,15 +187,30 @@ always takes over.
 
 ## 6. The incomplete-gamma derivative rule
 
-`SpecialFunctions.gamma(a, t)`, the two-argument upper incomplete gamma function used in `φ(x)`,
-has no `ForwardDiff.Dual` method, so `_upper_gamma` supplies one (spec D5, design (a) of three
-considered): combine the value from `gamma(a,t)`, the `a`-partial from a dedicated quadrature
+`SpecialFunctions.gamma(a, t)`, the two-argument upper incomplete gamma function, has no
+`ForwardDiff.Dual` method, so `_upper_gamma` supplies one (spec D5, design (a) of three
+considered): combine the value, the `a`-partial from a dedicated quadrature
 `_dgamma_da(a,t) = ∫_t^∞ s^{a−1}\ln(s)\,e^{−s}\,ds` (the closed form `Γ(a)ψ(a)` at `t = 0`), and
 the `t`-partial from the elementary `∂Γ(a,t)/∂t = −t^{a−1}e^{−t}`. The two other designs
 considered — a fully generic incomplete gamma implementation, or a dual argument carried inside a
 quadrature evaluated on every call — were rejected: the first would have to reproduce
 `SpecialFunctions`'s accuracy on the *value* itself for no measured benefit, and the second is a
 quadrature the shape cannot afford on every evaluation (`conventions.md` 5.2).
+
+**The value itself is `gamma_inc(a, t)[2] * gamma(a)`, not `SpecialFunctions.gamma(a, t)`
+directly** (D49, Phase 4.A remediation round 2, 2026-09-25). `gamma(a, t)` (SpecialFunctions
+2.9.0) computes `t^a * expint(1 - a, t)`, and `expint`'s "ν near an integer" series branch
+(`src/expint.jl`) is up to 5.3% wrong in windows of `t` whenever `a = 2/m` sits near a
+half-integer — 227 of 1301 sampled `m ∈ [1.5, 8]` (step 0.005) hit a fault window somewhere in
+`x ∈ [0.8, 2.2]`, e.g. 4.7% low at `m ≈ 4.135`. It touches only φ's *value*: the `x`-derivative
+(the closed form `dfdx` uses), `_dgamma_da`'s quadrature, and both tables (built from `dfdx` and
+from `_dgamma_da` respectively) are unaffected. `gamma_inc(a, t)` returns the regularized `(P, Q)`
+pair by a different algorithm (DiDonato and Morris) and agrees with a `quadgk` oracle to 1.5e-14
+worst case over `m ∈ [1.5, 8] × x ∈ [0.1, 3]` (test SG22, which checks both the plain call and the
+fast dual-`m` assembly of Section 7a, so that φ's value has one source regardless of path).
+**A library special function is never its own test oracle** (`conventions.md` 8.2): SG17
+originally compared `_upper_gamma`'s value against `gamma(a, t)` itself, so it could not see the
+fault; its oracle is now an independent BigFloat quadrature, in SG18's own form.
 
 **The `x`-partial of `φ` is never taken through `Γ`.** At `x = 0`, `iszero(x)` and `x == 0` are
 both `false` for a `ForwardDiff.Dual` whose value is zero but whose partials are not — the only
