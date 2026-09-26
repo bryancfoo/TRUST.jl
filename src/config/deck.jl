@@ -1298,39 +1298,22 @@ end
 # ------------------------------------------------------------------------------------------
 
 """
-    build_problem(deck::Deck) -> (AbstractFitProblem, AbstractOptimizer, Vector{Float64})
+    _read_channels(s::AbstractDict, chan_list::AbstractVector, regions_given::Bool)
+        -> (raw::Vector{StreakData}, probes::Vector{Any}, collections::Vector{Any})
 
-Builds the actual Julia objects a validated `Deck` describes (spec D33, D40): for each channel of
-`_channel_list(deck.sections)`, in order, reads and crops its data (`[data]`/`[channel.<n>.data]`),
-averages it onto `[[fit.regions]]` when given, and builds its probe and collection
-(`[geometry]`/`[channel.<n>.geometry]`, fixed). With one channel the trace axis is that channel's
-own averaged `t̄` (D14), bitwise unchanged from before chunk 7; with two or more it is the pooled
-mean of every channel's window counts (D39), and every channel's data is rebuilt on it. Builds the
-named intervals and fitted variables (`[fit.intervals]`, `[fit.variables]`, shared), the template
-plasma (`[plasma]`, shared) and each channel's own instrument chain
-(`[instrument]`/`[channel.<n>.instrument]`, every `_VarRef` substituted by its placeholder value
-and recorded as a binding -- the shorthand's five-element target, the channel form's named-tuple
-target carrying `channel`), one shared `ParameterSpec` over every channel's `Experiment` (which
-resolves every binding for real, D9, and rebuilds the trace with the union of leaves), the shared
-regularizer (`[regularizer]`) and the optimizer (`[optimizer]`). Returns a plain `FitProblem` for
-one channel or a `JointFitProblem` for two or more, the optimizer, and the start vector
-`flatten(pspec)`.
+`build_problem`'s first stage (D50, 2026-09-25), split out **unchanged** so the scatter (D51) can
+call it directly on the deck's own channels without re-reading through `average_regions`: for each
+channel of `chan_list`, in order, `read_streak`s its data file and crops it
+(`_crop_streak`, the lambda crop always, the time crop from `[data].t_range_ns`/
+`[channel.<n>.data].t_range_ns` **only when `!regions_given`** -- with regions the crop would
+silently discard what `average_regions` should see), and builds its probe and collection
+(`_build_geometry`). Not averaged yet -- that is `_average_channels`.
 
-Spec D33, D40.
+Spec D33, D40, D50.
 """
-function build_problem(deck::Deck)
-    s = deck.sections
-    is_channel_form = haskey(s, "channels")
-    chan_list = _channel_list(s)
+function _read_channels(s::AbstractDict, chan_list::AbstractVector, regions_given::Bool)
     nchannels = length(chan_list)
-
-    # Route B's master axis, the data averaged onto it rather than the model mapped to the
-    # detector's bins (OQ-34, decided 2026-09-21; D13-D16, D39). Only the time axis is averaged,
-    # and this is the only place average_regions is called from the deck.
-    regions_given = s["fit_regions"] !== nothing
-    regions = regions_given ? _build_averaging_regions(s["fit_regions"]) : AveragingRegion[]
-
-    chan_data = Vector{StreakData}(undef, nchannels)
+    raw = Vector{StreakData}(undef, nchannels)
     chan_probe = Vector{Any}(undef, nchannels)
     chan_collection = Vector{Any}(undef, nchannels)
     for c in 1:nchannels
@@ -1338,15 +1321,36 @@ function build_problem(deck::Deck)
         data0 = read_streak(chan["data"]["file"])
         data1 = _crop_streak(data0, get(chan["data"], "lambda_range_nm", nothing),
             regions_given ? nothing : get(chan["data"], "t_range_ns", nothing))
-        chan_data[c] = regions_given ?
-            average_regions(data1, regions; _averaging_kwargs(chan["data"])...) : data1
+        raw[c] = data1
         chan_probe[c], chan_collection[c] = _build_geometry(chan["geometry"])
     end
+    return raw, chan_probe, chan_collection
+end
 
-    # D39: with one channel the axis is that channel's own t̄, the very expression used before
-    # chunk 7 (Pitfall 27). With two or more, the pooled mean over every channel's window counts,
-    # a plain loop in channel order (never `sum` over a generator, so the summation order is
-    # fixed and reproducible).
+"""
+    _average_channels(raw::AbstractVector{StreakData}, chan_list::AbstractVector,
+                      regions::AbstractVector{AveragingRegion}) -> Vector{StreakData}
+
+`build_problem`'s second stage (D50, 2026-09-25), split out **unchanged**: `raw[c]` averaged onto
+`regions` with `_averaging_kwargs(chan_list[c]["data"])` when `regions` is non-empty, else `raw[c]`
+itself (Route B, OQ-34; D13-D16, D39). Then D39's axis -- one channel's own `t̄` (Pitfall 27,
+bitwise as before chunk 7), or, with two or more, the pooled mean of every channel's window counts,
+a plain loop in channel order so the summation order is fixed and reproducible -- and every
+channel's `StreakData` rebuilt on it.
+
+Spec D33, D40, D50, D39.
+"""
+function _average_channels(raw::AbstractVector{StreakData}, chan_list::AbstractVector,
+    regions::AbstractVector{AveragingRegion})
+    nchannels = length(chan_list)
+    regions_given = !isempty(regions)
+
+    chan_data = Vector{StreakData}(undef, nchannels)
+    for c in 1:nchannels
+        chan_data[c] = regions_given ?
+            average_regions(raw[c], regions; _averaging_kwargs(chan_list[c]["data"])...) : raw[c]
+    end
+
     axis = if nchannels == 1
         chan_data[1].t
     else
@@ -1370,6 +1374,27 @@ function build_problem(deck::Deck)
         chan_data[c] = StreakData(; lambda_m=d.lambda, t_s=axis, image=d.image, sigma=d.sigma,
             mask=d.mask, meta=d.meta)
     end
+    return chan_data
+end
+
+"""
+    _assemble_problem(s::AbstractDict, chan_list::AbstractVector, chan_data::AbstractVector{StreakData},
+                      chan_probe::AbstractVector, chan_collection::AbstractVector,
+                      regions::AbstractVector{AveragingRegion})
+        -> (AbstractFitProblem, AbstractOptimizer, Vector{Float64})
+
+`build_problem`'s third stage (D50, 2026-09-25), split out **unchanged**: from the "no usable
+pixel" check to the `return`, moved verbatim. `regions` feeds only the interval synthesis and the
+region-interval bins check (D15 amendment 1 and 4) -- `_read_channels`/`_average_channels` have
+already done everything the averaging itself needs.
+
+Spec D33, D40, D50, D15.
+"""
+function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
+    chan_data::AbstractVector{StreakData}, chan_probe::AbstractVector, chan_collection::AbstractVector,
+    regions::AbstractVector{AveragingRegion})
+    is_channel_form = haskey(s, "channels")
+    nchannels = length(chan_list)
 
     for c in 1:nchannels
         d = chan_data[c]
@@ -1377,6 +1402,8 @@ function build_problem(deck::Deck)
             "build_problem: channel \"$(chan_list[c]["name"])\" has no usable pixel (its mask " *
             "excludes every pixel)"))
     end
+
+    axis = chan_data[1].t
 
     axis_unit = Symbol(s["fit"]["axis_unit"])
     factor = axis_unit === :ns ? 1e-9 : 1.0
@@ -1475,6 +1502,41 @@ function build_problem(deck::Deck)
     optimizer = _build_optimizer(s["optimizer"])
     start = flatten(pspec)
     return problem, optimizer, start
+end
+
+"""
+    build_problem(deck::Deck) -> (AbstractFitProblem, AbstractOptimizer, Vector{Float64})
+
+Builds the actual Julia objects a validated `Deck` describes (spec D33, D40): for each channel of
+`_channel_list(deck.sections)`, in order, reads and crops its data (`[data]`/`[channel.<n>.data]`),
+averages it onto `[[fit.regions]]` when given, and builds its probe and collection
+(`[geometry]`/`[channel.<n>.geometry]`, fixed). With one channel the trace axis is that channel's
+own averaged `t̄` (D14), bitwise unchanged from before chunk 7; with two or more it is the pooled
+mean of every channel's window counts (D39), and every channel's data is rebuilt on it. Builds the
+named intervals and fitted variables (`[fit.intervals]`, `[fit.variables]`, shared), the template
+plasma (`[plasma]`, shared) and each channel's own instrument chain
+(`[instrument]`/`[channel.<n>.instrument]`, every `_VarRef` substituted by its placeholder value
+and recorded as a binding -- the shorthand's five-element target, the channel form's named-tuple
+target carrying `channel`), one shared `ParameterSpec` over every channel's `Experiment` (which
+resolves every binding for real, D9, and rebuilds the trace with the union of leaves), the shared
+regularizer (`[regularizer]`) and the optimizer (`[optimizer]`). Returns a plain `FitProblem` for
+one channel or a `JointFitProblem` for two or more, the optimizer, and the start vector
+`flatten(pspec)`.
+
+**Split into three stages at chunk 10 (D50, 2026-09-25)**: `_read_channels`, `_average_channels`
+and `_assemble_problem`, moved verbatim -- so that `slice_scatter` (D51) can call the same three
+stages on data it has averaged itself, one fine window at a time, without re-reading the streak
+files. Not one expression changed; the split is bitwise, checked in scratch against `4311330`.
+
+Spec D33, D40, D50.
+"""
+function build_problem(deck::Deck)
+    s = deck.sections
+    chan_list = _channel_list(s)
+    regions = s["fit_regions"] === nothing ? AveragingRegion[] : _build_averaging_regions(s["fit_regions"])
+    raw, probes, collections = _read_channels(s, chan_list, !isempty(regions))
+    chan_data = _average_channels(raw, chan_list, regions)
+    return _assemble_problem(s, chan_list, chan_data, probes, collections, regions)
 end
 
 # ------------------------------------------------------------------------------------------

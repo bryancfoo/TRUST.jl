@@ -200,9 +200,12 @@ quadrature the shape cannot afford on every evaluation (`conventions.md` 5.2).
 **The value itself is `gamma_inc(a, t)[2] * gamma(a)`, not `SpecialFunctions.gamma(a, t)`
 directly** (D49, Phase 4.A remediation round 2, 2026-09-25). `gamma(a, t)` (SpecialFunctions
 2.9.0) computes `t^a * expint(1 - a, t)`, and `expint`'s "ν near an integer" series branch
-(`src/expint.jl`) is up to 5.3% wrong in windows of `t` whenever `a = 2/m` sits near a
-half-integer — 227 of 1301 sampled `m ∈ [1.5, 8]` (step 0.005) hit a fault window somewhere in
-`x ∈ [0.8, 2.2]`, e.g. 4.7% low at `m ≈ 4.135`. It touches only φ's *value*: the `x`-derivative
+(`src/expint.jl`) is wrong in a window of `t` about 0.003 wide for **every `a = 2/m < 1/2`
+(`m > 4`)**; `m < 4` is unaffected. The edge is sharp: 7.8e-14 at m = 3.99, 5.5% at m = 4.01,
+falling to 1.9% at m = 5 and 7.8e-3 at m = 6, e.g. 4.7% low at `m ≈ 4.135` (corrected 2026-09-25,
+chunk 10: the fault does not need `a` near a half-integer, and the "227 of 1301" figure first
+quoted here was an undersampling at an x step of 0.005, which missed most windows). It touches
+only φ's *value*: the `x`-derivative
 (the closed form `dfdx` uses), `_dgamma_da`'s quadrature, and both tables (built from `dfdx` and
 from `_dgamma_da` respectively) are unaffected. `gamma_inc(a, t)` returns the regularized `(P, Q)`
 pair by a different algorithm (DiDonato and Morris) and agrees with a `quadgk` oracle to 1.5e-14

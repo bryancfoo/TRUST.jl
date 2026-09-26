@@ -93,6 +93,9 @@ end
     # more than one BLAS thread is not bitwise-reproducible run to run, which is exactly why
     # TH3 pins BLAS to one thread before comparing measure results. The pinned reference was
     # generated the same way.
+    # The *_MEASURE arrays match only under Pkg.test()'s --check-bounds=yes (Phase 4.A chunk 10,
+    # Level 3's finding, reproduced by Level 2): under the default flag they differ in up to 1 557
+    # entries at up to 8.1e-16, so re-pin them under --check-bounds=yes.
     prev = pin_blas_threads(1)
     try
         cases = (("EPW", _rf_epw_ablation, EPW_IDEAL, EPW_MEASURE),

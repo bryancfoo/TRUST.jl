@@ -4,6 +4,12 @@
 # RF1 and GA2 compare against these, bitwise (all(a .=== b)).
 
 # Re-pinned 2026-09-25 for D49 (Phase 4.A remediation round 2), after 9a66769: the eight SuperGaussian arrays above (D22_SPECTRUM_M{2,3,5}_0, GA2_COLUMN_N{1,5,7}, EPW_IDEAL, EPW_MEASURE) recomputed with _upper_gamma routed through gamma_inc rather than SpecialFunctions.gamma(a,t), whose expint fallback was up to 5.3% wrong in windows of t; the six Maxwellian arrays below are byte-identical to their prior pin.
+#
+# The *_MEASURE arrays (EPW_MEASURE, MULTIFLOW_MEASURE, SHOCK_MEASURE) match a fresh measure()
+# only under Pkg.test()'s --check-bounds=yes (Phase 4.A chunk 10, Level 3's finding, reproduced by
+# Level 2): under the default flag they differ in up to 1 571 entries at up to 8.1e-16, which
+# predates D49 (it affects the Maxwellian arrays too). A bitwise measure() reference is generated,
+# and re-pinned, under the flags Pkg.test() runs with (conventions.md 8.6, [propagate]).
 
 const D22_SPECTRUM_M2_0 = [
     1.3490557016641374e6,

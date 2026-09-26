@@ -148,6 +148,16 @@ On the MC fixture (channel 2, `[-0.01, 0.0, 0.01]` nm), χ² is 104.67 / 100.46 
 fixture's own offset (0.01 nm, unbound) is the scan's own minimum, as it must be, since the
 synthetic data were generated at it.
 
+**Update (chunk 10, 2026-09-25):** Section 7 below is chunk 9's own diagnostic narrative, kept as
+the record of how the needle was found. **The cause turned out to be D49, a forward-model bug in
+`SuperGaussian`'s φ** (`src/distributions/supergaussian.jl`, `docs/derivations/supergaussian.md`
+Section 6), not a property of this fit or this optimizer: `SpecialFunctions.gamma(a, t)`'s
+`expint` fallback was wrong by up to 5.5% in narrow windows of `t` for every `m > 4`, so the
+Gauss-Newton step's own model (built from a smooth, correct Jacobian) predicted a decrease the
+discontinuous φ never delivered. After D49, CS4 passes as written (`all(scan.decrease .<= 1e-6)`),
+with no change to this file, `polish`, `calibration_scan` or any tolerance. See
+`dev/reports/phase4A_report.md`'s round-2 section for the full trace.
+
 ## 7. CS4: a structural failure to reach `tol`, not a bug
 
 On the reproductions' own 128 x 32 EPW problem (96 fitted parameters, `weight = 2e-4`), the
@@ -187,3 +197,97 @@ edge that criterion tests, so this tiny, version-driven difference in the assemb
 enough to move it. `test/inversion/test_optimizers.jl`'s OP21 row therefore asserts
 `isapprox(...; rtol = 1e-6)` rather than `==`, with this paragraph's reasoning inlined as a comment
 at the row itself; see the chunk 9 hand-off for the user's decision on record.
+
+## 9. The per-slice scatter (Step 4.A.4b, D51)
+
+`slice_scatter` (`src/config/scatter.jl`) is the statistical half of Step 4.4's plan
+([OQ-24](../../dev/open_questions.md#oq-24) item 3): the full-resolution unregularized fit, at
+single-slice S/N, whose spread within each averaged bin is the uncertainty a bootstrap would
+measure directly, without synthesizing any noise. **The user's decision of 2026-09-25 (superseding
+an earlier per-camera answer, Section 10's head): with two cameras, the per-slice fit is a
+fine-grid *joint* fit**, not one fit per camera — averaging both cameras onto a shared grid of
+nested windows keeps the noise independent and σ correct, where interpolating one camera onto the
+other's times would mix neighbouring slices and correlate the noise (bias a scatter low).
+
+### 9.1 The fine grid
+
+Each `[[fit.regions]]` region `[lo, hi]` with `n` coarse bins of width `w = (hi - lo) / n` is
+covered by `n · m` **fine** windows of the same total extent, so every fine window nests exactly
+inside one coarse bin:
+
+```
+Delta_max = max slice spacing of any camera on its own recorded axis
+m         = floor(Int, (w / Delta_max) * (1 + 1e-9))
+```
+
+**The `(1 + 1e-9)` guard is load-bearing** (Pitfall 39): a *uniform* recorded axis's largest
+spacing is not exactly its nominal value in floating point — `1.0000000000000007e-10` s, not
+`1e-10` — so `w / Delta_max` can land a whisker below the true integer `m` (`3.9999999999999973`
+instead of `4.0`), and a plain `floor` silently drops one fine window's worth of resolution from
+every coarse bin. The guard is deliberately generous (`1e-9`, nine orders above the observed
+`3e-15` relative gap) since it only ever pushes a value that is already within round-off of an
+integer up past the `floor` boundary; it cannot manufacture an extra window from a genuinely
+non-integer ratio. Every camera is then averaged onto the fine grid with the same
+`_average_channels` (D50) the coarse axis uses, so a fine window shorter than `Delta_max` — which
+cannot happen by construction — would be caught by `average_regions`'s own "no source pixel in
+this window" refusal, kept here only as an unreachable guard (`m < 1`).
+
+### 9.2 The window fits
+
+Per fine window `j` (coarse bin `k`): a **one-bin, one-region** deck section is built from the
+original deck's own sections, with `regularizer = nothing` (`Λ = 0`) and every **non-time-varying**
+fitted variable pinned at θ\*'s own value (`vary = false`, `init = result.values[name][1]`,
+Pitfall 42) — only free **time-varying** variables (`vary && time_varying`) are left to fit, and
+only these get a scatter. The one-bin problem is assembled with `_assemble_problem` (D50) exactly
+as `build_problem` would, over every camera's own single-slice column at that window's own fine
+time, warm-started from θ\*'s own value in that window's coarse bin, `LevenbergMarquardt` then
+`polish`.
+
+**Why this decouples exactly**: with `Λ = 0` there is no regularizer row coupling neighbouring
+bins, and with every instrument scalar and non-time-varying variable already fixed, each window's
+residual depends only on that window's own free entries — so fitting 832 (at full size) one-bin
+joint problems independently is *identical* to a single full-resolution unregularized joint fit,
+just assembled window by window instead of as one giant sparse problem. **What this does not
+model** (Pitfall 41): a `TemporalIRF` becomes the identity on a one-bin axis, so a camera whose IRF
+spans many fine windows (the two-channel problem's 80 ps and 50 ps IRFs against ~4 ps windows) has
+its *data* blurred in time while its *model* is not — the same approximation OQ-24 item 3's "each
+detector slice fitted on its own" already makes, stated here and accepted for this phase, not
+corrected.
+
+### 9.3 The detrended spread
+
+Per coarse bin `k` and free variable, over that bin's own `m` fine-window estimates `y` at times
+`t` (`_detrended_spread`, `src/inversion/uncertainty.jl`):
+
+```
+tau  = t .- mean(t)
+ybar = mean(y)
+c    = sum(tau .* y) / sum(tau .^ 2)
+e    = y .- ybar .- c .* tau
+s_stat = sqrt(sum(e .^ 2) / (m - 2))          (NaN for m <= 2)
+```
+
+the least-squares line removed first so that real evolution across the cluster (OQ-24 item 3's
+caveat (a)) does not inflate the spread, on the **centred** axis `tau` so the closed form needs no
+matrix solve and is well conditioned regardless of the absolute time values. `m - 2` degrees of
+freedom, one each for the line's slope and intercept. **Never a plain standard deviation** (no
+detrending, `m - 1` in the denominator) **and never divided by `sqrt(m)`** (Pitfall 40, OQ-24 item
+4): `s_stat` is the scatter of a *single*-slice estimate, the quantity that is comparable to the
+Laplace covariance's **sampling** form (`Section 5`) and to a bootstrap over noise realizations —
+dividing by `sqrt(m)` would instead estimate the standard error of the *m*-slice mean, a different
+and smaller quantity that answers a different question. Every window's status, `gn_decrease` and
+near-bound flags are carried alongside, never dropped for a poor fit (OQ-24 item 3's caveat (b)).
+
+### 9.4 What the numbers mean when the noise model has a point spread
+
+`StreakCameraNoise`'s one-pixel Gaussian point spread (Swadling Eq. 25-26) blurs the *data*'s mean
+with a kernel the forward model does not carry (Pitfall 38): at the two-channel problem's full
+size the per-slice scatter reads about half of `sqrt(m) · sigma_samp` (the coarse Laplace σ scaled
+naively by the slice count), which is *not* a bug in `slice_scatter` — it is `sqrt(chi2/n) ≈
+sqrt(0.3) ≈ 0.55` predicting almost exactly the observed ratio, since the point spread correlates
+neighbouring pixels and slices in a way that lowers the realized single-slice noise below the
+model's own frozen σ. **The coverage tests (`test/slow/test_uncertainty.jl`, D54) therefore use
+`GaussianNoise`**, Swadling's σ formula without the point spread, so that the machinery's own
+intervals can be checked against a noise model with no such mismatch; **the two-channel example
+(D55) keeps `StreakCameraNoise`, as it always has, and reports the ratio without asserting it** —
+that is the finding this section records, not something to fix.

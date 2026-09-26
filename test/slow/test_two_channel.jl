@@ -109,7 +109,14 @@ function _ts_two_channel()
             @info "TS1: joint fit worst bin" variable = v t_ns = wb.t_ns fit = wb.fit truth = wb.truth rel_error = wb.rel
         end
 
-        (; joint, epw, iaw, med_joint, med_epw, med_iaw, epw_td_move)
+        # TS2 (D53), on the same temporary joint deck: the staged fit (EPW-only, IAW-only, then
+        # the joint LM + polish started from their values).
+        t_staged = @elapsed st = staged_joint_fit(joint_deck_path)
+        @info "TS2: staged_joint_fit done" elapsed_s = t_staged decrease = st.decreases[end]
+        flush(stderr)
+        med_st = _ts_report("staged joint", st.result, problem_nt)
+
+        (; joint, epw, iaw, med_joint, med_epw, med_iaw, epw_td_move, st, med_st)
     end
 end
 
@@ -121,4 +128,22 @@ const _TS_TWO_CHANNEL = _ts_two_channel()
     @test r.med_joint["ne_cm3"] <= 0.2
     @test r.med_joint["T_e"] <= 0.2
     @test r.med_joint["T_D"] <= 0.2
+end
+
+@testset "TS2: the staged fit (D53)" begin
+    st = _TS_TWO_CHANNEL.st
+    @test st.decreases[end] <= 1e-6
+
+    epw_summary = st.result.channels[findfirst(c -> c.name == "epw", st.result.channels)]
+    iaw_summary = st.result.channels[findfirst(c -> c.name == "iaw", st.result.channels)]
+    chi2n_epw_joint = epw_summary.chi2 / epw_summary.npixels
+    chi2n_iaw_joint = iaw_summary.chi2 / iaw_summary.npixels
+    chi2n_epw_alone = st.epw.chi2 / st.epw.npixels
+    chi2n_iaw_alone = st.iaw.chi2 / st.iaw.npixels
+    @test chi2n_epw_joint <= 1.1 * chi2n_epw_alone
+    @test chi2n_iaw_joint <= 1.1 * chi2n_iaw_alone
+
+    @test sum(count, values(st.result.near_bound)) == 0
+
+    @info "TS2 chi2/n" chi2n_epw_joint chi2n_epw_alone chi2n_iaw_joint chi2n_iaw_alone
 end

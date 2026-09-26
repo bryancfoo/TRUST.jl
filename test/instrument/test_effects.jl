@@ -506,6 +506,9 @@ end
     expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda, effects=effects)
     # measure() applies the IRFs via mul! (BLAS gemm!); pin BLAS to one thread for a
     # bitwise-reproducible comparison, as TH3 does and as the pinned reference was generated.
+    # The EPW_MEASURE array matches only under Pkg.test()'s --check-bounds=yes (Phase 4.A chunk
+    # 10, Level 3's finding, reproduced by Level 2): under the default flag it differs in up to
+    # 1 571 entries at up to 8.1e-16, so re-pin it under --check-bounds=yes.
     prev = pin_blas_threads(1)
     M = try
         measure(expt)

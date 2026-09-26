@@ -158,6 +158,74 @@ function synthesize_channel(problem, name::Symbol)
 end
 
 """
+    staged_joint_fit(joint_deck_path::AbstractString; optimizer = LevenbergMarquardt(),
+                     tol::Real = 1e-6) -> (; deck, problem, result, decreases, epw, iaw)
+
+The user's decision of 2026-09-25 (D48 item 1, amended by D53): from a two-channel deck's own
+inits, the joint LBFGS fit reports `converged` at an objective far above a reachable one (chunk 8's
+F2), so Step 4.A.4's tests and example get θ\\* by a **written-out procedure** instead:
+
+1. The EPW-only and IAW-only decks (`single_channel_deck_text`), each fitted alone, every variable
+   free, with the deck's own optimizer (D41).
+2. The joint problem started from `logn`, `T_e` and `m_e` of the EPW-only fit and `T_D` of the
+   IAW-only fit -- **by bin index**: the single-channel axes are each channel's own `t̄`, the joint
+   axis is the pooled one, and they share the regions and so the bin count.
+3. `LevenbergMarquardt()`, then `polish`.
+
+Returns the joint `deck` and `problem`, the polished `result`, `polish`'s own `decreases`, and the
+two single-channel `FitResult`s (`epw`, `iaw`), since `slice_scatter` needs the `Deck` and
+`laplace`/`calibration_scan` need the `problem`.
+
+Spec D48 item 1, D53.
+"""
+function staged_joint_fit(joint_deck_path::AbstractString; optimizer=LevenbergMarquardt(), tol::Real=1e-6)
+    text = read(joint_deck_path, String)
+    single = mktempdir() do dir
+        results = Dict{String,FitResult}()
+        for name in ("epw", "iaw")
+            path = joinpath(dir, "$name.toml")
+            write(path, single_channel_deck_text(text, name))
+            p, opt, st = OTIS.build_problem(read_deck(path))
+            results[name] = solve(p, opt; start=st)
+        end
+        results
+    end
+    epw, iaw = single["epw"], single["iaw"]
+
+    deck = read_deck(joint_deck_path)
+    problem, _, _ = OTIS.build_problem(deck)
+
+    start = flatten(problem.pspec, ["logn" => epw.values["logn"], "T_e" => epw.values["T_e"],
+        "m_e" => epw.values["m_e"], "T_D" => iaw.values["T_D"]])
+    lm = solve(problem, optimizer; start=start)
+    pol = polish(problem, lm; tol=tol)
+
+    return (; deck, problem, result=pol.result, decreases=pol.decreases, epw, iaw)
+end
+
+"""
+    with_wavelength_calibration(text::AbstractString) -> String
+
+Parses the channel-form deck `text`, adds `wavelength_calibration = { lambda_offset_nm = 0.0 }`
+(unbound) to every `[channel.<n>.instrument]`, and re-serializes with `TOML.print(...; sorted =
+true)` (D55). `examples/two_channel.toml` itself is not edited -- TC3 and TS1 read it -- so the
+example that needs the calibration for `calibration_scan` builds it from the deck's own text
+instead.
+
+Spec D55.
+"""
+function with_wavelength_calibration(text::AbstractString)
+    raw = TOML.parse(text)
+    for (nm, chan) in raw["channel"]
+        instrument = get!(chan, "instrument", Dict{String,Any}())
+        instrument["wavelength_calibration"] = Dict{String,Any}("lambda_offset_nm" => 0.0)
+    end
+    buf = IOBuffer()
+    TOML.print(buf, raw; sorted=true)
+    return String(take!(buf))
+end
+
+"""
     single_channel_deck_text(text::AbstractString, name::AbstractString) -> String
 
 The single-channel deck derived, in code, from a channel-form deck's own text (spec D41, Section

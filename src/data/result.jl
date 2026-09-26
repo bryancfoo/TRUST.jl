@@ -111,7 +111,8 @@ end
                  deck = "", source = "fit",
                  scan::Union{Nothing,WeightScanResult} = nothing,
                  laplace::Union{Nothing,LaplaceResult} = nothing,
-                 calibration_scan::Union{Nothing,CalibrationScanResult} = nothing) -> path
+                 calibration_scan::Union{Nothing,CalibrationScanResult} = nothing,
+                 scatter::Union{Nothing,ScatterResult} = nothing) -> path
 
 Writes `result` (and, if given, `scan`, `laplace` and `calibration_scan`) to `path` as a JLD2 file
 of plain numeric arrays and strings (`docs/derivations/data_layout.md` Section 3, spec D34, D40,
@@ -135,9 +136,14 @@ know `laplace` was computed at the θ `result` reports).
 `base_offset_nm`, `chi2`, `objective`, `decrease` and `status` (strings), and, per variable,
 `calibration_scan/variables/<name>/delta` (`Matrix`) and `.../s_sys`.
 
-Both groups are written inside `otis-result-3` (D17 forbids a *second* bump within the phase, not
-a dataset added inside the one bump already made); **RE1's exact key set is unchanged**, since
-neither group is written without its keyword.
+**`scatter` (D52), only when given**: `scatter/m`, `t_fine`, `coarse_bin`, `counts`, `status`
+(strings) and `decrease`, and, per free variable, `scatter/variables/<name>/values`, `near_bound`
+(`UInt8`), `s_stat` and `n_near_bound`. Must satisfy `scatter.theta == result.theta` exactly, else
+a loud error (`"scatter was computed at a different θ than result.theta"`).
+
+All three groups are written inside `otis-result-3` (D17 forbids a *second* bump within the phase,
+not a dataset added inside the one bump already made); **RE1's exact key set is unchanged**, since
+none is written without its keyword.
 
 When `problem` is given, `problem.pspec === result.pspec` is required (a loud error otherwise,
 naming what to pass instead): `write_result` has no other way to know the problem it is given is
@@ -152,7 +158,8 @@ function write_result(path::AbstractString, result::FitResult;
     problem::Union{Nothing,AbstractFitProblem}=nothing, deck::AbstractString="",
     source="fit", scan::Union{Nothing,WeightScanResult}=nothing,
     laplace::Union{Nothing,LaplaceResult}=nothing,
-    calibration_scan::Union{Nothing,CalibrationScanResult}=nothing)
+    calibration_scan::Union{Nothing,CalibrationScanResult}=nothing,
+    scatter::Union{Nothing,ScatterResult}=nothing)
     pspec = result.pspec
     nt = nbins(pspec.trace)
     unit_keys = _variable_unit_keys(pspec.bindings)
@@ -166,6 +173,11 @@ function write_result(path::AbstractString, result::FitResult;
     if laplace !== nothing
         laplace.theta == result.theta || throw(ArgumentError(
             "write_result: laplace was computed at a different θ than result.theta"))
+    end
+
+    if scatter !== nothing
+        scatter.theta == result.theta || throw(ArgumentError(
+            "write_result: scatter was computed at a different θ than result.theta"))
     end
 
     jldopen(path, "w") do f
@@ -308,6 +320,22 @@ function write_result(path::AbstractString, result::FitResult;
                 f["$prefix/s_sys"] = Vector{Float64}(calibration_scan.s_sys[name])
             end
         end
+
+        if scatter !== nothing
+            f["scatter/m"] = Int64.(scatter.m)
+            f["scatter/t_fine"] = Vector{Float64}(scatter.t_fine)
+            f["scatter/coarse_bin"] = Int64.(scatter.coarse_bin)
+            f["scatter/counts"] = Int64.(scatter.counts)
+            f["scatter/status"] = String[string(st) for st in scatter.status]
+            f["scatter/decrease"] = Vector{Float64}(scatter.decrease)
+            for (name, v) in scatter.values
+                prefix = "scatter/variables/$name"
+                f["$prefix/values"] = Vector{Float64}(v)
+                f["$prefix/near_bound"] = UInt8.(scatter.near_bound[name])
+                f["$prefix/s_stat"] = Vector{Float64}(scatter.s_stat[name])
+                f["$prefix/n_near_bound"] = Int64.(scatter.n_near_bound[name])
+            end
+        end
     end
     return path
 end
@@ -323,7 +351,7 @@ end
 Reads a result written by `write_result`, returning plain arrays and strings, like `read_trace`'s
 own `:arrays` mode: `(; layout_version, meta, deck, axis_name, axis, axis_unit,
 axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan, laplace,
-calibration_scan)`. `variables` and `dependents` are `Dict{String,<:NamedTuple}` keyed by name;
+calibration_scan, scatter)`. `variables` and `dependents` are `Dict{String,<:NamedTuple}` keyed by name;
 `leaves` is `Dict{String,Vector{Float64}}` keyed by SI leaf path; `fit` and `trajectory` are
 `NamedTuple`s of the file's own `fit/*` and `trajectory/*` datasets; `channels` (D40) is a
 `Vector{<:NamedTuple}`, one per channel in channel order, each `(; name, weight, chi2, npixels,
@@ -341,6 +369,11 @@ sigma_post, sigma_samp, near_bound)`, `sigma_post`/`sigma_samp`/`near_bound` eac
 **`calibration_scan` (D47)**: `nothing` when the file carries no `calibration_scan/*` group, else
 `(; shifts_nm, channel, base_offset_nm, chi2, objective, decrease, status, delta, s_sys)`,
 `delta`/`s_sys` each `Dict{String,<:AbstractArray}` keyed by variable name.
+
+**`scatter` (D52)**: `nothing` when the file carries no `scatter/*` group, else `(; m, t_fine,
+coarse_bin, counts, status, decrease, values, near_bound, s_stat, n_near_bound)`, `values`,
+`near_bound`, `s_stat` and `n_near_bound` each `Dict{String,<:AbstractArray}` keyed by variable
+name, in the same forms as `calibration_scan`'s.
 
 Throws, naming the version found and expected, if `layout_version` does not match
 `RESULT_LAYOUT_VERSION`.
@@ -470,8 +503,28 @@ function read_result(path::AbstractString)
             )
         end
 
+        scatter = nothing
+        if haskey(f, "scatter")
+            values = Dict{String,Vector{Float64}}()
+            near_bound = Dict{String,Vector{UInt8}}()
+            s_stat = Dict{String,Vector{Float64}}()
+            n_near_bound = Dict{String,Vector{Int64}}()
+            for nm in _read_group(f, "scatter/variables")
+                prefix = "scatter/variables/$nm"
+                values[nm] = f["$prefix/values"]
+                near_bound[nm] = f["$prefix/near_bound"]
+                s_stat[nm] = f["$prefix/s_stat"]
+                n_near_bound[nm] = f["$prefix/n_near_bound"]
+            end
+            scatter = (
+                m=f["scatter/m"], t_fine=f["scatter/t_fine"], coarse_bin=f["scatter/coarse_bin"],
+                counts=f["scatter/counts"], status=f["scatter/status"], decrease=f["scatter/decrease"],
+                values=values, near_bound=near_bound, s_stat=s_stat, n_near_bound=n_near_bound,
+            )
+        end
+
         return (; layout_version=version, meta, deck, axis_name, axis, axis_unit,
             axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan,
-            laplace, calibration_scan)
+            laplace, calibration_scan, scatter)
     end
 end

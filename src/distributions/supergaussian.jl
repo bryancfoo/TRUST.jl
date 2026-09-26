@@ -475,9 +475,12 @@ around this method entirely).
 
 **The value comes from `gamma_inc(a, t)[2] * gamma(a)`, not `SpecialFunctions.gamma(a, t)`
 directly** (D49, 2026-09-25): `gamma(a, t)` (SpecialFunctions 2.9.0) computes `t^a *
-expint(1 - a, t)`, and `expint`'s "ν near an integer" branch (`src/expint.jl`) is up to 5.3% wrong
-in windows of `t` whenever `a` sits near a half-integer — 227 of 1301 sampled `m ∈ [1.5, 8]` hit a
-fault window somewhere in `x ∈ [0.8, 2.2]`. `gamma_inc(a, t)` returns the regularized `(P, Q)` pair
+expint(1 - a, t)`, and `expint`'s "ν near an integer" branch (`src/expint.jl`) is wrong in a window
+of `t` about 0.003 wide for **every `a < 1/2` (`m > 4`)**; `m < 4` is unaffected. The edge is sharp:
+7.8e-14 at m = 3.99, 5.5% at m = 4.01, falling to 1.9% at m = 5 and 7.8e-3 at m = 6 (corrected
+2026-09-25, chunk 10: the fault does not need `a` near a half-integer, and the "227 of 1301" figure
+first quoted here was an undersampling at an x step of 0.005, which missed most windows).
+`gamma_inc(a, t)` returns the regularized `(P, Q)` pair
 by a different algorithm (DiDonato and Morris) and agrees with a `quadgk` oracle to 1.5e-14 worst
 case over `m ∈ [1.5, 8] × x ∈ [0.1, 3]`; SG22 is the regression that checks it, through both call
 paths. **A library special function is never its own test oracle** (`conventions.md` 8.2): SG17

@@ -474,3 +474,110 @@ function Base.show(io::IO, ::MIME"text/plain", scan::CalibrationScanResult)
             scan.chi2[k], scan.status[k], scan.decrease[k])
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# D51: the per-slice scatter -- _detrended_spread, and ScatterResult (slice_scatter itself is
+# in config/scatter.jl, which needs Deck and build_problem's three stages, D50)
+# ------------------------------------------------------------------------------------------
+
+"""
+    _detrended_spread(t::AbstractVector, y::AbstractVector) -> Float64
+
+The detrended sample spread of per-slice estimates `y` at times `t` (D51 step 6, Section 10's
+"the per-slice scatter"): a least-squares line is removed first, on the **centred** axis
+`tau = t .- mean(t)` so the closed form is exact and well-conditioned,
+
+    ybar = mean(y);  c = sum(tau .* y) / sum(tau.^2);  e = y .- ybar .- c .* tau
+    _detrended_spread = sqrt(sum(e.^2) / (m - 2))      (m = length(t))
+
+`m - 2` degrees of freedom, one each for the line's slope and intercept; `NaN` for `m <= 2`, where
+none are left. **Never a plain standard deviation** (which removes no trend and divides by
+`m - 1`) **and never divided by `sqrt(m)`** (Pitfall 40): this is the scatter of a single-slice
+estimate, the point of the report, not a standard error of the mean.
+
+Spec D51 step 6.
+"""
+function _detrended_spread(t::AbstractVector, y::AbstractVector)
+    m = length(t)
+    length(y) == m || throw(ArgumentError(
+        "_detrended_spread: t and y must have the same length; got $m and $(length(y))"))
+    m <= 2 && return NaN
+    tbar = sum(t) / m
+    tau = t .- tbar
+    ybar = sum(y) / m
+    c = sum(tau .* y) / sum(abs2, tau)
+    e = y .- ybar .- c .* tau
+    return sqrt(sum(abs2, e) / (m - 2))
+end
+
+"""
+    ScatterResult
+
+The outcome of `slice_scatter` (D51, `config/scatter.jl`): the per-slice statistical uncertainty
+report, a fine-grid **joint** fit at single-slice resolution.
+
+- `theta`: `copy(result.theta)`, the θ\\* `slice_scatter` was computed at (`write_result`'s own
+  check that it was not computed at a different θ than the result it is written beside, D52).
+- `m`: fine windows per coarse bin, one entry per `[[fit.regions]]` region (Pitfall 39).
+- `t_fine`: the fine axis (s), D39's pooled mean, shared by every channel, length `N_fine`.
+- `coarse_bin`: fine window `j`'s own coarse bin, length `N_fine`.
+- `counts`: `N_fine x nchannels`, each channel's own slice count in that fine window.
+- `status`, `decrease`: each fine window's own fit status and final `gn_decrease`, length `N_fine`.
+- Per **free** variable (`vary && time_varying`, Pitfall 42; a scalar or a frozen variable has no
+  entry here):
+  - `values`: length `N_fine`, in the variable's own unit;
+  - `near_bound`: length `N_fine`;
+  - `s_stat`: length = the number of coarse bins, `_detrended_spread` over each bin's own fine
+    windows, **never divided by `sqrt(m)`** (Pitfall 40);
+  - `n_near_bound`: length = the number of coarse bins, the count of `near_bound` over the bin's
+    own fine windows.
+
+Spec D51.
+"""
+struct ScatterResult
+    theta::Vector{Float64}
+    m::Vector{Int}
+    t_fine::Vector{Float64}
+    coarse_bin::Vector{Int}
+    counts::Matrix{Int}
+    status::Vector{Symbol}
+    decrease::Vector{Float64}
+    values::Dict{String,Vector{Float64}}
+    near_bound::Dict{String,BitVector}
+    s_stat::Dict{String,Vector{Float64}}
+    n_near_bound::Dict{String,Vector{Int}}
+end
+
+"""
+    _median_finite(v::AbstractVector) -> Float64
+
+The median of `v`'s finite entries, `NaN` if none (Level 3's helper for `ScatterResult`'s
+`text/plain` summary only, flagged under rule 11 zero: `Statistics` is not a dependency of this
+package, and a print-only median does not warrant adding one).
+"""
+function _median_finite(v::AbstractVector)
+    finite = filter(isfinite, v)
+    isempty(finite) && return NaN
+    s = sort(finite)
+    n = length(s)
+    return isodd(n) ? s[(n+1)÷2] : (s[n÷2] + s[n÷2+1]) / 2
+end
+
+function Base.show(io::IO, sc::ScatterResult)
+    print(io, "ScatterResult(", length(sc.t_fine), " fine windows over ", length(sc.m),
+        " region(s), ", length(sc.values), " free variable(s))")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", sc::ScatterResult)
+    println(io, "ScatterResult")
+    println(io, "  m (fine windows per coarse bin, per region): ", sc.m)
+    println(io, "  fine windows: ", length(sc.t_fine))
+    counts_by_status = Dict{Symbol,Int}()
+    for st in sc.status
+        counts_by_status[st] = get(counts_by_status, st, 0) + 1
+    end
+    println(io, "  statuses: ", counts_by_status)
+    for name in sort(collect(keys(sc.s_stat)))
+        @printf(io, "  %s: median s_stat = %.6g\n", name, _median_finite(sc.s_stat[name]))
+    end
+end

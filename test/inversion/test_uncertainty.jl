@@ -1,9 +1,11 @@
 using Test
 using OTIS
 using OTIS: jvp!, jtvp!, jacobian, _full_residuals, gradient!, _free_entries, _theta_layout,
-    _to_unconstrained, _from_unconstrained, _dx_dy, _chain_class, BOUND_PROXIMITY_TOL
+    _to_unconstrained, _from_unconstrained, _dx_dy, _chain_class, BOUND_PROXIMITY_TOL,
+    _detrended_spread
 import Random
 using LinearAlgebra: dot, cholesky, Symmetric
+using Statistics: median
 
 # UN1-UN6, CS1-CS3 against dev/phase4A_instructions.md Section 10.1's table (spec D43, D45, D46),
 # gated "uncertainty". The fixture is D35's MC fixture (test_joint.jl), copied here and NOT shared
@@ -394,4 +396,260 @@ end
         @test size(scan.delta[v.name]) == (length(_UN_POLISH.result.values[v.name]), 3)
         @test scan.s_sys[v.name] == vec(maximum(abs, scan.delta[v.name]; dims=2))
     end
+end
+
+# ------------------------------------------------------------------------------------------
+# SX1-SX5, RE14 against dev/phase4A_instructions.md Section 10.2's table (spec D51, D52),
+# gated "uncertainty". The SX fixture (deck-based, mktempdir(), noise-free data with
+# sigma = sigma(GaussianNoise(; a = 121.0, b = 141.75), image)): SXA, a two-channel deck with
+# T_D and u_D free and time-varying, T_e fixed; SXB, the same deck with T_e a free scalar bound
+# to electrons.e.T_eV. Both cameras' true times coincide (channel b's t_shift_ns = 0.02 undoes
+# its own recorded-axis offset), so the pooled fine axis is exactly the 12 shared slice times.
+# ------------------------------------------------------------------------------------------
+
+_sx_template() = Plasma(; n_e_cm3=3e19,
+    electrons=[electrons(T_eV=400.0)],
+    ions=[ion(name="D", mass_amu=2.014, charge=1, T_eV=200.0, u_kms=0.0)])
+
+_sx_TD(t_ns) = 180.0 + 60.0 * t_ns
+_sx_uD(t_ns) = 20.0 + 15.0 * t_ns
+_sx_path(p::AbstractString) = replace(p, "\\" => "/")
+
+function _sx_write(path::AbstractString, t_ns_recorded::AbstractVector, t_shift_ns::Real,
+    lambda_lo::Real, lambda_hi::Real, nlambda::Integer, scale::Real, background::Bool)
+    t_true_ns = t_ns_recorded .+ t_shift_ns
+    trace = PlasmaTrace(_sx_template(); t_ns=collect(t_true_ns),
+        leaves=("ions.D.T_eV" => _sx_TD, "ions.D.u_kms" => _sx_uD))
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60.0, k_model=:exact)
+    lambda = collect(range(lambda_lo, lambda_hi; length=nlambda)) .* 1e-9
+    effects = background ? (Sensitivity(scale=scale), ConstantBackground(level=25.0)) :
+              (Sensitivity(scale=scale),)
+    expt = Experiment(; trace=trace, probe=probe, collection=collection, lambda_m=lambda, effects=effects)
+    image = measure(expt)
+    sig = sigma(GaussianNoise(; a=121.0, b=141.75), image)
+    sd = StreakData(; lambda_m=lambda, t_s=t_ns_recorded .* 1e-9, image=image, sigma=sig)
+    write_streak(path, sd; source="sx_test")
+    return sd
+end
+
+_sx_write_a(path::AbstractString) = _sx_write(path, collect(range(0.05, 1.15; length=12)), 0.0,
+    262.0, 264.5, 24, 1.0e-6, true)
+_sx_write_b(path::AbstractString) = _sx_write(path, collect(range(0.03, 1.13; length=12)), 0.02,
+    262.5, 264.0, 16, 2.0e-6, false)
+
+# regions_block/intervals_block/te_value/te_var_block/regularizer_block let one builder make
+# SXA, SXB, and the no-regularizer one-window deck SX4 needs.
+function _sx_deck_text(path_a::AbstractString, path_b::AbstractString, outdir::AbstractString;
+    regions_block::AbstractString="[[fit.regions]]\nt_range_ns = [0.0, 1.2]\nnbins = 3\n",
+    intervals_block::AbstractString="",
+    te_value::AbstractString="400.0", te_var_block::AbstractString="",
+    regularizer_block::AbstractString="[regularizer]\nweight = 1.0\nterms = [\n  { select = [\"T_D\", \"u_D\"], operator = \"D2\", normalization = \"relative\" },\n]\n")
+    return """
+    deck_version = "otis-deck-2"
+    channels = ["a", "b"]
+
+    $regions_block
+    $intervals_block
+
+    [channel.a.data]
+    file = "$(_sx_path(path_a))"
+    [channel.a.geometry]
+    lambda_probe_nm = 263.25
+    theta_deg = 60.0
+    k_model = "exact"
+    [channel.a.instrument]
+    sensitivity = { scale = 1.0e-6 }
+    background = [{ type = "Constant", level = 25.0 }]
+
+    [channel.b.data]
+    file = "$(_sx_path(path_b))"
+    t_shift_ns = 0.02
+    [channel.b.geometry]
+    lambda_probe_nm = 263.25
+    theta_deg = 60.0
+    k_model = "exact"
+    [channel.b.instrument]
+    sensitivity = { scale = 2.0e-6 }
+
+    [fit.variables]
+    T_D = { bounds = [50.0, 800.0], init = 200.0, time_varying = true }
+    u_D = { bounds = [-200.0, 200.0], init = 10.0, time_varying = true }
+    $te_var_block
+
+    [plasma]
+    n_e_cm3 = 3.0e19
+
+    [plasma.electrons.e]
+    fraction = 1.0
+    T_eV = $te_value
+
+    [plasma.ions.D]
+    mass_amu = 2.014
+    charge = 1
+    fraction = 1.0
+    T_eV = "T_D"
+    u_kms = "u_D"
+
+    $regularizer_block
+
+    [optimizer]
+    procedure = "levenberg_marquardt"
+
+    [fit]
+    sigma = "supplied"
+
+    [output]
+    dir = "$(_sx_path(outdir))"
+    """
+end
+
+function _sx_build(dir::AbstractString, text::AbstractString, deckname::AbstractString)
+    path = joinpath(dir, deckname)
+    write(path, text)
+    deck = read_deck(path)
+    problem, opt, start = OTIS.build_problem(deck)
+    r = solve(problem, opt; start=start)
+    pol = polish(problem, r)
+    return deck, problem, pol.result
+end
+
+const _SX_DIR = mktempdir()
+const _SX_PATH_A = joinpath(_SX_DIR, "sx_a.jld2")
+const _SX_PATH_B = joinpath(_SX_DIR, "sx_b.jld2")
+const _SX_SD_A = _sx_write_a(_SX_PATH_A)
+const _SX_SD_B = _sx_write_b(_SX_PATH_B)
+
+const _SX_TEXT_A = _sx_deck_text(_SX_PATH_A, _SX_PATH_B, joinpath(_SX_DIR, "out_a"))
+const _SX_DECK_A, _SX_PROBLEM_A, _SX_RESULT_A = _sx_build(_SX_DIR, _SX_TEXT_A, "sxa_deck.toml")
+const _SX_SCATTER_A = slice_scatter(_SX_DECK_A, _SX_RESULT_A)
+
+const _SX_TEXT_B = _sx_deck_text(_SX_PATH_A, _SX_PATH_B, joinpath(_SX_DIR, "out_b");
+    te_value="\"T_e\"", te_var_block="T_e = { bounds = [100.0, 1000.0], init = 380.0 }")
+const _SX_DECK_B, _SX_PROBLEM_B, _SX_RESULT_B = _sx_build(_SX_DIR, _SX_TEXT_B, "sxb_deck.toml")
+const _SX_SCATTER_B = slice_scatter(_SX_DECK_B, _SX_RESULT_B)
+
+# The coarse chan_data, built the same way build_problem does internally, for SX1's own
+# window-count cross-check (D48 item 2's own check, reused here rather than reimplemented).
+const _SX_CHAN_LIST = OTIS._channel_list(_SX_DECK_A.sections)
+const _SX_RAW, _SX_PROBES, _SX_COLLECTIONS = OTIS._read_channels(_SX_DECK_A.sections, _SX_CHAN_LIST, true)
+const _SX_REGIONS = OTIS._build_averaging_regions(_SX_DECK_A.sections["fit_regions"])
+const _SX_COARSE = OTIS._average_channels(_SX_RAW, _SX_CHAN_LIST, _SX_REGIONS)
+
+@testset "SX1: the grid" begin
+    sc = _SX_SCATTER_A
+    @test sc.m == [4]
+    @test length(sc.t_fine) == 12
+    @test isapprox(sc.t_fine, collect(0.05:0.1:1.15) .* 1e-9; rtol=1e-12)
+    @test sc.counts == ones(Int, 12, 2)
+    @test sc.coarse_bin == repeat(1:3, inner=4)
+    for c in 1:2
+        for k in 1:3
+            @test sum(sc.counts[sc.coarse_bin.==k, c]) == _SX_COARSE[c].meta["regions_window_counts"][k]
+        end
+    end
+end
+
+@testset "SX2: exact recovery, noise-free" begin
+    sc = _SX_SCATTER_A
+    t_fine_ns = sc.t_fine .* 1e9
+    truth_TD = _sx_TD.(t_fine_ns)
+    truth_uD = _sx_uD.(t_fine_ns)
+    @test isapprox(sc.values["T_D"], truth_TD; rtol=1e-8)
+    @test isapprox(sc.values["u_D"], truth_uD; rtol=1e-8)
+    @test all(sc.decrease .<= 1e-6)
+    worst_TD = maximum(abs.(sc.values["T_D"] .- truth_TD) ./ truth_TD)
+    worst_uD = maximum(abs.(sc.values["u_D"] .- truth_uD) ./ truth_uD)
+    @info "SX2 worst relative recovery error" worst_TD worst_uD
+    for name in ("T_D", "u_D")
+        med = median(sc.values[name])
+        @test all(sc.s_stat[name] .<= 1e-8 * med)
+    end
+    @info "SX2 s_stat" s_stat_TD = sc.s_stat["T_D"] s_stat_uD = sc.s_stat["u_D"]
+end
+
+@testset "SX3: _detrended_spread's closed form" begin
+    @test isapprox(_detrended_spread([0.0, 1.0, 2.0, 3.0], [1.0, 3.0, 2.0, 5.0]), sqrt(1.35); rtol=1e-14)
+    @test isnan(_detrended_spread([0.0, 1.0], [1.0, 3.0]))
+    @test isnan(_detrended_spread([0.0], [1.0]))
+end
+
+@testset "SX4: SXB -- T_e absent; window 5 matches its own one-window deck" begin
+    sc = _SX_SCATTER_B
+    @test Set(keys(sc.values)) == Set(["T_D", "u_D"])
+
+    resultB = _SX_RESULT_B
+    Te_star = resultB.values["T_e"][1]
+    TD_bin2 = resultB.values["T_D"][2]
+    uD_bin2 = resultB.values["u_D"][2]
+
+    text5 = _sx_deck_text(_SX_PATH_A, _SX_PATH_B, joinpath(_SX_DIR, "out_window5");
+        regions_block="[[fit.regions]]\nt_range_ns = [0.4, 0.5]\nnbins = 1\n",
+        te_value="\"T_e\"",
+        te_var_block="T_e = { bounds = [100.0, 1000.0], init = $Te_star, vary = false }",
+        regularizer_block="")
+    deck5, problem5, _ = _sx_build(_SX_DIR, text5, "window5_deck.toml")
+    start5 = flatten(problem5.pspec, ["T_D" => TD_bin2, "u_D" => uD_bin2])
+    fit5 = solve(problem5, LevenbergMarquardt(); start=start5)
+    pol5 = polish(problem5, fit5)
+
+    rel_TD = abs(pol5.result.values["T_D"][1] - sc.values["T_D"][5]) / abs(sc.values["T_D"][5])
+    rel_uD = abs(pol5.result.values["u_D"][1] - sc.values["u_D"][5]) / abs(sc.values["u_D"][5])
+    @test rel_TD <= 1e-12
+    @test rel_uD <= 1e-12
+    @info "SX4 window 5 relative difference against its own one-window deck" rel_TD rel_uD
+end
+
+@testset "SX5: the three refusals" begin
+    text_noregions = """
+    deck_version = "otis-deck-2"
+
+    [data]
+    file = "$(_sx_path(_SX_PATH_A))"
+
+    [geometry]
+    lambda_probe_nm = 263.25
+    theta_deg = 60.0
+    k_model = "exact"
+
+    [instrument]
+    sensitivity = { scale = 1.0e-6 }
+    background = [{ type = "Constant", level = 25.0 }]
+
+    [fit.variables]
+    T_D = { bounds = [50.0, 800.0], init = 200.0, time_varying = true }
+    u_D = { bounds = [-200.0, 200.0], init = 10.0, time_varying = true }
+
+    [plasma]
+    n_e_cm3 = 3.0e19
+
+    [plasma.electrons.e]
+    fraction = 1.0
+    T_eV = 400.0
+
+    [plasma.ions.D]
+    mass_amu = 2.014
+    charge = 1
+    fraction = 1.0
+    T_eV = "T_D"
+    u_kms = "u_D"
+
+    [optimizer]
+    procedure = "levenberg_marquardt"
+
+    [fit]
+    sigma = "supplied"
+
+    [output]
+    dir = "$(_sx_path(joinpath(_SX_DIR, "out_noregions")))"
+    """
+    deck_nr, problem_nr, result_nr = _sx_build(_SX_DIR, text_noregions, "noregions_deck.toml")
+    @test_throws r"has no \[\[fit\.regions\]\]" slice_scatter(deck_nr, result_nr)
+
+    text_intervals = _sx_deck_text(_SX_PATH_A, _SX_PATH_B, joinpath(_SX_DIR, "out_intervals");
+        intervals_block="[fit.intervals.foo]\nt_range_ns = [-1.0, 2.0]\n")
+    deck_iv, problem_iv, result_iv = _sx_build(_SX_DIR, text_intervals, "intervals_deck.toml")
+    @test_throws r"intervals are not supported" slice_scatter(deck_iv, result_iv)
+
+    @test_throws r"was not fitted from this deck" slice_scatter(_SX_DECK_B, _SX_RESULT_A)
 end

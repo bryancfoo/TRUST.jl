@@ -571,3 +571,161 @@ end
         end
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# RE14 (A19, D52): scatter/ inside otis-result-3. A local copy of test_uncertainty.jl's SXA
+# fixture (not shared across the @safetestset boundary, chunk 6's own rule): a two-channel deck,
+# T_D and u_D free and time-varying, T_e fixed, noise-free data.
+# ------------------------------------------------------------------------------------------
+
+_re14_template() = Plasma(; n_e_cm3=3e19,
+    electrons=[electrons(T_eV=400.0)],
+    ions=[ion(name="D", mass_amu=2.014, charge=1, T_eV=200.0, u_kms=0.0)])
+
+_re14_TD(t_ns) = 180.0 + 60.0 * t_ns
+_re14_uD(t_ns) = 20.0 + 15.0 * t_ns
+_re14_path(p::AbstractString) = replace(p, "\\" => "/")
+
+function _re14_write(path::AbstractString, t_ns_recorded::AbstractVector, t_shift_ns::Real,
+    lambda_lo::Real, lambda_hi::Real, nlambda::Integer, scale::Real, background::Bool)
+    t_true_ns = t_ns_recorded .+ t_shift_ns
+    trace = PlasmaTrace(_re14_template(); t_ns=collect(t_true_ns),
+        leaves=("ions.D.T_eV" => _re14_TD, "ions.D.u_kms" => _re14_uD))
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60.0, k_model=:exact)
+    lambda = collect(range(lambda_lo, lambda_hi; length=nlambda)) .* 1e-9
+    effects = background ? (Sensitivity(scale=scale), ConstantBackground(level=25.0)) :
+              (Sensitivity(scale=scale),)
+    expt = Experiment(; trace=trace, probe=probe, collection=collection, lambda_m=lambda, effects=effects)
+    image = measure(expt)
+    sig = sigma(GaussianNoise(; a=121.0, b=141.75), image)
+    sd = StreakData(; lambda_m=lambda, t_s=t_ns_recorded .* 1e-9, image=image, sigma=sig)
+    write_streak(path, sd; source="re14_test")
+    return sd
+end
+
+_re14_write_a(path::AbstractString) = _re14_write(path, collect(range(0.05, 1.15; length=12)), 0.0,
+    262.0, 264.5, 24, 1.0e-6, true)
+_re14_write_b(path::AbstractString) = _re14_write(path, collect(range(0.03, 1.13; length=12)), 0.02,
+    262.5, 264.0, 16, 2.0e-6, false)
+
+function _re14_deck_text(path_a::AbstractString, path_b::AbstractString, outdir::AbstractString)
+    return """
+    deck_version = "otis-deck-2"
+    channels = ["a", "b"]
+
+    [[fit.regions]]
+    t_range_ns = [0.0, 1.2]
+    nbins = 3
+
+    [channel.a.data]
+    file = "$(_re14_path(path_a))"
+    [channel.a.geometry]
+    lambda_probe_nm = 263.25
+    theta_deg = 60.0
+    k_model = "exact"
+    [channel.a.instrument]
+    sensitivity = { scale = 1.0e-6 }
+    background = [{ type = "Constant", level = 25.0 }]
+
+    [channel.b.data]
+    file = "$(_re14_path(path_b))"
+    t_shift_ns = 0.02
+    [channel.b.geometry]
+    lambda_probe_nm = 263.25
+    theta_deg = 60.0
+    k_model = "exact"
+    [channel.b.instrument]
+    sensitivity = { scale = 2.0e-6 }
+
+    [fit.variables]
+    T_D = { bounds = [50.0, 800.0], init = 200.0, time_varying = true }
+    u_D = { bounds = [-200.0, 200.0], init = 10.0, time_varying = true }
+
+    [plasma]
+    n_e_cm3 = 3.0e19
+
+    [plasma.electrons.e]
+    fraction = 1.0
+    T_eV = 400.0
+
+    [plasma.ions.D]
+    mass_amu = 2.014
+    charge = 1
+    fraction = 1.0
+    T_eV = "T_D"
+    u_kms = "u_D"
+
+    [regularizer]
+    weight = 1.0
+    terms = [
+      { select = ["T_D", "u_D"], operator = "D2", normalization = "relative" },
+    ]
+
+    [optimizer]
+    procedure = "levenberg_marquardt"
+
+    [fit]
+    sigma = "supplied"
+
+    [output]
+    dir = "$(_re14_path(outdir))"
+    """
+end
+
+function _re14_deck_and_scatter()
+    return mktempdir() do dir
+        path_a = joinpath(dir, "sxa.jld2")
+        path_b = joinpath(dir, "sxb.jld2")
+        _re14_write_a(path_a)
+        _re14_write_b(path_b)
+        text = _re14_deck_text(path_a, path_b, joinpath(dir, "out"))
+        deckpath = joinpath(dir, "deck.toml")
+        write(deckpath, text)
+        deck = read_deck(deckpath)
+        problem, opt, start = OTIS.build_problem(deck)
+        r = solve(problem, opt; start=start)
+        pol = polish(problem, r)
+        sc = slice_scatter(deck, pol.result)
+        (; deck, problem, result=pol.result, sc)
+    end
+end
+
+const _RE14_FIXTURE = _re14_deck_and_scatter()
+
+@testset "RE14: write_result with scatter (D52)" begin
+    mktempdir() do dir
+        path = joinpath(dir, "result.jld2")
+        write_result(path, _RE14_FIXTURE.result; deck="d", scatter=_RE14_FIXTURE.sc)
+
+        jldopen(path, "r") do f
+            for (name, v) in _walk_leaf_values(f, "scatter")
+                @test v isa Union{AbstractArray{<:Real},AbstractArray{<:AbstractString},AbstractString,Real}
+            end
+        end
+
+        r = read_result(path)
+        sc_read = r.scatter
+        @test sc_read !== nothing
+        @test isequal(sc_read.m, _RE14_FIXTURE.sc.m)
+        @test isequal(sc_read.t_fine, _RE14_FIXTURE.sc.t_fine)
+        @test isequal(sc_read.coarse_bin, _RE14_FIXTURE.sc.coarse_bin)
+        @test isequal(sc_read.counts, _RE14_FIXTURE.sc.counts)
+        @test sc_read.status == string.(_RE14_FIXTURE.sc.status)
+        @test isequal(sc_read.decrease, _RE14_FIXTURE.sc.decrease)
+        for name in keys(_RE14_FIXTURE.sc.values)
+            @test isequal(sc_read.values[name], _RE14_FIXTURE.sc.values[name])
+            @test sc_read.near_bound[name] == UInt8.(_RE14_FIXTURE.sc.near_bound[name])
+            @test isequal(sc_read.s_stat[name], _RE14_FIXTURE.sc.s_stat[name])
+            @test isequal(sc_read.n_near_bound[name], _RE14_FIXTURE.sc.n_near_bound[name])
+        end
+
+        wrong_theta = copy(_RE14_FIXTURE.sc.theta)
+        wrong_theta[1] += 0.01
+        wrong_sc = ScatterResult(wrong_theta, _RE14_FIXTURE.sc.m, _RE14_FIXTURE.sc.t_fine,
+            _RE14_FIXTURE.sc.coarse_bin, _RE14_FIXTURE.sc.counts, _RE14_FIXTURE.sc.status,
+            _RE14_FIXTURE.sc.decrease, _RE14_FIXTURE.sc.values, _RE14_FIXTURE.sc.near_bound,
+            _RE14_FIXTURE.sc.s_stat, _RE14_FIXTURE.sc.n_near_bound)
+        @test_throws r"different θ than result.theta" write_result(path, _RE14_FIXTURE.result; scatter=wrong_sc)
+    end
+end

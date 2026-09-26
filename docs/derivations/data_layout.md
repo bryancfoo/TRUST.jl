@@ -242,6 +242,27 @@ are never written (13 MB at `p = 1280`); only the per-variable σ and the near-b
 | `calibration_scan/variables/<name>/delta` | `Float64` | `(N_t or 1, N_shifts)` | yes, one group per variable |
 | `calibration_scan/variables/<name>/s_sys` | `Float64` | `(N_t)` or `(1)` | yes |
 
+**`scatter/` group, inside the same `otis-result-3` (Step 4.A.4b, D52).** Not a version bump, the
+same style as `laplace/` and `calibration_scan/` above: written only when `write_result` is given
+the `scatter` keyword, and `scatter.theta == result.theta` is required exactly (a loud error
+otherwise, `"scatter was computed at a different θ than result.theta"`) -- `write_result` has no
+other way to know the `ScatterResult` it is given was computed at the θ `result` itself reports.
+One entry per **free** (`vary && time_varying`) fitted variable only; a scalar or a frozen variable
+has no `scatter/variables/<name>` group at all.
+
+| Dataset | Type | Shape | Required |
+|---|---|---|---|
+| `scatter/m` | `Int64` | `(N_regions)` | only with `scatter` |
+| `scatter/t_fine` | `Float64` | `(N_fine)`, s | yes |
+| `scatter/coarse_bin` | `Int64` | `(N_fine)` | yes |
+| `scatter/counts` | `Int64` | `(N_fine, N_channels)` | yes |
+| `scatter/status` | `String` | `(N_fine)` | yes |
+| `scatter/decrease` | `Float64` | `(N_fine)` | yes |
+| `scatter/variables/<name>/values` | `Float64` | `(N_fine)`, the variable's own unit | yes, one group per free variable |
+| `scatter/variables/<name>/near_bound` | `UInt8` | `(N_fine)` | yes |
+| `scatter/variables/<name>/s_stat` | `Float64` | `(N_coarse)`, **never divided by `sqrt(m)`** | yes |
+| `scatter/variables/<name>/n_near_bound` | `Int64` | `(N_coarse)` | yes |
+
 **`read_trace` gains an `as` keyword** (`:arrays`, unchanged and default, or `:trace`, spec D35),
 once the component registry (`conventions.md` 7.2) exists to look shape names up in; the trace
 layout itself, `TRACE_LAYOUT_VERSION` and `read_streak`/`write_streak`/`write_trace` are

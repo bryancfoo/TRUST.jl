@@ -87,14 +87,38 @@ variation, over a nine-bin pre-shock interval, is likewise not smoothed by regul
 regularization, consistent with a short-interval noise-floor effect rather than a solver defect.
 Step 3.8 adds `WarpMap` and `dewarp`, the OMEGA streak's geometric correction, built and tested
 against a synthetic warp; no real OMEGA streak was available this chunk, so a first fit of one
-has not been run. Phase 4 (the extensions) is under way: a fit can now be driven by a
+has not been run.
+
+**Phase 4.A (multi-channel fits and uncertainty) is complete.** A fit can be driven by a
 multi-channel deck (`channels`/`[channel.<name>]`), joining several streaks that share one plasma
-into one `JointFitProblem`. `examples/two_channel.jl` and `examples/fit_two_channel.jl`
-synthesize a two-camera EPW/IAW streak pair from one plasma — an EPW camera that sees density,
-temperature and the super-Gaussian exponent but is blind to the ion temperature, and an IAW
-camera the other way round — and fit it jointly and single-channel; `examples/figures/two_channel_fit.png`
-is the committed figure showing each channel pinning what the other barely sees. The roadmap is
-kept outside this tree.
+into one `JointFitProblem`, each channel's own data averaged first onto a shared, user-chosen set
+of time bins (`[[fit.regions]]`, `average_regions`) rather than the model resampled onto the
+detector's own axis. A per-channel `WavelengthCalibration` effect — a scalar wavelength offset
+and an optional dispersion scale, acting on the axis the kernel evaluates the spectrum at, never
+on the probe or the IRFs — replaces the old `ProbeOffset`, since the dominant experimental
+uncertainty in practice is the measured wavelength axis, not the probe beam.
+`examples/two_channel.jl` and `examples/fit_two_channel.jl` synthesize a two-camera EPW/IAW
+streak pair from one plasma — an EPW camera that sees density, temperature and the
+super-Gaussian exponent but is blind to the ion temperature, and an IAW camera the other way
+round — and fit it jointly and single-channel; `examples/figures/two_channel_fit.png` is the
+committed figure showing each channel pinning what the other barely sees.
+
+Three uncertainty reports sit beside a fit. A **calibration scan** repeats the regularized fit
+with a channel's calibration offset fixed at a stated set of shifts, warm-started, and reports
+every fitted variable's movement per bin — the systematic uncertainty, propagated by hand and
+left for the user to read, not marginalized. A **Laplace covariance** at the minimizer, from the
+Gauss–Newton Hessian assembled without ever forming a dense Jacobian, is reported in both a
+posterior form (the credible width under the fit's own smoothness prior) and a sampling form
+(comparable to a bootstrap over noise, since it uses only the data rows' own Fisher information);
+every report first checks it is actually at a minimum and refuses, naming the shortfall, if it is
+not. A **per-slice scatter** is the statistical uncertainty: every camera is averaged onto a
+shared grid of windows nested finely inside each fitted bin, each fine window fitted on its own
+as an unregularized joint problem with the instrument held fixed, and the detrended spread of
+those single-slice estimates across a bin — never divided by the count, which would answer a
+different question — is reported beside the regularized value, together with every window's own
+convergence status. All three write to, and read back from, the result file; `examples/
+uncertainty_two_channel.jl` runs the full-resolution two-channel problem through every one of
+them, by hand. The roadmap is kept outside this tree.
 
 ## Installing and testing
 
