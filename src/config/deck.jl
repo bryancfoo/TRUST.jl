@@ -27,6 +27,7 @@
 # binding for real, D9), the Regularizer and the optimizer.
 
 import TOML
+using LinearAlgebra: PosDefException
 
 const DECK_VERSION = "otis-deck-2"
 
@@ -1630,6 +1631,40 @@ end
 # ------------------------------------------------------------------------------------------
 
 """
+    _fit_gn_decrease(problem::AbstractFitProblem, result::FitResult) -> Float64
+
+`gn_decrease(problem, result.theta)`, or `NaN` with a warning when `JᵀJ` over the free entries is
+not positive definite (`PosDefException`, e.g. a fitted variable no residual depends on). Any other
+error propagates. The fit itself succeeded, so a failed check must not lose its result (Phase 4.B
+spec D5).
+"""
+function _fit_gn_decrease(problem::AbstractFitProblem, result::FitResult)
+    try
+        return gn_decrease(problem, result.theta)
+    catch err
+        err isa PosDefException || rethrow()
+        @warn "fit: gn_decrease could not be computed: J'J over the free entries is not positive definite" status = result.status converged = result.converged
+        return NaN
+    end
+end
+
+"""
+    _warn_fit_minimum(result::FitResult, decrease::Real, fraction::Real) -> nothing
+
+OQ-41 option 1's two warnings, whatever `result.status` is (Phase 4.B spec D5). `NaN > x` is
+`false`, so a `NaN` decrease, already warned by `_fit_gn_decrease`, does not warn again here.
+"""
+function _warn_fit_minimum(result::FitResult, decrease::Real, fraction::Real)
+    if decrease > GN_DECREASE_WARN
+        @warn "fit: gn_decrease exceeds GN_DECREASE_WARN; the returned theta may not be a minimum (polish(problem, result) takes Gauss-Newton steps to one)" gn_decrease = decrease threshold = GN_DECREASE_WARN status = result.status converged = result.converged
+    end
+    if fraction >= SATURATION_FRACTION
+        @warn "fit: the near-bound fraction reaches SATURATION_FRACTION; the returned theta is pinned at its bounds" near_bound_fraction = fraction threshold = SATURATION_FRACTION status = result.status converged = result.converged
+    end
+    return nothing
+end
+
+"""
     fit(path::AbstractString) -> FitResult
     fit(deck::Deck) -> FitResult
 
@@ -1642,6 +1677,13 @@ writes the result and the effective deck into `[output].dir` (`<dir>/result.jld2
 `write_result` is always given the problem, so `fit`'s own result files always carry a residual and
 a mask per channel.
 
+**The minimum check** (Phase 4.B spec D5, [OQ-41](../../dev/open_questions.md#oq-41) option 1):
+after `solve`, `fit` computes `gn_decrease(problem, result.theta)` and the near-bound fraction,
+warns when the first exceeds `GN_DECREASE_WARN` or the second reaches `SATURATION_FRACTION`,
+**whatever the stop**, and writes `fit/gn_decrease` into the result file. `converged` means what
+OQ-36 says and is not changed: a converged fit may still warn. The check costs one
+`normal_matrices` call, about 1 s at `ntheta = 128`.
+
 Spec D33, D40.
 """
 function fit(deck::Deck)
@@ -1650,10 +1692,13 @@ function fit(deck::Deck)
     problem, optimizer, start = build_problem(deck)
     pin_blas_threads()
     result = solve(problem, optimizer; start=start)
+    decrease = _fit_gn_decrease(problem, result)
+    _warn_fit_minimum(result, decrease, _near_bound_fraction(result))
     dir = deck.sections["output"]["dir"]
     mkpath(dir)
     eff = effective_deck(deck, problem, optimizer)
-    write_result(joinpath(dir, "result.jld2"), result; problem=problem, deck=eff, source="fit")
+    write_result(joinpath(dir, "result.jld2"), result; problem=problem, deck=eff, source="fit",
+        gn_decrease=decrease)
     open(joinpath(dir, "effective_deck.toml"), "w") do io
         write(io, eff)
     end

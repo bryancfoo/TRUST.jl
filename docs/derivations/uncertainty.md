@@ -246,8 +246,12 @@ time, warm-started from θ\*'s own value in that window's coarse bin, `Levenberg
 **Why this decouples exactly**: with `Λ = 0` there is no regularizer row coupling neighbouring
 bins, and with every instrument scalar and non-time-varying variable already fixed, each window's
 residual depends only on that window's own free entries — so fitting 832 (at full size) one-bin
-joint problems independently is *identical* to a single full-resolution unregularized joint fit,
-just assembled window by window instead of as one giant sparse problem. **What this does not
+joint problems independently is identical to a single full-resolution unregularized joint fit, with the same variables held,
+**only when no channel carries a `TemporalIRF`**: with one, the full-resolution fit couples
+neighbouring windows through the IRF and the one-bin fits do not (the next paragraph, Pitfall 41).
+Under that condition the two are the same problem, assembled window by window instead of as one
+giant sparse problem. *(Corrected 2026-09-26, Phase 4.B spec D4: this said "identical"
+unconditionally.)* **What this does not
 model** (Pitfall 41): a `TemporalIRF` becomes the identity on a one-bin axis, so a camera whose IRF
 spans many fine windows (the two-channel problem's 80 ps and 50 ps IRFs against ~4 ps windows) has
 its *data* blurred in time while its *model* is not — the same approximation OQ-24 item 3's "each

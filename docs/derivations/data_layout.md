@@ -192,6 +192,7 @@ shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
 | `fit/status`, `fit/optimizer` | `String` | scalar | yes |
 | `fit/termination` | `String` | scalar, Optim's finer code (`:none` for the non-Optim optimizers) | yes |
 | `fit/near_bound_fraction` | `Float64` | scalar, `_near_bound_fraction(result)` | yes |
+| `fit/gn_decrease` | `Float64` | scalar, the Gauss–Newton predicted decrease at `fit/theta` over the free entries; `NaN` when `JᵀJ` there is not positive definite (Phase 4.B spec D5) | only when `write_result` is given it, which `fit(deck)` always does |
 | `fit/elapsed` | `Float64` | scalar, seconds | yes |
 | `trajectory/iteration` | `Int64` | `(n_iter)` | yes |
 | `trajectory/objective`, `trajectory/chi2`, `trajectory/R` | `Float64` | `(n_iter)` | yes |

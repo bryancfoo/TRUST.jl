@@ -60,6 +60,7 @@ end
 _total_variation(v::AbstractVector) = sum(abs(v[j+1] - v[j]) for j in 1:(length(v)-1))
 
 function run_reproduction()
+    pin_blas_threads()
     t_start = time()
 
     deck = read_deck(joinpath(@__DIR__, "iaw_shock.toml"))

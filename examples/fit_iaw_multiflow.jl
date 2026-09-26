@@ -70,6 +70,7 @@ function _rss_normalized(result::FitResult, truth::Dict{String,Vector{Float64}},
 end
 
 function run_reproduction()
+    pin_blas_threads()
     t_start = time()
 
     deck = read_deck(joinpath(@__DIR__, "iaw_multiflow.toml"))

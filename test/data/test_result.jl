@@ -729,3 +729,32 @@ const _RE14_FIXTURE = _re14_deck_and_scatter()
         @test_throws r"different θ than result.theta" write_result(path, _RE14_FIXTURE.result; scatter=wrong_sc)
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# RE15 (Phase 4.B spec D5, D21): fit/gn_decrease, optional inside otis-result-3
+# ------------------------------------------------------------------------------------------
+
+@testset "RE15: write_result with gn_decrease (Phase 4.B spec D5)" begin
+    mktempdir() do dir
+        path = joinpath(dir, "result.jld2")
+        write_result(path, _RE12_RESULT; deck="d", gn_decrease=0.25)
+        jldopen(path, "r") do f
+            @test f["fit/gn_decrease"] == 0.25
+        end
+        r = read_result(path)
+        @test r.fit.gn_decrease == 0.25
+
+        path_nan = joinpath(dir, "result_nan.jld2")
+        write_result(path_nan, _RE12_RESULT; deck="d", gn_decrease=NaN)
+        r_nan = read_result(path_nan)
+        @test isnan(r_nan.fit.gn_decrease)
+
+        path_none = joinpath(dir, "result_none.jld2")
+        write_result(path_none, _RE12_RESULT; deck="d")
+        jldopen(path_none, "r") do f
+            @test !haskey(f, "fit/gn_decrease")
+        end
+        r_none = read_result(path_none)
+        @test r_none.fit.gn_decrease === nothing
+    end
+end

@@ -9,12 +9,16 @@
 
 The per-slice statistical uncertainty report (D51, [OQ-24](../../dev/open_questions.md#oq-24)
 item 3): both cameras averaged, not interpolated, onto a shared fine grid of nested windows inside
-each coarse `[[fit.regions]]` bin; each fine window fitted **jointly** (every camera, every plasma
-variable free) on its own, unregularized (`Λ = 0`); per coarse bin, the detrended spread of the
-window estimates (`_detrended_spread`), **never divided by `sqrt(m)`** (Pitfall 40). With `Λ = 0`
-and the instrument fixed, this decouples exactly into one independent one-bin joint fit per fine
-window -- the full-resolution unregularized fit of OQ-24 item 3, fitted window by window instead
-of column by column.
+each coarse `[[fit.regions]]` bin; each fine window fitted **jointly** (every camera; every free
+time-varying plasma variable free, every variable that is not time-varying held at `result`'s
+value, Pitfall 42) on its own, unregularized (`Λ = 0`); per coarse bin, the detrended spread of
+the window estimates (`_detrended_spread`), **never divided by `sqrt(m)`** (Pitfall 40). With
+`Λ = 0`, the instrument fixed and those variables held, this decouples exactly into one
+independent one-bin joint fit per fine window -- the full-resolution unregularized fit of OQ-24
+item 3 with the same variables held, fitted window by window instead of column by column, **and
+without a `TemporalIRF`**, which a one-bin window cannot carry (Pitfall 41; corrected 2026-09-26,
+Phase 4.B spec D4: this said "every plasma variable free" and claimed the equivalence
+unconditionally).
 
 `result` must be `deck`'s own regularized fit (θ\\*), normally polished; every variable that is
 **not time-varying** is held at `result`'s own value in every window (Pitfall 42) -- only free

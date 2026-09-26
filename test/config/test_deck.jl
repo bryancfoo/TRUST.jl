@@ -846,3 +846,179 @@ end
         @test_throws "unknown top-level key \"bogus_section\"" read_deck(badpath)
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# Fixtures for DK20-DK22 (Phase 4.B spec D5, D21): fit(deck)'s minimum report.
+# ------------------------------------------------------------------------------------------
+
+# Phase 4.B spec D5: P1's noise-free streak (one bin, 24 wavelengths, sigma = 1), truth
+# T_D = 250 eV, u_D = 40 km/s, for the minimum-report rows DK20-DK22.
+function _dk_p1_streak(path::AbstractString)
+    template = Plasma(; n_e_cm3=3e19, electrons=[electrons(T_eV=400.0)],
+        ions=[ion(name="D", mass_amu=2.014, charge=1, T_eV=250.0, u_kms=40.0)])
+    trace = PlasmaTrace(template; t_ns=[0.0])
+    expt = Experiment(trace=trace, probe=ProbeBeam(lambda_probe_nm=263.25),
+        collection=Collection(theta_deg=60.0, k_model=:exact),
+        lambda_m=collect(range(262.0, 264.5; length=24)) .* 1e-9,
+        effects=(Sensitivity(scale=1.0e-6), ConstantBackground(level=25.0)))
+    image = measure(expt)
+    sd = StreakData(lambda_m=expt.lambda, t_s=expt.t, image=image, sigma=ones(size(image)))
+    write_streak(path, sd; source="test")
+    return sd
+end
+
+function _dk_p1_deck(datafile, outdir; t_bounds="[50.0, 800.0]", t_init=200.0,
+                     optimizer="procedure = \"levenberg_marquardt\"", extra_variables="")
+    return """
+    deck_version = "otis-deck-2"
+
+    [data]
+    file = "$(replace(datafile, "\\" => "/"))"
+
+    [geometry]
+    lambda_probe_nm = 263.25
+    theta_deg = 60.0
+
+    [fit.variables]
+    T_D = { bounds = $t_bounds, init = $t_init }
+    u_D = { bounds = [-200.0, 200.0], init = 10.0 }
+    $extra_variables
+
+    [plasma]
+    n_e_cm3 = 3.0e19
+
+    [plasma.electrons.e]
+    fraction = 1.0
+    T_eV = 400.0
+
+    [plasma.ions.D]
+    mass_amu = 2.014
+    charge = 1
+    fraction = 1.0
+    T_eV = "T_D"
+    u_kms = "u_D"
+
+    [instrument]
+    sensitivity = { scale = 1.0e-6 }
+    background = [{ type = "Constant", level = 25.0 }]
+
+    [fit]
+    sigma = "supplied"
+
+    [optimizer]
+    $optimizer
+
+    [output]
+    dir = "$(replace(outdir, "\\" => "/"))"
+    """
+end
+
+# Phase 4.B spec D5: the warnings are captured with Test.TestLogger and
+# Base.CoreLogging.with_logger, so no Logging entry is added to test/Project.toml.
+function _dk_fit_logged(deckpath)
+    logger = Test.TestLogger(min_level=Base.CoreLogging.Warn)
+    result = Base.CoreLogging.with_logger(() -> fit(deckpath), logger)
+    return result, logger.logs
+end
+_dk_count(logs, needle) = count(l -> occursin(needle, string(l.message)), logs)
+
+# ------------------------------------------------------------------------------------------
+# DK20: fit(deck) writes fit/gn_decrease (Phase 4.B spec D5, D21)
+# ------------------------------------------------------------------------------------------
+
+@testset "DK20: fit(deck) writes fit/gn_decrease" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "p1.jld2")
+        _dk_p1_streak(datafile)
+
+        # Fixture A2: lbfgs, one iteration, far from a minimum.
+        outdir_a2 = joinpath(dir, "a2")
+        deckpath_a2 = joinpath(dir, "a2.toml")
+        write(deckpath_a2, _dk_p1_deck(datafile, outdir_a2;
+            optimizer="procedure = \"lbfgs\"\n    lbfgs = { f_abstol_per_pixel = 1.0e6, patience = 1 }"))
+        result_a2 = fit(deckpath_a2)
+        @test result_a2.converged == true
+        @test result_a2.status == :f_tolerance
+        @test result_a2.iterations == 1
+
+        r_a2 = read_result(joinpath(outdir_a2, "result.jld2"))
+        @test r_a2.fit.gn_decrease > OTIS.GN_DECREASE_WARN
+        problem2, _, _ = OTIS.build_problem(read_deck(deckpath_a2))
+        @test r_a2.fit.gn_decrease ≈ gn_decrease(problem2, result_a2.theta) rtol = 1e-12
+
+        # Fixture C: levenberg_marquardt, converges to a genuine minimum.
+        outdir_c = joinpath(dir, "c")
+        deckpath_c = joinpath(dir, "c.toml")
+        write(deckpath_c, _dk_p1_deck(datafile, outdir_c))
+        result_c = fit(deckpath_c)
+        r_c = read_result(joinpath(outdir_c, "result.jld2"))
+        @test 0 <= r_c.fit.gn_decrease < 1e-10
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# DK21: the two warnings, exactly once, on the row that earns them (Phase 4.B spec D5, D21)
+# ------------------------------------------------------------------------------------------
+
+@testset "DK21: fit(deck) warns exactly on the row that earns it" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "p1.jld2")
+        _dk_p1_streak(datafile)
+
+        # Fixture A2: the decrease warning, once; not the fraction one.
+        outdir_a2 = joinpath(dir, "a2")
+        deckpath_a2 = joinpath(dir, "a2.toml")
+        write(deckpath_a2, _dk_p1_deck(datafile, outdir_a2;
+            optimizer="procedure = \"lbfgs\"\n    lbfgs = { f_abstol_per_pixel = 1.0e6, patience = 1 }"))
+        result_a2, logs_a2 = _dk_fit_logged(deckpath_a2)
+        @test _dk_count(logs_a2, "gn_decrease exceeds GN_DECREASE_WARN") == 1
+        @test _dk_count(logs_a2, "near-bound fraction reaches") == 0
+        decrease_log = only(filter(l -> occursin("gn_decrease exceeds GN_DECREASE_WARN", string(l.message)), logs_a2))
+        r_a2 = read_result(joinpath(outdir_a2, "result.jld2"))
+        @test decrease_log.kwargs[:gn_decrease] == r_a2.fit.gn_decrease
+        @test decrease_log.kwargs[:threshold] == 1e-2
+
+        # Fixture B: T_D pinned at its upper bound, fraction exactly 0.5.
+        outdir_b = joinpath(dir, "b")
+        deckpath_b = joinpath(dir, "b.toml")
+        write(deckpath_b, _dk_p1_deck(datafile, outdir_b; t_bounds="[50.0, 150.0]", t_init=100.0))
+        result_b, logs_b = _dk_fit_logged(deckpath_b)
+        @test _dk_count(logs_b, "near-bound fraction reaches SATURATION_FRACTION") == 1
+        @test _dk_count(logs_b, "gn_decrease exceeds") == 0
+        fraction_log = only(filter(l -> occursin("near-bound fraction reaches", string(l.message)), logs_b))
+        @test fraction_log.kwargs[:near_bound_fraction] >= 0.5
+
+        # Fixture C: no warning at all.
+        outdir_c = joinpath(dir, "c")
+        deckpath_c = joinpath(dir, "c.toml")
+        write(deckpath_c, _dk_p1_deck(datafile, outdir_c))
+        result_c, logs_c = _dk_fit_logged(deckpath_c)
+        @test isempty(logs_c)
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# DK22: a PosDefException becomes NaN with a warning, never a lost fit (Phase 4.B spec D5)
+# ------------------------------------------------------------------------------------------
+
+@testset "DK22: gn_decrease could not be computed" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "p1.jld2")
+        _dk_p1_streak(datafile)
+
+        # Fixture D: C plus a variable no residual depends on.
+        outdir_d = joinpath(dir, "d")
+        deckpath_d = joinpath(dir, "d.toml")
+        write(deckpath_d, _dk_p1_deck(datafile, outdir_d;
+            extra_variables="junk = { bounds = [0.0, 1.0], init = 0.5 }"))
+        result_d, logs_d = _dk_fit_logged(deckpath_d)
+        @test result_d isa FitResult
+        @test _dk_count(logs_d, "gn_decrease could not be computed") == 1
+        @test _dk_count(logs_d, "gn_decrease exceeds") == 0
+        @test isfile(joinpath(outdir_d, "result.jld2"))
+        @test isfile(joinpath(outdir_d, "effective_deck.toml"))
+
+        r_d = read_result(joinpath(outdir_d, "result.jld2"))
+        @test isnan(r_d.fit.gn_decrease)
+    end
+end

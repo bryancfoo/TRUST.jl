@@ -105,6 +105,16 @@ function normal_matrices(problem::AbstractFitProblem, theta::AbstractVector)
 end
 
 """
+    GN_DECREASE_WARN
+
+`1e-2`: the Gauss-Newton predicted decrease above which `fit(deck)` warns that its result may not
+be a minimum (OQ-41 option 1, Phase 4.B spec D5). In `𝒪`'s own units a change of 1 is one σ, so
+this reads "one more Gauss-Newton step would gain more than a hundredth of a σ" (OQ-36), the same
+number `laplace`'s `max_decrease` defaults to. A report, never a status: `converged` is unchanged.
+"""
+const GN_DECREASE_WARN = 1e-2
+
+"""
     gn_decrease(problem::AbstractFitProblem, theta::AbstractVector) -> Float64
 
 The decrease of `𝒪` a full Gauss-Newton step from `theta` would achieve, restricted to the free

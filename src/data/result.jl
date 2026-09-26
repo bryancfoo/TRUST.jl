@@ -112,7 +112,8 @@ end
                  scan::Union{Nothing,WeightScanResult} = nothing,
                  laplace::Union{Nothing,LaplaceResult} = nothing,
                  calibration_scan::Union{Nothing,CalibrationScanResult} = nothing,
-                 scatter::Union{Nothing,ScatterResult} = nothing) -> path
+                 scatter::Union{Nothing,ScatterResult} = nothing,
+                 gn_decrease::Union{Nothing,Real} = nothing) -> path
 
 Writes `result` (and, if given, `scan`, `laplace` and `calibration_scan`) to `path` as a JLD2 file
 of plain numeric arrays and strings (`docs/derivations/data_layout.md` Section 3, spec D34, D40,
@@ -120,7 +121,9 @@ D47): `layout_version`, a `meta` group, the effective `deck` text, the axis, one
 variable and per dependent, one group per leaf of the fitted trace, the `fit/*` scalars and
 vectors (including, since `otis-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`;
 `fit/chi2` and `fit/npixels` are the **weighted total** and the **sum over channels** for a
-`JointFitProblem` result, D40), the `trajectory/*` arrays, `channels/names` and, per channel
+`JointFitProblem` result, D40), and, only when given `gn_decrease` (which `fit(deck)` always
+passes), `fit/gn_decrease`, a `Float64` that may be `NaN` (Phase 4.B spec D5), the `trajectory/*`
+arrays, `channels/names` and, per channel
 (D40), the six summary scalars, `lambda`, `model` and `effects/*`, and, only when `problem !==
 nothing`, `residual` and `mask`; and, only when `scan !== nothing`, the `scan/*` arrays (including
 `scan/status` and `scan/termination`, one string per requested weight each) and per-variable
@@ -159,7 +162,8 @@ function write_result(path::AbstractString, result::FitResult;
     source="fit", scan::Union{Nothing,WeightScanResult}=nothing,
     laplace::Union{Nothing,LaplaceResult}=nothing,
     calibration_scan::Union{Nothing,CalibrationScanResult}=nothing,
-    scatter::Union{Nothing,ScatterResult}=nothing)
+    scatter::Union{Nothing,ScatterResult}=nothing,
+    gn_decrease::Union{Nothing,Real}=nothing)
     pspec = result.pspec
     nt = nbins(pspec.trace)
     unit_keys = _variable_unit_keys(pspec.bindings)
@@ -230,6 +234,7 @@ function write_result(path::AbstractString, result::FitResult;
         f["fit/status"] = string(result.status)
         f["fit/termination"] = string(result.termination)
         f["fit/near_bound_fraction"] = _near_bound_fraction(result)
+        gn_decrease === nothing || (f["fit/gn_decrease"] = Float64(gn_decrease))
         f["fit/optimizer"] = result.optimizer
         f["fit/elapsed"] = Float64(result.elapsed)
 
@@ -360,7 +365,8 @@ a `Vector` of `(; type::String, parameters::Dict{String,Any})` in index order, a
 `mask` `nothing` when the file carries none (`write_result` was not given a problem); `scan` is
 `nothing` when the file carries no `scan/*` group, else a `NamedTuple` (`rss`/`rss_normalized`
 themselves `Dict{String,Vector{Float64}}` and `rss_unreg` `Dict{String,Float64}`, empty when the
-file carries no ground truth).
+file carries no ground truth). `fit.gn_decrease` is `nothing` when the file carries none (Phase
+4.B spec D5).
 
 **`laplace` (D47)**: `nothing` when the file carries no `laplace/*` group, else `(; decrease,
 sigma_post, sigma_samp, near_bound)`, `sigma_post`/`sigma_samp`/`near_bound` each
@@ -425,6 +431,7 @@ function read_result(path::AbstractString)
             converged=f["fit/converged"], status=f["fit/status"], termination=f["fit/termination"],
             near_bound_fraction=f["fit/near_bound_fraction"], optimizer=f["fit/optimizer"],
             elapsed=f["fit/elapsed"],
+            gn_decrease=haskey(f, "fit/gn_decrease") ? f["fit/gn_decrease"] : nothing,
         )
 
         trajectory = (
