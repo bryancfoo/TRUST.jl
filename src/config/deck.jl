@@ -503,7 +503,7 @@ const _PLASMA_TOP_KEYS = ("n_e_cm3", "n_e_m3", "electrons", "ions")
 const _ELECTRON_SPECIES_KEYS = ("T_eV", "T_keV", "u_kms", "u_ms", "fraction", "shape")
 const _ION_SPECIES_KEYS = (_ELECTRON_SPECIES_KEYS..., "mass_amu", "mass_kg", "charge")
 const _SHAPE_OPTIONS = Dict{String,Any}("Maxwellian" => MaxwellianOptions, "SuperGaussian" => SuperGaussianOptions,
-                                         "Kappa" => KappaOptions)
+                                         "Kappa" => KappaOptions, "GeneralizedNormal" => GeneralizedNormalOptions)
 
 function _validate_shape_entry(given::AbstractDict, known_names::AbstractSet{String}, section::AbstractString)
     given isa AbstractDict || throw(ArgumentError("read_deck: \"$section\" must be a table"))
@@ -1124,6 +1124,7 @@ end
 _construct_shape(::Type{MaxwellianOptions}, ::AbstractDict) = Maxwellian()
 _construct_shape(::Type{SuperGaussianOptions}, resolved::AbstractDict) = SuperGaussian(resolved["m"])
 _construct_shape(::Type{KappaOptions}, resolved::AbstractDict) = Kappa(resolved["kappa"])
+_construct_shape(::Type{GeneralizedNormalOptions}, resolved::AbstractDict) = GeneralizedNormal(resolved["m"])
 
 """
     _build_template(plasma_section, vals) -> (Plasma, Vector{Pair{String,Any}})

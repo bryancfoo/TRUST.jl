@@ -153,7 +153,7 @@ to the precision either measurement can distinguish).
 - **Why `s = 1/κ`, not κ itself**: the Maxwellian limit `κ → ∞` becomes the table's own edge
   `s = 0`, so every `κ ≥ 2` is served with **no upper limit and no beyond-table branch in κ**. A
   table directly in `κ ∈ [2, 10]`, say, would leave every `κ > 10` — a common suprathermal case —
-  to the 400×-slower fallback.
+  to the fallback, about 120× slower.
 - **Why `κ ≥ 2` (`s ≤ 1/2`)**: `R(ξ; κ)` is singular at `κ = 3/2` (`a² = 0`), which is `s = 2/3`.
   At `s ≤ 1/2` the build needs `np = 32`; at `s ≤ 0.6` (`κ ≥ 1.67`) it needs the cap, `48`, with no
   margin left. `κ ∈ (3/2, 2)` is a valid shape and always runs the fallback.
@@ -213,6 +213,7 @@ analytic continuation off the real axis, the same reason `SuperGaussian`'s fallb
 **What reaches it**: every `κ ∈ (3/2, 2)` (`s` above the table's domain), and every `|ξ| > 20`
 regardless of κ — the second case is not rare for an **ion** species: a `Kappa` on an ion shape
 across a typical EPW window has `ξ_i` in the hundreds, and always takes this route. Both are
-documented, not errors; Section 12 row 13 measures the fallback's cost against the table's (about
-400× on this machine, matching `SuperGaussian`'s own ratio, since both fallbacks are the same
-`_cauchy_real`/`_cauchy_upper` quadrature machinery).
+documented, not errors; Section 12 row 13 measures the fallback's cost against the table's (124×
+on this machine on 2026-09-27: 30.2 µs a call against the table's 244 ns at κ = 1.8, ξ = 1.3;
+`SuperGaussian`'s own ratio read 137× in the same session, both fallbacks being the same
+`_cauchy_real`/`_cauchy_upper` machinery).

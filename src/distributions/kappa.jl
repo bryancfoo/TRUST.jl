@@ -85,7 +85,8 @@ needed, unlike `SuperGaussian`'s: `log1p(0) = 0` exactly, and under a dual κ th
 zero partials, never `0 · log 0` (KP5 checks `x = 0` under a dual κ).
 
 **A κ outside `KAPPA_TABLE`'s domain is not an error**: `cauchy_dfdv` on it runs the reference
-quadrature instead of the table, correctly but about 400× slower (spec D16, D18); `κ ∈ (3/2, 2)`
+quadrature instead of the table, correctly but about 120× slower (124× measured at κ = 1.8,
+ξ = 1.3, 2026-09-27; spec D16, D18, Phase 4.B Section 12 row 13); `κ ∈ (3/2, 2)`
 always takes this route, since the table never serves `s > 1/2`.
 
 Section 10.1; spec D16; `docs/derivations/kappa.md`.
@@ -228,7 +229,7 @@ f.slice, |ξ|)` plus the exact Plemelj term `iπ φ'(ξ)`; **(2)** otherwise, th
 `_kappa_cauchy_reference`. **No series branch** (spec D16, Section 14 item 4 of the phase spec): a
 kappa distribution's moments exist only below order `2κ − 1`, so `_cauchy_series`'s Laurent
 expansion (which needs moments to about order 40) does not apply; `κ ∈ (3/2, 2)` and `|ξ| > 20`
-both always take the fallback, correctly and about 400× slower — documented, not an error.
+both always take the fallback, correctly and about 120× slower — documented, not an error.
 
 **R is even in ξ** (`φ` is even, so `φ'` is odd and the principal value `R` is even): the table
 holds `ξ ≥ 0` and this function passes `abs(ξ)` to `_cheb_table_eval` (D13's contract for an even

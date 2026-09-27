@@ -11,12 +11,14 @@
     SHAPE_REGISTRY
 
 Deck name -> `AbstractVelocityDistribution` constructor (spec D32). Each entry's option struct
-is in `options.jl` (`MaxwellianOptions`, `SuperGaussianOptions`, `KappaOptions`).
+is in `options.jl` (`MaxwellianOptions`, `SuperGaussianOptions`, `KappaOptions`,
+`GeneralizedNormalOptions`).
 """
 const SHAPE_REGISTRY = Dict{String,Any}(
     "Maxwellian" => Maxwellian,
     "SuperGaussian" => SuperGaussian,
     "Kappa" => Kappa,
+    "GeneralizedNormal" => GeneralizedNormal,
 )
 
 """

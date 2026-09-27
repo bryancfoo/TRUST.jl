@@ -47,6 +47,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("Kappa")
         @safetestset "Kappa" begin include("distributions/test_kappa.jl") end
     end
+    if _wanted("GeneralizedNormal")
+        @safetestset "GeneralizedNormal" begin include("distributions/test_generalized_normal.jl") end
+    end
     if _wanted("shape cost")
         @safetestset "shape cost" begin include("distributions/test_shape_cost.jl") end
     end

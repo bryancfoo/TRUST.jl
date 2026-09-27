@@ -18,7 +18,7 @@
 # literal (`coefficients = ["bg", "c1", 0.0]`) has one fixed field type to check element by
 # element, each entry independently a variable reference or a fixed number.
 
-# --- SHAPE_REGISTRY's three option structs ---
+# --- SHAPE_REGISTRY's four option structs ---
 
 """
     MaxwellianOptions
@@ -50,6 +50,17 @@ value inside `KAPPA_TABLE`'s domain, far from `κ = 3/2` where the tails are vis
 """
 Base.@kwdef struct KappaOptions
     kappa::Float64 = 4.0
+end
+
+"""
+    GeneralizedNormalOptions
+
+`m`, the shape parameter (spec D31, D33). `GeneralizedNormal(m::Real)`'s own constructor has no
+default (`m` is a required positional argument); `2.0` is the deck's default, the Maxwellian, the
+table's own edge, as `SuperGaussianOptions`' `m = 2.0` is.
+"""
+Base.@kwdef struct GeneralizedNormalOptions
+    m::Float64 = 2.0
 end
 
 # --- EFFECT_REGISTRY's ten option structs ---

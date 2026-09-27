@@ -144,8 +144,13 @@ machinery (generalized at Step 4.B.2a), whose κ-derivative is the interpolant's
 dual slice; φ's κ-partial is closed form through `loggamma`'s ForwardDiff rule, so no second
 table is needed. Outside the domain the quadrature fallback runs, documented; there is no Laurent
 series branch, since a kappa distribution's moments exist only below order 2κ − 1.
-**`GeneralizedNormal` and `SkewNormal`** (Steps 4.B.3 and 4.B.4) are written at Phase 4.B's
-hold. **`HermiteExpansion` is not built** (the user, 2026-09-26). **The guard checks each
+**`GeneralizedNormal`** (Phase 4.B, Step 4.B.3) meets it the same way, derived in
+`docs/derivations/generalized_normal.md`: its Cauchy integral from `GN_TABLE` (m ∈ [2, 8] × |ξ| ≤
+10), the Laurent series beyond it, and the quadrature for m ∈ [1.5, 2) near ξ = 0; φ's m-partial is
+closed form through `loggamma`, so no second table.
+
+**`SkewNormal`** (Step 4.B.4) is written at Phase 4.B's hold. **`HermiteExpansion` is not
+built** (the user, 2026-09-26). **The guard checks each
 shape's route rather than assuming it**: `test_shape_cost.jl`'s SC1 fails the instant a shape is
 registered in `SHAPE_REGISTRY` without a matching entry in `_SC_SHAPES`, and SC5 the instant one is
 registered in one of the two name tables and not the other, so a slow or allocating parameter
