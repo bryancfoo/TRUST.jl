@@ -6,7 +6,7 @@
 
 using Test
 using OTIS
-using OTIS: SHAPE_REGISTRY
+using OTIS: SHAPE_REGISTRY, _SHAPE_OPTIONS, _build_shape
 import ForwardDiff
 
 # --- The representative-instance table (spec D11's forcing function; corrected 2026-09-18,
@@ -21,6 +21,7 @@ import ForwardDiff
 const _SC_SHAPES = Dict{String,Any}(
     "Maxwellian"    => Maxwellian(),
     "SuperGaussian" => SuperGaussian(3.0),
+    "Kappa"         => Kappa(3.5),  # mid-domain in s (0.286), not an integer: coincides with no oracle point
 )
 
 # --- The fixture: the package's standard collective EPW recipe (test_supergaussian_dm.jl's
@@ -100,12 +101,12 @@ function _sc_measure(name::String, f, p::Symbol, N::Int)
     t_tdual_2 = _sc_throughput(plasma_tdual, N)
     t_pdual_2 = _sc_throughput(plasma_pdual, N)
 
-    # SC4's baseline, in both orders on its own four calls (Phase 4.B spec D28: one plain       # new
-    # measurement read 0.665 at fdc1b7d). A bound fails only when both orders agree.           # new
-    t_tdual_3 = _sc_throughput(plasma_tdual, N)                                                 # new
-    t_plain_1 = _sc_throughput(plasma_plain, N)                                                 # new
-    t_plain_2 = _sc_throughput(plasma_plain, N)                                                 # new
-    t_tdual_4 = _sc_throughput(plasma_tdual, N)                                                 # new
+    # SC4's baseline, in both orders on its own four calls (Phase 4.B spec D28: one plain
+    # measurement read 0.665 at fdc1b7d). A bound fails only when both orders agree.
+    t_tdual_3 = _sc_throughput(plasma_tdual, N)
+    t_plain_1 = _sc_throughput(plasma_plain, N)
+    t_plain_2 = _sc_throughput(plasma_plain, N)
+    t_tdual_4 = _sc_throughput(plasma_tdual, N)
 
     ratio_1 = t_pdual_1 / t_tdual_1
     ratio_2 = t_pdual_2 / t_tdual_2
@@ -114,8 +115,8 @@ function _sc_measure(name::String, f, p::Symbol, N::Int)
             t_pdual_1 = t_pdual_1, t_tdual_1 = t_tdual_1, ratio_1 = ratio_1,
             t_tdual_2 = t_tdual_2, t_pdual_2 = t_pdual_2, ratio_2 = ratio_2,
             ratio_pt = max(ratio_1, ratio_2),
-            t_tdual_3 = t_tdual_3, t_plain_1 = t_plain_1, ratio_tp_1 = t_tdual_3 / t_plain_1,  # new
-            t_plain_2 = t_plain_2, t_tdual_4 = t_tdual_4, ratio_tp_2 = t_tdual_4 / t_plain_2)  # new
+            t_tdual_3 = t_tdual_3, t_plain_1 = t_plain_1, ratio_tp_1 = t_tdual_3 / t_plain_1,
+            t_plain_2 = t_plain_2, t_tdual_4 = t_tdual_4, ratio_tp_2 = t_tdual_4 / t_plain_2)
 end
 
 const _SC_RESULTS = let
@@ -188,5 +189,17 @@ end
         @info "SC4 (throughput, N=$(_SC_N), ns/call, barriered spectral_density(plasma, k, omega))" shape=r.shape parameter=r.parameter t_tdual_order1=r.t_tdual_3 t_plain_order1=r.t_plain_1 ratio_order1=r.ratio_tp_1 t_plain_order2=r.t_plain_2 t_tdual_order2=r.t_tdual_4 ratio_order2=r.ratio_tp_2
         @test max(r.ratio_tp_1, r.ratio_tp_2) >= 1
         @test min(r.ratio_tp_1, r.ratio_tp_2) <= 20
+    end
+end
+
+# --- SC5: a shape registered in one name table and forgotten in the other (Phase 4.B spec D19).
+# _SHAPE_OPTIONS (the deck layer) and SHAPE_REGISTRY (io.jl's read path) are not folded into one
+# table (summary B4); this is the guard that catches the one failure mode a fold would prevent. ---
+
+@testset "SC5: _SHAPE_OPTIONS and SHAPE_REGISTRY name the same shapes" begin
+    @test Set(keys(_SHAPE_OPTIONS)) == Set(keys(SHAPE_REGISTRY))
+    for (name, ctor) in SHAPE_REGISTRY
+        @test ctor isa Type
+        @test hasmethod(_build_shape, Tuple{Type{ctor},Dict{String,Float64}})
     end
 end

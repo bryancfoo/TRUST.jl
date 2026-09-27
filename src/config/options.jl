@@ -18,7 +18,7 @@
 # literal (`coefficients = ["bg", "c1", 0.0]`) has one fixed field type to check element by
 # element, each entry independently a variable reference or a fixed number.
 
-# --- SHAPE_REGISTRY's two option structs ---
+# --- SHAPE_REGISTRY's three option structs ---
 
 """
     MaxwellianOptions
@@ -38,6 +38,18 @@ super-Gaussian's Maxwellian-equivalent exponent (`docs/derivations/supergaussian
 """
 Base.@kwdef struct SuperGaussianOptions
     m::Float64 = 2.0
+end
+
+"""
+    KappaOptions
+
+`kappa`, the shape parameter (spec D16, D19). `Kappa(kappa::Real)`'s own constructor has no
+default (`kappa` is a required positional argument); `4.0` is the deck's default, a representative
+value inside `KAPPA_TABLE`'s domain, far from `κ = 3/2` where the tails are visibly suprathermal
+(excess kurtosis 2) -- unlike `SuperGaussianOptions`' `m = 2.0`, no finite `κ` is Maxwellian.
+"""
+Base.@kwdef struct KappaOptions
+    kappa::Float64 = 4.0
 end
 
 # --- EFFECT_REGISTRY's ten option structs ---

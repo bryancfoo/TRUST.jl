@@ -137,12 +137,17 @@ documented slow fallback: exactly the role the Cauchy integral's own quadrature 
 in Section 4 above. Neither quadrature is deleted or sped up; the contract is met by not calling
 it on the fast path, not by making it faster.
 
-**`Kappa` and `HermiteExpansion`** (Step 4.2, not yet built) are expected, as an expectation and
-not a claim, to meet the contract in closed form: kappa's κ-derivative through
-`exp(−κ log(…))`, with `digamma` for `x₀(κ)`'s own derivative; Hermite's coefficients entering
-`φ` linearly, so each one's derivative is just the corresponding basis function. **The guard
-checks this expectation rather than assuming it**: `test_shape_cost.jl`'s `SC1` fails the
-instant either shape is registered in `SHAPE_REGISTRY` without a matching entry in the test's own
-`_SC_SHAPES` table, at a representative parameter value inside its own valid range, so a slow or
-allocating parameter derivative is a test failure on the day it is written — not a profile
-finding three phases later, which is what happened to `SuperGaussian`'s.
+**`Kappa`** (Phase 4.B, Step 4.B.2b) meets it by **table and closed form**, derived in
+`docs/derivations/kappa.md`. Its Cauchy integral is served, inside `KAPPA_TABLE`'s domain (s = 1/κ
+∈ [0, ½], every κ ≥ 2, × |ξ| ≤ 20), from a Chebyshev table built at include time by the Phase 1.SG
+machinery (generalized at Step 4.B.2a), whose κ-derivative is the interpolant's own through the
+dual slice; φ's κ-partial is closed form through `loggamma`'s ForwardDiff rule, so no second
+table is needed. Outside the domain the quadrature fallback runs, documented; there is no Laurent
+series branch, since a kappa distribution's moments exist only below order 2κ − 1.
+**`GeneralizedNormal` and `SkewNormal`** (Steps 4.B.3 and 4.B.4) are written at Phase 4.B's
+hold. **`HermiteExpansion` is not built** (the user, 2026-09-26). **The guard checks each
+shape's route rather than assuming it**: `test_shape_cost.jl`'s SC1 fails the instant a shape is
+registered in `SHAPE_REGISTRY` without a matching entry in `_SC_SHAPES`, and SC5 the instant one is
+registered in one of the two name tables and not the other, so a slow or allocating parameter
+derivative is a test failure on the day it is written, not a profile finding three phases later,
+which is what happened to `SuperGaussian`'s.
