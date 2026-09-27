@@ -76,7 +76,9 @@ end
 
 @testset "NZ4: sigma against its closed form" begin
     Sbar = [10.0 20.0; 30.0 40.0]
-    model_cam = StreakCameraNoise(camera_gain=135.0, noise_factor=1.05, read_noise=11.0)
+    # sigma_px = 0.0 since Phase 4.B spec D9: the closed form below is the pre-spread formula,
+    # which `sigma` returns only without a spread; NZ12 is the spread's own closed-form row.
+    model_cam = StreakCameraNoise(camera_gain=135.0, noise_factor=1.05, sigma_px=0.0, read_noise=11.0)
     oracle_cam = sqrt.(Sbar .* 135.0 .* 1.05 .+ 11.0^2)
     @test isapprox(sigma(model_cam, Sbar), oracle_cam; rtol=1e-14)
 
@@ -150,4 +152,54 @@ end
     @test_throws "expected signal is negative" sigma(StreakCameraNoise(), [-1.0 2.0])
     @test_throws "a must be strictly positive" GaussianNoise(a=0.0)
     @test_throws "lambda must be non-negative" _rand_poisson(Xoshiro(1), -1.0)
+end
+
+@testset "NZ11: the zero branch is today's expression, bitwise" begin
+    S = [10.0 20.0 30.0; 40.0 50.0 60.0]
+    oracle = sqrt.(S .* 135.0 .* 1.05 .+ 11.0^2)
+    for sigma_px in (0.0, -1.0)
+        model = StreakCameraNoise(sigma_px=sigma_px)
+        @test all(sigma(model, S) .=== oracle)
+    end
+end
+
+@testset "NZ12: the spread's own closed form, an independent oracle" begin
+    S = [10.0 * (l + 2j) for l in 1:5, j in 1:4]
+    model = StreakCameraNoise(sigma_px=1.3)
+    w(n, s) = (W = [exp(-(l - a)^2 / (2s^2)) for l in 1:n, a in 1:n]; W ./ sum(W; dims=1))
+    wl, wt = w(5, 1.3), w(4, 1.3)
+    oracle = [sqrt(sum(wl[l, a]^2 * wt[j, b]^2 * S[a, b] * 135.0 * 1.05 for a in 1:5, b in 1:4) + 11.0^2)
+              for l in 1:5, j in 1:4]
+    @test isapprox(sigma(model, S), oracle; rtol=1e-13)
+end
+
+@testset "NZ13: the realized noise against the realized sigma, the spread on" begin
+    expt = _nz_streak()
+    model = StreakCameraNoise()
+    Sbar = measure(expt)
+    K = 400
+    images = Array{Float64}(undef, size(Sbar)..., K)
+    for k in 1:K
+        rng = Xoshiro(20260926 + k)
+        sd = synthesize(expt, model; rng=rng)
+        images[:, :, k] = sd.image
+    end
+    sigma2 = sigma(model, Sbar) .^ 2
+    ratios = Float64[]
+    worst = 0.0
+    worst_pixel = (0, 0)
+    for j in axes(Sbar, 2), l in axes(Sbar, 1)
+        s2 = var(images[l, j, :])
+        r = s2 / sigma2[l, j]
+        push!(ratios, r)
+        dev = abs(r - 1.0)
+        if dev > worst
+            worst = dev
+            worst_pixel = (l, j)
+        end
+        @test isapprox(r, 1.0; rtol=0.25)
+    end
+    pooled = mean(ratios)
+    @info "NZ13 pooled variance ratio, worst pixel deviation" pooled worst worst_pixel
+    @test isapprox(pooled, 1.0; rtol=0.03)
 end

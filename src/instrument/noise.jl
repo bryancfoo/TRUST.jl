@@ -21,10 +21,19 @@ read_noise²)` (Swadling Eqs. 37, 40 with n = 1). `camera_gain` is Swadling's `G
 photoelectron — a different number from `Sensitivity`'s `scale` (counts per m⁻¹), hence the
 different name. `sigma_px` is the single-photoelectron point spread, in pixels.
 
+`sigma(model, expected)` is the **realized** per-pixel σ: Swadling's pre-spread variance
+`S̄·G·F²` propagated through the squared weights of the point spread, `σ² = (K_λ∘K_λ)(S̄GF²)
+(K_t∘K_t)ᵀ + σ_RN²`, the read noise added after the spread (OQ-40 option A, Phase 4.B spec D8).
+It is **diagonal-approximate**: the spread also correlates neighbouring pixels (Swadling Eq. 38),
+which is not modelled, so an average of many pixels has a larger variance than the averaged σ
+says (Phase 4.B's summary A1). At `sigma_px = 0` it is the pre-spread formula bitwise. The data's
+mean `K_λ S̄ K_tᵀ` is blurred by a kernel the forward model does not have; that is not modelled
+either (the user, 2026-09-26).
+
 Built with `StreakCameraNoise(; camera_gain = 135.0, noise_factor = 1.05, sigma_px = 1.0,
 read_noise = 11.0)`.
 
-Spec D21.
+Spec D21, D8.
 """
 Base.@kwdef struct StreakCameraNoise{FT<:Real} <: AbstractNoiseModel
     camera_gain::FT = 135.0
@@ -73,11 +82,20 @@ weight when `sd.image` already *is* the expected signal — the docstring warns 
 supplied `sd.sigma` or the model applied to the model's own prediction). Throws naming the pixel
 and the value for a negative entry.
 
-Swadling Eqs. 37, 40; spec D21.
+For `StreakCameraNoise` with `sigma_px > 0`, this is the **realized** per-pixel σ: the pre-spread
+variance `V = expected·camera_gain·noise_factor` propagated through the squared weights of the
+point spread, `σ² = (K_λ∘K_λ)·V·(K_t∘K_t)ᵀ + read_noise²` (`_spread_variance`; OQ-40 option A,
+Phase 4.B spec D8, `conventions.md` 10.4). At `sigma_px <= 0` it is today's pre-spread formula,
+bitwise.
+
+Swadling Eqs. 37, 40; spec D21, D8.
 """
 function sigma(model::StreakCameraNoise, expected::AbstractMatrix)
     _check_nonneg_signal(expected)
-    return sqrt.(expected .* model.camera_gain .* model.noise_factor .+ model.read_noise^2)
+    model.sigma_px > 0 ||
+        return sqrt.(expected .* model.camera_gain .* model.noise_factor .+ model.read_noise^2)
+    V = expected .* model.camera_gain .* model.noise_factor
+    return sqrt.(_spread_variance(V, model.sigma_px) .+ model.read_noise^2)
 end
 function sigma(model::GaussianNoise, expected::AbstractMatrix)
     _check_nonneg_signal(expected)
@@ -144,19 +162,46 @@ function _rand_poisson(rng::AbstractRNG, lambda::Real)
 end
 
 """
+    _point_spread_matrices(nl::Integer, nt::Integer, sigma_px::Real) -> (Kl, Kt)
+
+The point spread's two column-normalized convolution matrices, `_convolution_matrix(GaussianKernel(
+sigma_px), 1:n)` on each axis (spec D13 of Phase 2): `Kl` is `nl × nl` along λ, `Kt` is `nt × nt`
+along t. Shared by `_point_spread` (the image) and `_spread_variance` (the realized σ), so the two
+can never use different kernels (Phase 4.B spec D8). Requires `sigma_px > 0` (`GaussianKernel`
+throws otherwise).
+"""
+function _point_spread_matrices(nl::Integer, nt::Integer, sigma_px::Real)
+    Kl = _convolution_matrix(GaussianKernel(sigma_px), 1:nl)
+    Kt = _convolution_matrix(GaussianKernel(sigma_px), 1:nt)
+    return Kl, Kt
+end
+
+"""
     _point_spread(image::AbstractMatrix, sigma_px::Real) -> Matrix
 
 The single-photoelectron point spread of `StreakCameraNoise`, a separable Gaussian of standard
 deviation `sigma_px` **pixels** applied to both axes of `image` (Swadling Eqs. 25, 26), using the
-same column-normalized `_convolution_matrix` the IRFs use (spec D13) — so, unlike Swadling's own
-kernel, which loses flux at the edges, this one **conserves counts exactly** (NZ5), differing
-from his form only in the outermost `8σ_px` pixels.
+same column-normalized `_convolution_matrix` the IRFs use (spec D13), built by
+`_point_spread_matrices` — so, unlike Swadling's own kernel, which loses flux at the edges, this
+one **conserves counts exactly** (NZ5), differing from his form only in the outermost `8σ_px`
+pixels.
 """
 function _point_spread(image::AbstractMatrix, sigma_px::Real)
-    nl, nt = size(image)
-    Kl = _convolution_matrix(GaussianKernel(sigma_px), 1:nl)
-    Kt = _convolution_matrix(GaussianKernel(sigma_px), 1:nt)
+    Kl, Kt = _point_spread_matrices(size(image, 1), size(image, 2), sigma_px)
     return Kl * image * transpose(Kt)
+end
+
+"""
+    _spread_variance(V::AbstractMatrix, sigma_px::Real) -> Matrix
+
+The variance of a pixel after the point spread, given the pre-spread per-pixel variances `V` of
+independent pixels: `(Kl ∘ Kl) · V · (Kt ∘ Kt)ᵀ`, `∘` the elementwise square (Phase 4.B spec D8,
+`conventions.md` 10.4). Exact for the diagonal; the covariance between neighbours (Swadling Eq. 38)
+is not computed.
+"""
+function _spread_variance(V::AbstractMatrix, sigma_px::Real)
+    Kl, Kt = _point_spread_matrices(size(V, 1), size(V, 2), sigma_px)
+    return (Kl .^ 2) * V * transpose(Kt .^ 2)
 end
 
 function _synthesize_meta(expt::Experiment, source::AbstractString)
@@ -188,8 +233,8 @@ A synthetic noisy `StreakData` from `measure(expt)` (spec D23), in this order:
    conserves counts exactly.
 6. `image[l,j] = N_C[l,j] + read_noise·randn(rng)`.
 7. Returns `StreakData(lambda = expt.lambda, t = expt.t, image, sigma = sigma(model, Sbar),
-   meta = source and the probe/collection geometry keys)`. **`σ` is from `Sbar`, never from the
-   noisy `image`.**
+   meta = source and the probe/collection geometry keys)`: `sigma = sigma(model, Sbar)`, the
+   realized per-pixel σ (Phase 4.B spec D8). **`σ` is from `Sbar`, never from the noisy `image`.**
 
 **`GaussianNoise`**: steps 3-6 become `image = Sbar .+ sigma(model, Sbar) .* randn(rng)`, drawn
 in the same column-major order.

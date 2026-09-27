@@ -1682,7 +1682,9 @@ after `solve`, `fit` computes `gn_decrease(problem, result.theta)` and the near-
 warns when the first exceeds `GN_DECREASE_WARN` or the second reaches `SATURATION_FRACTION`,
 **whatever the stop**, and writes `fit/gn_decrease` into the result file. `converged` means what
 OQ-36 says and is not changed: a converged fit may still warn. The check costs one
-`normal_matrices` call, about 1 s at `ntheta = 128`.
+`normal_matrices` call, which scales with `ntheta` times the pixel count: about 1 s at `ntheta =
+128` on the two-channel problem, about a minute at `ntheta = 768` on `examples/epw_ablation.toml`'s
+full-resolution problem (Phase 4.B spec D28, measured 2026-09-26).
 
 Spec D33, D40.
 """

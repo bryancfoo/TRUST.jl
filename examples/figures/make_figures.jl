@@ -171,13 +171,11 @@ function figure_noise(outdir, problem)
     spectrumplot!(ax1, lambda_nm, Sbar[:, j]; color=:black, label="S̄")
     axislegend(ax1)
 
-    model0 = StreakCameraNoise(camera_gain=model.camera_gain, noise_factor=model.noise_factor,
-        sigma_px=0.0, read_noise=model.read_noise)
-    sd0 = synthesize(expt, model0; rng=Xoshiro(problem.seed))
-    sig0 = sigma(model0, Sbar)
-    z = vec((sd0.image .- Sbar) ./ sig0)
+    # E[image] is the blurred mean (the spread is linear); the model's own mean is not blurred
+    # (OQ-40, Phase 4.B spec D12).
+    z = vec((sd.image .- OTIS._point_spread(Sbar, model.sigma_px)) ./ sig)
 
-    ax2 = Axis(fig[1, 2]; xlabel="(image - S̄) / σ  [sigma_px = 0]", ylabel="density")
+    ax2 = Axis(fig[1, 2]; xlabel="(image - E[image]) / σ  [realized σ, sigma_px = $(model.sigma_px)]", ylabel="density")
     hist!(ax2, z; normalization=:pdf, bins=60, color=(:steelblue, 0.5), label="residuals")
     xs = range(-4, 4; length=200)
     lines!(ax2, xs, _gaussian_pdf.(xs); color=:black, label="unit normal")

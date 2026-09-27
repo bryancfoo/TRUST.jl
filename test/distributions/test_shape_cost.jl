@@ -99,7 +99,13 @@ function _sc_measure(name::String, f, p::Symbol, N::Int)
     t_tdual_1 = _sc_throughput(plasma_tdual, N)
     t_tdual_2 = _sc_throughput(plasma_tdual, N)
     t_pdual_2 = _sc_throughput(plasma_pdual, N)
-    t_plain   = _sc_throughput(plasma_plain, N)
+
+    # SC4's baseline, in both orders on its own four calls (Phase 4.B spec D28: one plain       # new
+    # measurement read 0.665 at fdc1b7d). A bound fails only when both orders agree.           # new
+    t_tdual_3 = _sc_throughput(plasma_tdual, N)                                                 # new
+    t_plain_1 = _sc_throughput(plasma_plain, N)                                                 # new
+    t_plain_2 = _sc_throughput(plasma_plain, N)                                                 # new
+    t_tdual_4 = _sc_throughput(plasma_tdual, N)                                                 # new
 
     ratio_1 = t_pdual_1 / t_tdual_1
     ratio_2 = t_pdual_2 / t_tdual_2
@@ -108,7 +114,8 @@ function _sc_measure(name::String, f, p::Symbol, N::Int)
             t_pdual_1 = t_pdual_1, t_tdual_1 = t_tdual_1, ratio_1 = ratio_1,
             t_tdual_2 = t_tdual_2, t_pdual_2 = t_pdual_2, ratio_2 = ratio_2,
             ratio_pt = max(ratio_1, ratio_2),
-            t_plain = t_plain, ratio_tdual_plain = t_tdual_1 / t_plain)
+            t_tdual_3 = t_tdual_3, t_plain_1 = t_plain_1, ratio_tp_1 = t_tdual_3 / t_plain_1,  # new
+            t_plain_2 = t_plain_2, t_tdual_4 = t_tdual_4, ratio_tp_2 = t_tdual_4 / t_plain_2)  # new
 end
 
 const _SC_RESULTS = let
@@ -172,11 +179,14 @@ end
 
 # --- SC4: the baseline is a real baseline -- catches a "T-dual" that is not dual or a "plain"
 # call that is not plain, which would make SC3 meaningless. Deliberately very wide: a fixture
-# sanity check, not a performance bound. ---
+# sanity check, not a performance bound. Measured in both orders on its own four calls since
+# Phase 4.B spec D28 (2026-09-26): the lower bound on the larger ratio, the upper on the smaller,
+# so one noisy measurement cannot fail it. ---
 
 @testset "SC4: the T-dual/plain ratio is a real baseline" begin
     for r in _SC_RESULTS
-        @info "SC4 (throughput, N=$(_SC_N), ns/call, barriered spectral_density(plasma, k, omega))" shape=r.shape parameter=r.parameter t_tdual=r.t_tdual_1 t_plain=r.t_plain ratio=r.ratio_tdual_plain
-        @test 1 <= r.ratio_tdual_plain <= 20
+        @info "SC4 (throughput, N=$(_SC_N), ns/call, barriered spectral_density(plasma, k, omega))" shape=r.shape parameter=r.parameter t_tdual_order1=r.t_tdual_3 t_plain_order1=r.t_plain_1 ratio_order1=r.ratio_tp_1 t_plain_order2=r.t_plain_2 t_tdual_order2=r.t_tdual_4 ratio_order2=r.ratio_tp_2
+        @test max(r.ratio_tp_1, r.ratio_tp_2) >= 1
+        @test min(r.ratio_tp_1, r.ratio_tp_2) <= 20
     end
 end

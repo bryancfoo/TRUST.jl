@@ -159,12 +159,35 @@ is not modelled. The point spread (`_point_spread`, step 5) uses the same column
 window and loses flux at the edges instead. The two differ only in the outermost `~8σ_px`
 pixels.
 
-**σ is from the expected signal, never the noisy one.** `sigma(model, expected)` is written
-against `measure(expt)`'s own output (or an externally supplied expectation); passing a
-*realised*, noisy streak gives that realisation's own sample σ, not the χ² weight — the
-docstring says this in one sentence, and it is why `synthesize` computes `sigma(model, Sbar)`
-from `Sbar = measure(expt)` in step 1, before any noise is drawn (step 7 returns it, written
-last for readability, but it is the expected-signal σ throughout).
+**σ is the realized per-pixel σ, from the expected signal** (Phase 4.B, OQ-40 option A, spec D8).
+The point spread (step 5) is linear, so a pixel's variance after it is its pre-spread variance
+propagated through the squared weights: with `V = S̄·G·F²` the pre-spread variance of independent
+pixels (Eq. 37) and `K_λ`, `K_t` the column-normalized Gaussian matrices of `_point_spread`,
+
+    σ² = (K_λ ∘ K_λ) · V · (K_t ∘ K_t)ᵀ + σ_RN²,
+
+`∘` the elementwise square and the read noise added after the spread, as step 6 adds it. At
+`sigma_px = 0` this is Eq. 40's σ bitwise. It is written against the **expected** signal,
+`measure(expt)` (or an externally supplied expectation): passing a *realised*, noisy streak gives
+that realisation's own σ, not the χ² weight. It is **diagonal-approximate**: the spread also
+correlates neighbouring pixels (Eq. 38), which is not modelled, exactly as the dewarp's σ is
+diagonal-approximate. **Consequence for averaging**: `average_regions` combines σ as for
+independent slices, so an average of n ≫ σ_px slices has its variance understated by up to
+1/Σ_b w_b² = 2√π σ_px (≈ 3.54 at `sigma_px = 1`; measured 3.36 at 32 slices per bin). Averaged
+fits of synthetic data therefore read χ²/n ≈ 3, not 1; the user decided on 2026-09-26 that this
+is reported and fixed later.
+
+**The mean's blur is not modelled** (the user, 2026-09-26: "not a big deal in the long run"). The
+data's mean is `E[image] = K_λ S̄ K_tᵀ`, and the forward model has no point spread, so a fit sees a
+mean blurred by one pixel in both directions. Its size against σ on the three example problems
+and the two-channel problem, measured once (Phase 4.B, chunk 3's report), is: `epw_ablation`
+(512 × 256) max 3.049 at pixel (511, 2), RMS 0.138; `iaw_multiflow` (512 × 256) max 1.165 at
+pixel (277, 256), RMS 0.052; `iaw_shock` (512 × 256) max 4.831 at pixel (271, 72), RMS 0.162;
+the two-channel problem's `epw` channel (256 × 1024) max 2.812 at pixel (256, 1), RMS 0.158; its
+`iaw` channel (256 × 960) max 1.008 at pixel (120, 959), RMS 0.046. A deck whose spectral and
+temporal IRFs span many pixels hides it; a small problem with no
+spectral IRF shows it (Phase 4.A: χ²/n 7.2 and a +200 eV `T_D` bias on 24 wavelengths). The
+fast fixtures therefore use `GaussianNoise`.
 
 **Reproducibility.** `synthesize` draws every pixel in fixed **column-major** order (wavelength
 fastest, then time) on a single thread, so one `rng` seed gives the same image regardless of
