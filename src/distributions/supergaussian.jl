@@ -71,7 +71,7 @@ before computing, rather than computing at `m`'s own type and promoting the thre
 afterwards, is what `conventions.md` 5.1 asks for — "a `Float32` input promotes to `Float64` at
 the constructor" — since computing `x0` and `C` at `Float32` precision and then widening gives a
 different shape from `SuperGaussian(3.0)`, bit for bit, not merely to `Float32` precision; HK1
-is the test); computes `slice = _sg_slice(SG_TABLE, m_p)` at the promoted `m_p` (so `slice`'s
+is the test); computes `slice = _cheb_slice(SG_TABLE, m_p)` at the promoted `m_p` (so `slice`'s
 element type is `FT` too); returns `SuperGaussian{FT,L,LM}`, `L` the Cauchy table's slice length,
 the same integer for every shape built in a session. Every constructor path recomputes all cached
 fields and slices from `m` — there is no constructor that takes them directly. The uncached
@@ -83,7 +83,7 @@ asymmetry between the two constructors is deliberate — do not tidy them into a
 
 **Two public constructor methods** (Phase 3.C spec D6): `SuperGaussian(m::Real)`, above, gives
 `LM = 0` and `dm_slice = ()`; `SuperGaussian(m::ForwardDiff.Dual)`, below, additionally computes
-`dm_slice = _sg_slice(SG_DM_TABLE, m_p)`, the m-partial table's slice at this shape's own `m`.
+`dm_slice = _cheb_slice(SG_DM_TABLE, m_p)`, the m-partial table's slice at this shape's own `m`.
 `ForwardDiff.Dual <: Real`, so the dual method is strictly more specific and Julia selects it
 automatically for a dual `m`; **`LM = 0` for a plain `m` is not an optimization for its own sake**
 — it is what keeps `reconstruct`'s cost, and the size of every `Species` and `Plasma` built from a
@@ -94,7 +94,7 @@ dm-slice actually exists (D6 item 3, `_sg_call`'s `LM = 0` override).
 Dimensionless: `m` is the exponent of the 3-D form (`conventions.md` notation dictionary), not a
 physical quantity. Tested for `m ∈ [1.4999, 8.5]`; below `m = 1` the quadrature fallback's second
 derivative at `x = 0` can be `NaN` under ForwardDiff (spec Pitfall 14), so no test asks for it.
-**A shape's `m` outside the table's domain (`SG_TABLE.m_lo` to `SG_TABLE.m_hi`) is not an error**:
+**A shape's `m` outside the table's domain (`SG_TABLE.p_lo` to `SG_TABLE.p_hi`) is not an error**:
 `cauchy_dfdv` on it runs the reference quadrature instead of the table, correctly but about 60 µs
 a call against about 50 ns through the table (spec D18, D14); likewise a dual `m` outside
 `SG_DM_TABLE`'s domain (the same rectangle) falls back to the quadrature-based m-partial (Phase
@@ -121,7 +121,7 @@ function SuperGaussian(m::Real)
     m_p = FT(m)
     x0_p = FT(_sg_x0(m_p))
     C_p = FT(_sg_C(m_p))
-    slice = _sg_slice(SG_TABLE, m_p)
+    slice = _cheb_slice(SG_TABLE, m_p)
     return SuperGaussian(m_p, x0_p, C_p, slice, ())
 end
 
@@ -130,7 +130,7 @@ end
 
 The dual-`m` constructor (Phase 3.C spec D6): promotes and computes `m`, `x0`, `C` and `slice`
 exactly as `SuperGaussian(m::Real)` does, and additionally computes
-`dm_slice = _sg_slice(SG_DM_TABLE, m_p)`, the m-partial table's `|x|`-coefficients at this shape's
+`dm_slice = _cheb_slice(SG_DM_TABLE, m_p)`, the m-partial table's `|x|`-coefficients at this shape's
 own `m`. Selected automatically over `SuperGaussian(m::Real)` for any dual `m` since
 `ForwardDiff.Dual <: Real` makes this method the more specific one. `reconstruct` therefore
 returns `LM = 0` for a plain `values.m` and the full slice for a dual one with no special case,
@@ -144,8 +144,8 @@ function SuperGaussian(m::ForwardDiff.Dual)
     m_p = FT(m)
     x0_p = FT(_sg_x0(m_p))
     C_p = FT(_sg_C(m_p))
-    slice = _sg_slice(SG_TABLE, m_p)
-    dm_slice = _sg_slice(SG_DM_TABLE, m_p)
+    slice = _cheb_slice(SG_TABLE, m_p)
+    dm_slice = _cheb_slice(SG_DM_TABLE, m_p)
     return SuperGaussian(m_p, x0_p, C_p, slice, dm_slice)
 end
 
@@ -273,7 +273,7 @@ function _sg_call(f::SuperGaussian{D,L,LM}, x::Real) where {D<:ForwardDiff.Dual,
     m0 = ForwardDiff.value(f.m)
     ax = abs(_primal_value(x))
     (iszero(ForwardDiff.partials(f.m)) || _sg_nested_dual(D) ||
-        !(SG_DM_TABLE.m_lo <= m0 <= SG_DM_TABLE.m_hi) || ax > SG_DM_TABLE.xi_max) &&
+        !(SG_DM_TABLE.p_lo <= m0 <= SG_DM_TABLE.p_hi) || ax > SG_DM_TABLE.xi_max) &&
         return _sg_call_generic(f, x)
 
     x0v = ForwardDiff.value(f.x0)
@@ -281,7 +281,7 @@ function _sg_call(f::SuperGaussian{D,L,LM}, x::Real) where {D<:ForwardDiff.Dual,
     xv = _primal_value(x)
     val = iszero(xv) ? Cv * gamma(2 / m0) : Cv * _upper_gamma(2 / m0, (ax / x0v)^m0)
     dx = iszero(xv) ? zero(val) : -(m0 * Cv / x0v^2) * xv * exp(-(ax / x0v)^m0)
-    dm = _sg_table_eval(SG_DM_TABLE, f.dm_slice, ax)
+    dm = _cheb_table_eval(SG_DM_TABLE, f.dm_slice, ax)
     return val + dx * (x - xv) + dm * (f.m - m0)
 end
 
@@ -375,17 +375,17 @@ The Cauchy integral of the shape's derivative (`conventions.md` 1.5), in its fin
 D14, Step 1.SG.3): off the real axis, `Im ξ < 0` throws and `Im ξ > 0` uses direct quadrature,
 both via `_sg_cauchy_reference` (D18) — the forward model never evaluates off the real axis, so
 this branch exists for tests and for Phase 4. For real `ξ`, three branches in order: **(1)**
-inside the table's domain — `|ξ| ≤ SG_TABLE.xi_max` and `SG_TABLE.m_lo ≤ m ≤ SG_TABLE.m_hi`, both
+inside the table's domain — `|ξ| ≤ SG_TABLE.xi_max` and `SG_TABLE.p_lo ≤ m ≤ SG_TABLE.p_hi`, both
 read from the table object and never duplicated (`SG_TABLE` is the only place the domain lives) —
-`_sg_table_eval(SG_TABLE, f.slice, |ξ|)` plus the exact Plemelj term `iπ φ'(ξ)`, used **even where
+`_cheb_table_eval(SG_TABLE, f.slice, |ξ|)` plus the exact Plemelj term `iπ φ'(ξ)`, used **even where
 the large-|ξ| series would also converge** (the join at `|ξ| = xi_max` is a test, DP7/TB10, not a
 blend); **(2)** outside the table's domain, the large-|ξ| Laurent series (`_cauchy_series`) if it
 converges, plus the same Plemelj term; **(3)** otherwise, the reference quadrature
-`_sg_cauchy_reference`. **`m` outside `[m_lo, m_hi]` is not an error**: the fallback runs,
+`_sg_cauchy_reference`. **`m` outside `[p_lo, p_hi]` is not an error**: the fallback runs,
 correctly, about 60 µs a call, against about 50 ns through the table.
 
 Every branch decision is made on a primal value: comparisons on a `ForwardDiff.Dual` already
-compare values, so `|ξ| ≤ xi_max` and `m_lo ≤ m ≤ m_hi` need no help; only `_sg_table_eval`'s panel
+compare values, so `|ξ| ≤ xi_max` and `p_lo ≤ m ≤ p_hi` need no help; only `_cheb_table_eval`'s panel
 index is built from a primal (`_primal_value`, inside that function, spec 5.12).
 
 `conventions.md` 1.5; spec D14; `docs/derivations/supergaussian.md`.
@@ -396,9 +396,9 @@ function cauchy_dfdv(f::SuperGaussian, xi::Number)
     end
     rxi = real(xi)
     axi = abs(rxi)
-    if axi <= SG_TABLE.xi_max && SG_TABLE.m_lo <= f.m <= SG_TABLE.m_hi
+    if axi <= SG_TABLE.xi_max && SG_TABLE.p_lo <= f.m <= SG_TABLE.p_hi
         QT = _basefloat(rxi)
-        return _sg_table_eval(SG_TABLE, f.slice, axi) + im * QT(pi) * dfdx(f, rxi)
+        return _cheb_table_eval(SG_TABLE, f.slice, axi) + im * QT(pi) * dfdx(f, rxi)
     end
     series_val, converged = _cauchy_series(f, rxi)
     if converged

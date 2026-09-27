@@ -104,7 +104,10 @@ decay and, per spec D9, for the heavier-tailed shapes arriving at Step 1.SG.1.
 `SuperGaussian` (Step 1.SG.1) is derived in `docs/derivations/supergaussian.md`. Its Cauchy
 integral is served, on the real axis and inside a domain in `(ξ, m)`, from a Chebyshev table
 built at precompile time (Step 1.SG.2); the generic quadrature fallback above remains its
-reference method and the table's own generator.
+reference method and the table's own generator. *(The table machinery itself was generalized and
+renamed — a general `ChebyshevTable` type, per-table degree caps and a signed ξ domain — at
+Phase 4.B Step 4.B.2a, 2026-09-26, spec D13; `SG_TABLE` and `SG_DM_TABLE` are bitwise unchanged
+and keep their names.)*
 
 ## 6. A shape's derivative in its own parameters
 

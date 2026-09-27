@@ -1,7 +1,7 @@
 using Test
 using OTIS
 using OTIS: _sg_cauchy_reference, _cauchy_series, _require_high_moments, _upper_gamma,
-            _dgamma_da, _sg_x0, _sg_C, _sg_table_eval, SG_TABLE, _cauchy_upper, _basefloat
+            _dgamma_da, _sg_x0, _sg_C, _cheb_table_eval, SG_TABLE, _cauchy_upper, _basefloat
 using ForwardDiff: derivative
 import ForwardDiff
 using SpecialFunctions: gamma, digamma
@@ -357,7 +357,7 @@ end
 
 _dp_rng = Random.Xoshiro(20260908)
 _dp_xis = [(2 * rand(_dp_rng) - 1) * SG_TABLE.xi_max for _ in 1:200]
-_dp_ms  = [SG_TABLE.m_lo + rand(_dp_rng) * (SG_TABLE.m_hi - SG_TABLE.m_lo) for _ in 1:200]
+_dp_ms  = [SG_TABLE.p_lo + rand(_dp_rng) * (SG_TABLE.p_hi - SG_TABLE.p_lo) for _ in 1:200]
 
 @testset "DP1: cauchy_dfdv against _sg_cauchy_reference (seeded)" begin
     worst_re = 0.0
@@ -391,14 +391,14 @@ end
 
 @testset "DP3: the branches are the ones D14 names" begin
     xmax = SG_TABLE.xi_max
-    mlo = SG_TABLE.m_lo
-    mhi = SG_TABLE.m_hi
+    mlo = SG_TABLE.p_lo
+    mhi = SG_TABLE.p_hi
 
     # (a) inside the table's domain, at both sides of the m and xi edges: the table branch, exact
     for m in (mlo, 2.0, mhi), xi_pt in (0.0, 1.0, xmax)
         f = SuperGaussian(m)
         QT = _basefloat(xi_pt)
-        expected = _sg_table_eval(SG_TABLE, f.slice, abs(xi_pt)) + im * QT(pi) * dfdx(f, xi_pt)
+        expected = _cheb_table_eval(SG_TABLE, f.slice, abs(xi_pt)) + im * QT(pi) * dfdx(f, xi_pt)
         @test cauchy_dfdv(f, xi_pt) == expected
     end
 
@@ -424,7 +424,7 @@ end
         f = SuperGaussian(m)
         xi_pt = 2.0
         QT = _basefloat(xi_pt)
-        expected = _sg_table_eval(SG_TABLE, f.slice, abs(xi_pt)) + im * QT(pi) * dfdx(f, xi_pt)
+        expected = _cheb_table_eval(SG_TABLE, f.slice, abs(xi_pt)) + im * QT(pi) * dfdx(f, xi_pt)
         @test cauchy_dfdv(f, xi_pt) == expected
     end
 end

@@ -5,7 +5,7 @@
 
 using Test
 using OTIS
-using OTIS: SG_TABLE, SG_DM_TABLE, _sg_slice, _sg_table_eval, _sg_dphi_dm_reference,
+using OTIS: SG_TABLE, SG_DM_TABLE, _cheb_slice, _cheb_table_eval, _sg_dphi_dm_reference,
             _sg_x0, _sg_C, _sg_uncached, _widen_shape, _spectrum_eltype
 using Random
 import ForwardDiff
@@ -20,9 +20,9 @@ using QuadGK: quadgk
     @test SG_DM_TABLE.edges[end] == SG_DM_TABLE.xi_max
     @test length(SG_DM_TABLE.nxi) == length(SG_DM_TABLE.offset) == length(SG_DM_TABLE.edges) - 1
     LM = sum(SG_DM_TABLE.nxi .+ 1)
-    @test LM == length(SG_DM_TABLE.coeffs) ÷ (SG_DM_TABLE.nm + 1)
-    @test SG_DM_TABLE.m_lo == SG_TABLE.m_lo
-    @test SG_DM_TABLE.m_hi == SG_TABLE.m_hi
+    @test LM == length(SG_DM_TABLE.coeffs) ÷ (SG_DM_TABLE.np + 1)
+    @test SG_DM_TABLE.p_lo == SG_TABLE.p_lo
+    @test SG_DM_TABLE.p_hi == SG_TABLE.p_hi
     @test SG_DM_TABLE.xi_max == SG_TABLE.xi_max
 end
 
@@ -31,7 +31,7 @@ end
     # finding, only a flag that is false -- a direction that stopped while still failing the
     # trailing-coefficient check -- is. See TB3 for the Cauchy table's own version of this row.
     @test all(SG_DM_TABLE.xi_converged)
-    @test SG_DM_TABLE.m_converged
+    @test SG_DM_TABLE.p_converged
 end
 
 # --- DM3, DM4: the table's own accuracy, and that the certification covers the domain ---
@@ -42,7 +42,7 @@ function _dm_points()
     rng = Random.Xoshiro(_DM_SEED)
     edges = SG_DM_TABLE.edges
     xi_max = SG_DM_TABLE.xi_max
-    m_lo, m_hi = SG_DM_TABLE.m_lo, SG_DM_TABLE.m_hi
+    m_lo, m_hi = SG_DM_TABLE.p_lo, SG_DM_TABLE.p_hi
     near_edge(xi) = any(abs(xi - e) < 1e-9 for e in edges)
     xis = Float64[]
     ms = Float64[]
@@ -71,8 +71,8 @@ const _DM_X, _DM_M = _dm_points()
     for i in eachindex(_DM_X)
         x = _DM_X[i]
         m = _DM_M[i]
-        slice = _sg_slice(SG_DM_TABLE, m)
-        tv = _sg_table_eval(SG_DM_TABLE, slice, x)
+        slice = _cheb_slice(SG_DM_TABLE, m)
+        tv = _cheb_table_eval(SG_DM_TABLE, slice, x)
         rv = _sg_dphi_dm_reference(m, x)
         err = abs(tv - rv) / max(abs(rv), 1e-9)
         if err > worst
@@ -94,19 +94,19 @@ end
     @test all(>=(10), counts)
 
     # The four corners, explicitly, at the table's own tolerance.
-    corners = ((0.0, SG_DM_TABLE.m_lo), (0.0, SG_DM_TABLE.m_hi),
-               (SG_DM_TABLE.xi_max, SG_DM_TABLE.m_lo), (SG_DM_TABLE.xi_max, SG_DM_TABLE.m_hi))
+    corners = ((0.0, SG_DM_TABLE.p_lo), (0.0, SG_DM_TABLE.p_hi),
+               (SG_DM_TABLE.xi_max, SG_DM_TABLE.p_lo), (SG_DM_TABLE.xi_max, SG_DM_TABLE.p_hi))
     for (x, m) in corners
-        slice = _sg_slice(SG_DM_TABLE, m)
-        tv = _sg_table_eval(SG_DM_TABLE, slice, x)
+        slice = _cheb_slice(SG_DM_TABLE, m)
+        tv = _cheb_table_eval(SG_DM_TABLE, slice, x)
         rv = _sg_dphi_dm_reference(m, x)
         @test isapprox(tv, rv; rtol = 1e-9, atol = 1e-9)
     end
 
     # Both edges in m, across every panel boundary in xi.
-    for x in SG_DM_TABLE.edges, m in (SG_DM_TABLE.m_lo, SG_DM_TABLE.m_hi)
-        slice = _sg_slice(SG_DM_TABLE, m)
-        tv = _sg_table_eval(SG_DM_TABLE, slice, x)
+    for x in SG_DM_TABLE.edges, m in (SG_DM_TABLE.p_lo, SG_DM_TABLE.p_hi)
+        slice = _cheb_slice(SG_DM_TABLE, m)
+        tv = _cheb_table_eval(SG_DM_TABLE, slice, x)
         rv = _sg_dphi_dm_reference(m, x)
         @test isapprox(tv, rv; rtol = 1e-9, atol = 1e-9)
     end
@@ -121,7 +121,7 @@ end
     C = _sg_C(m)
     x0p_over_x0 = (5 * digamma(5 / m) - 3 * digamma(3 / m)) / (2 * m^2)
     Cp_over_C = (9 * digamma(3 / m) - 5 * digamma(5 / m)) / (2 * m^2)
-    slice = _sg_slice(SG_DM_TABLE, m)
+    slice = _cheb_slice(SG_DM_TABLE, m)
     for x in _DM_X
         t = abs(x / x0)^m
         Gamma_a = exp(-t) * log(t) + expint(t)     # Gamma_a(1, t), independent of _dgamma_da
@@ -129,7 +129,7 @@ end
         dt_dm = t * (log(abs(x / x0)) - m * x0p_over_x0)
         Gamma_val = gamma(a, t)
         closed = Cp_over_C * C * Gamma_val + C * (Gamma_a * (-2 / m^2) + Gamma_t * dt_dm)
-        tv = _sg_table_eval(SG_DM_TABLE, slice, x)
+        tv = _cheb_table_eval(SG_DM_TABLE, slice, x)
         @test isapprox(tv, closed; rtol = 1e-9, atol = 1e-9)
     end
 end
@@ -175,9 +175,9 @@ end
 @testset "DM7: the interpolant is continuous at every panel join" begin
     interior_edges = SG_DM_TABLE.edges[2:end-1]
     for edge in interior_edges, m in (1.5, 2.0, 5.0, 8.0)
-        slice = _sg_slice(SG_DM_TABLE, m)
-        v_below = _sg_table_eval(SG_DM_TABLE, slice, prevfloat(edge))
-        v_above = _sg_table_eval(SG_DM_TABLE, slice, edge)
+        slice = _cheb_slice(SG_DM_TABLE, m)
+        v_below = _cheb_table_eval(SG_DM_TABLE, slice, prevfloat(edge))
+        v_above = _cheb_table_eval(SG_DM_TABLE, slice, edge)
         @test isapprox(v_below, v_above; rtol = 1e-9, atol = 1e-9)
     end
 end

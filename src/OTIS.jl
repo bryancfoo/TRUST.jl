@@ -4,6 +4,7 @@ include("constants.jl")
 include("plasma_dispersion.jl")
 include("distributions/distribution.jl")
 include("distributions/maxwellian.jl")
+include("distributions/chebyshev_table.jl")       # new (4.B.2a): the general (xi, p) Chebyshev table machinery
 include("distributions/supergaussian.jl")         # new (1.SG.1)
 include("distributions/supergaussian_table.jl")   # new (1.SG.2): builds SG_TABLE at include time
 include("plasma/species.jl")

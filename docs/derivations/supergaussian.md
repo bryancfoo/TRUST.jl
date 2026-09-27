@@ -237,6 +237,15 @@ documented slow fallback.
 
 ## 7. The table (Step 1.SG.2)
 
+*(Generalized and renamed at Phase 4.B Step 4.B.2a, 2026-09-26, spec D13: the Chebyshev-table
+machinery this section describes moved to `src/distributions/chebyshev_table.jl` and its type
+and functions were renamed — `SuperGaussianTable` is now `ChebyshevTable`, `_sg_build_table` is
+now `_build_cheb_table`, `_sg_slice` is now `_cheb_slice`, `_sg_table_eval` is now
+`_cheb_table_eval`, and the fields `nm`, `m_lo`, `m_hi`, `m_converged` are now `np`, `p_lo`,
+`p_hi`, `p_converged` — with no numerical change: `SG_TABLE` and `SG_DM_TABLE` are bitwise
+unchanged. `SG_TABLE`, `SG_DM_TABLE` and every number and figure below are the super-Gaussian's
+own and keep their names.)*
+
 **The domain.** `R(ξ; m) = P∫ φ'(x; m)/(x−ξ) dx`, the real (principal-value) part of `𝒞φ` on the
 real axis, is tabulated on `|ξ| ∈ [0, 10]` (`SG_XI_MAX`) `× m ∈ [1.5, 8]` (`SG_M_LO`, `SG_M_HI`),
 evaluated by the reference quadrature of Section 6 at the Chebyshev–Lobatto nodes of every ξ
@@ -260,7 +269,7 @@ never tabulated; `R` is even in ξ (`φ'` is odd), so only `ξ ≥ 0` is stored 
 | 6 | [4, 10] | 32 |
 
 with one global `n_m = 32` and slice length `L = Σ(n_ξ+1) = 198`. **Every `xi_converged[p]` is
-`true` and `m_converged` is `true`** (`test/distributions/test_supergaussian_table.jl` TB3): no
+`true` and `p_converged` is `true`** (`test/distributions/test_supergaussian_table.jl` TB3): no
 panel or direction stopped while still failing its trailing-coefficient check, so there is no cap
 finding to report this round.
 
@@ -317,16 +326,16 @@ QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1), round 2, 2026-09-08:**
 | `Base.summarysize(SG_TABLE)` | size | 52 814 bytes |
 | Precompile time, before (`be55f68`) → after the table | latency | ≈ 4.3–4.7 s → ≈ 7.3–7.7 s (Δ ≈ +3.0 s; budget: Δ < 1 s, **missed, and by essentially the same margin as round 1's Δ ≈ +3.1 s** despite the table itself being 2.4× smaller — see the caveat below) |
 | Load time (warm cache), before → after | latency | 0.75 s → 0.82 s (Δ ≈ +0.07 s; within the < 1 s budget) |
-| `_sg_table_eval`, plain `ξ` | throughput | 39.3 ns |
-| `_sg_table_eval`, dual `ξ` | throughput | 52.8 ns |
-| `_sg_table_eval` on a dual-`m` shape (eval only, slice already built) | throughput | 41.7 ns |
+| `_cheb_table_eval`, plain `ξ` | throughput | 39.3 ns |
+| `_cheb_table_eval`, dual `ξ` | throughput | 52.8 ns |
+| `_cheb_table_eval` on a dual-`m` shape (eval only, slice already built) | throughput | 41.7 ns |
 | `SuperGaussian(m)` construction, plain | throughput | **5.53 µs** |
 | `SuperGaussian(m)` construction, dual `m`, chunk 1 | throughput | 9.42 µs |
 | `SuperGaussian(m)` construction, dual `m`, chunk 4 | throughput | 18.5 µs |
 | `SuperGaussian(m)` construction, dual `m`, chunk 8 | throughput | 21.0 µs |
 | `SuperGaussian(m)` construction, dual `m`, chunk 12 | throughput | 25.3 µs |
 
-`@allocated` is `0` for `_sg_table_eval` (plain, dual `ξ`, dual-`m` shape), for `reconstruct`, and
+`@allocated` is `0` for `_cheb_table_eval` (plain, dual `ξ`, dual-`m` shape), for `reconstruct`, and
 for `SuperGaussian(m)` construction at every chunk size measured. **`L = 198` and plain
 construction (`5.53 µs`) are now comfortably under the `L = 102`, `< 10 µs` anchor D3's caching
 decision was measured at** — round 1's `L = 247`, `15.0 µs` overshoot was entirely a symptom of
@@ -336,7 +345,7 @@ fitting quadrature noise at `τ = 1e-12`, not of anything wrong with the caching
 (table 2.4× larger, 3× more reference evaluations, ~4× the build time) and round 2, which shows
 the increase is dominated by *compiling the two new files' code* (the generic Clenshaw
 recurrence, the dual-number paths, the adaptive-fit machinery) rather than by the table's own
-size or the cost of running `_sg_build_table()` at precompile time (0.2–0.3 s of the 3.0 s).
+size or the cost of running `_build_cheb_table()` at precompile time (0.2–0.3 s of the 3.0 s).
 Shrinking the table further would not be expected to move this number appreciably. See the
 hand-off report for the go/no-go judgement this is input to.
 
@@ -374,7 +383,7 @@ with one global **`n_m = 48`** (`SG_TABLE`'s own is 32 — the m-partial needs a
 and this is exactly `SG_DEGREE_CAP_M`, the cap) and slice length `L = Σ(n_ξ+1) = 198` (the same
 number as `SG_TABLE`'s, coincidentally, since the ξ-degrees match panel for panel). **`n_m`
 reaching its cap is not itself a finding** (D4: "a cap that is reached is not a finding; a flag
-that is false is") — `m_converged` is `true`, meaning the trailing-coefficient check passed
+that is false is") — `p_converged` is `true`, meaning the trailing-coefficient check passed
 *at* 48, not that it was still failing when the loop stopped. `xi_converged` is `true` on every
 panel. `Base.summarysize(SG_DM_TABLE)` is **78 158 bytes** (`SG_TABLE`'s is 52 814 — larger
 because of the wider m-degree, 49 columns per slice entry against 33).
@@ -411,7 +420,7 @@ to `1e-9` relative — it passed at every point measured (session of 2026-09-18)
 
 **Build and evaluation cost, this machine (Windows 11, Julia 1.12.7; SpecialFunctions 2.9.0,
 QuadGK 2.11.3, ForwardDiff 1.4.5, ChainRulesCore 1.26.1), 2026-09-18, both tables warm
-(post-precompile) and each the second of two consecutive calls to `_sg_build_table` with its own
+(post-precompile) and each the second of two consecutive calls to `_build_cheb_table` with its own
 sampler:**
 
 | Quantity | Kind | `SG_TABLE` | `SG_DM_TABLE` |
