@@ -91,8 +91,9 @@ check's item 4 is expected to pass, unlike `SuperGaussian`'s guard).
 
 **An `m` outside `GN_TABLE`'s domain is not an error**: `cauchy_dfdv` on it runs the Laurent series
 if it converges, else the reference quadrature, correctly but slower (spec D31, D32); `m ∈ [1.5,
-2)` always runs the fallback near `ξ = 0` (about 100 to 420 µs a call, spec D30 item 3), since the
-table stops at `m = 2` (the `|ξ|^(m−1)` term at `ξ = 0` has infinite slope below it).
+2)` runs the fallback at every `|ξ|` below about 6 to 9, where the series does not converge (about
+100 to 420 µs a call, spec D30 item 3, D47), since the table stops at `m = 2` (the `|ξ|^(m−1)` term
+at `ξ = 0` has infinite slope below it).
 
 Section 10.2; spec D31; `docs/derivations/generalized_normal.md`.
 """
@@ -160,12 +161,13 @@ out.
 `φ″(0) · x`, which is `−2C/x₀²` at `m = 2` (the Maxwellian's `−2/√π`) and `0` for `m > 2` (for
 `m < 2` the true `φ″(0)` is `−∞`, and `0` is returned harmlessly, since only a dual `ξ` at exactly
 zero with `m < 2` could see it). Without this branch, `sign(x) · t^(m−1)` under a dual `x` at `0`
-carries the wrong partial (`0` instead of `−2C` at `m = 2`, GN4).
+carries the wrong partial (`0` instead of `−2C` at `m = 2`, GN4). The test `m == 2` is on the
+primal value (spec D47): ForwardDiff 1.x reads a dual `m` of exactly 2 as unequal to 2.
 
 Section 10.2; spec D31; `docs/derivations/generalized_normal.md`.
 """
 function dfdx(f::GeneralizedNormal, x::Real)
-    iszero(_primal_value(x)) && return (f.m == 2 ? -2 * f.C / f.x0^2 : zero(f.C)) * x
+    iszero(_primal_value(x)) && return (_primal_value(f.m) == 2 ? -2 * f.C / f.x0^2 : zero(f.C)) * x
     t = abs(x / f.x0)
     return -(f.m / f.x0) * sign(x) * t^(f.m - 1) * f.C * exp(-t^f.m)
 end
@@ -240,11 +242,14 @@ read from the table object) — `_cheb_table_eval(GN_TABLE, f.slice, |ξ|)` plus
 term `iπ φ'(ξ)`; **(2)** outside it, the large-`|ξ|` Laurent series (`_cauchy_series`) if it
 converges (every moment of this shape is finite, unlike `Kappa`'s); **(3)** otherwise, the
 reference quadrature `_gn_cauchy_reference`. `m ∈ [1.5, 2)` or `m > 8` outside the series' reach is
-not an error: the fallback runs, correctly, about 100 to 420 µs a call (spec D30 item 3, D32).
+not an error: the fallback runs, correctly, about 100 to 420 µs a call below `m = 2` and 25 to 70
+µs above `m = 8` (spec D30 item 3, D32).
 
 **R is even in ξ** (`φ` is even, so `φ'` is odd and the principal value `R` is even): the table
 holds `ξ ≥ 0` and this function passes `abs(ξ)` to `_cheb_table_eval` (D13's contract for an even
-table).
+table). **Both domain comparisons are on primal values** (`_primal_value`): ForwardDiff 1.x orders
+a dual at a tie by its partials, so a dual `m` exactly at `p_hi = 8` with a positive partial would
+otherwise leave the table for the fallback, about 430× slower (Phase 4.B spec D47).
 
 `conventions.md` 1.5; spec D31, D32; `docs/derivations/generalized_normal.md`.
 """
@@ -253,7 +258,7 @@ function cauchy_dfdv(f::GeneralizedNormal, xi::Number)
     rxi = real(xi)
     axi = abs(rxi)
     QT = _basefloat(rxi)
-    if axi <= GN_TABLE.xi_max && GN_TABLE.p_lo <= f.m <= GN_TABLE.p_hi
+    if _primal_value(axi) <= GN_TABLE.xi_max && GN_TABLE.p_lo <= _primal_value(f.m) <= GN_TABLE.p_hi
         return _cheb_table_eval(GN_TABLE, f.slice, axi) + im * QT(pi) * dfdx(f, rxi)
     end
     series_val, converged = _cauchy_series(f, rxi)

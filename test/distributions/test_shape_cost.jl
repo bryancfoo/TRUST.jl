@@ -23,6 +23,7 @@ const _SC_SHAPES = Dict{String,Any}(
     "SuperGaussian" => SuperGaussian(3.0),
     "Kappa"         => Kappa(3.5),  # mid-domain in s (0.286), not an integer: coincides with no oracle point
     "GeneralizedNormal" => GeneralizedNormal(3.5),  # mid-domain, and no oracle point of GN10
+    "SkewNormal"        => SkewNormal(0.7),  # inside the table, off every oracle point
 )
 
 # --- The fixture: the package's standard collective EPW recipe (test_supergaussian_dm.jl's

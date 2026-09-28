@@ -260,6 +260,7 @@ _build_shape(::Type{Maxwellian}, ::AbstractDict) = Maxwellian()
 _build_shape(::Type{SuperGaussian}, shape_p::AbstractDict) = SuperGaussian(Float64(shape_p["m"]))
 _build_shape(::Type{Kappa}, shape_p::AbstractDict) = Kappa(Float64(shape_p["kappa"]))
 _build_shape(::Type{GeneralizedNormal}, shape_p::AbstractDict) = GeneralizedNormal(Float64(shape_p["m"]))
+_build_shape(::Type{SkewNormal}, shape_p::AbstractDict) = SkewNormal(Float64(shape_p["alpha"]))
 
 """
     _shape_from_dict(d::AbstractDict) -> AbstractVelocityDistribution

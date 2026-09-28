@@ -274,3 +274,14 @@ end
     @info "TB13 error map: worst per panel" panel_worst
     @info "TB13 worst near xi=0, m in [1.5,2]" near0_worst
 end
+
+@testset "TB14: a dual exactly at the table's edges stays in the table (Phase 4.B spec D47)" begin
+    for (m, xi) in ((1.5, 1.0), (8.0, 1.0), (8.0, 9.5)), s in (1.0, -1.0)
+        lhs = s * ForwardDiff.derivative(t -> real(cauchy_dfdv(SuperGaussian(s * t), xi)), s * m)
+        rhs = s * ForwardDiff.derivative(t -> _cheb_table_eval(SG_TABLE, _cheb_slice(SG_TABLE, s * t), xi), s * m)
+        @test lhs === rhs
+    end
+    f = SuperGaussian(3.0)
+    @test ForwardDiff.derivative(x -> real(cauchy_dfdv(f, x)), 10.0) ===
+          ForwardDiff.derivative(x -> _cheb_table_eval(SG_TABLE, f.slice, x), 10.0)
+end

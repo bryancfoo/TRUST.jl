@@ -75,6 +75,12 @@ end
         @test isapprox(imag(cv), imag(zp); atol = 1e-9, rtol = 0)
     end
     @info "GN4 worst |cauchy_dfdv(m=2) - Zprime|" worst
+
+    # (b) Phase 4.B spec D47 item 1: a dual m exactly at 2 with a nonzero partial reads the
+    # x = 0 branch's m-partial correctly only when the guard compares the primal value.
+    md = ForwardDiff.Dual{:GN4}(2.0, 1.0)
+    xd = ForwardDiff.Dual{:GN4}(0.0, 1.0)
+    @test isapprox(ForwardDiff.partials(dfdx(GeneralizedNormal(md), xd))[1], -2 / sqrt(pi); rtol = 1e-14)
 end
 
 @testset "GN5: dfdx vs ForwardDiff, and x=0 under a dual m" begin
@@ -239,6 +245,15 @@ const _GN13_XI = [10.0 * rand(_GN_RNG) for _ in 1:12]
         lhs = ForwardDiff.derivative(mm -> real(cauchy_dfdv(GeneralizedNormal(mm), xi)), m)
         @test isapprox(lhs, dRdm; rtol = 1e-12)
     end
+
+    # (c) Phase 4.B spec D47 item 1: the chain at the table's m edges, along +m and -m, must
+    # take the table (=== the slice's own derivative), not the fallback a dual-at-a-tie
+    # comparison would otherwise divert it to.
+    for (m, xi) in ((2.0, 1.0), (8.0, 1.0), (8.0, 9.5)), s in (1.0, -1.0)
+        lhs = s * ForwardDiff.derivative(t -> real(cauchy_dfdv(GeneralizedNormal(s * t), xi)), s * m)
+        rhs = s * ForwardDiff.derivative(t -> _cheb_table_eval(GN_TABLE, _cheb_slice(GN_TABLE, s * t), xi), s * m)
+        @test lhs === rhs
+    end
 end
 
 @testset "GN14: panel joins" begin
@@ -352,6 +367,10 @@ end
         @test real(cauchy_dfdv(f, -xi)) == real(cauchy_dfdv(f, xi))
         @test imag(cauchy_dfdv(f, -xi)) == -imag(cauchy_dfdv(f, xi))
     end
+
+    # (g) Phase 4.B spec D47 item 1: a dual xi exactly at xi_max must stay in the table.
+    @test ForwardDiff.derivative(x -> real(cauchy_dfdv(f, x)), 10.0) ===
+          ForwardDiff.derivative(x -> _cheb_table_eval(GN_TABLE, f.slice, x), 10.0)
 end
 
 const _GN_PROBE = ProbeBeam(lambda_probe_nm = 263.25)

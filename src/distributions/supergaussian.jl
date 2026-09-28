@@ -384,9 +384,12 @@ converges, plus the same Plemelj term; **(3)** otherwise, the reference quadratu
 `_sg_cauchy_reference`. **`m` outside `[p_lo, p_hi]` is not an error**: the fallback runs,
 correctly, about 60 µs a call, against about 50 ns through the table.
 
-Every branch decision is made on a primal value: comparisons on a `ForwardDiff.Dual` already
-compare values, so `|ξ| ≤ xi_max` and `p_lo ≤ m ≤ p_hi` need no help; only `_cheb_table_eval`'s panel
-index is built from a primal (`_primal_value`, inside that function, spec 5.12).
+Every branch decision is made on a primal value: `|ξ| ≤ xi_max` and `p_lo ≤ m ≤ p_hi` compare
+`_primal_value`s, and `_cheb_table_eval` builds its panel index from one (spec 5.12). **Comparing
+the duals themselves is not the same**: ForwardDiff 1.x orders a dual at a tie by its partials, so
+a dual `m` exactly at `p_hi = 8` with a positive partial would leave the table for the fallback,
+180 to 340 times slower (Phase 4.B spec D47, 2026-09-27; this paragraph said comparisons on duals
+compare values, which was true of ForwardDiff 0.10).
 
 `conventions.md` 1.5; spec D14; `docs/derivations/supergaussian.md`.
 """
@@ -396,7 +399,7 @@ function cauchy_dfdv(f::SuperGaussian, xi::Number)
     end
     rxi = real(xi)
     axi = abs(rxi)
-    if axi <= SG_TABLE.xi_max && SG_TABLE.p_lo <= f.m <= SG_TABLE.p_hi
+    if _primal_value(axi) <= SG_TABLE.xi_max && SG_TABLE.p_lo <= _primal_value(f.m) <= SG_TABLE.p_hi
         QT = _basefloat(rxi)
         return _cheb_table_eval(SG_TABLE, f.slice, axi) + im * QT(pi) * dfdx(f, rxi)
     end

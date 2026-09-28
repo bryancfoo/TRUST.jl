@@ -146,10 +146,16 @@ table is needed. Outside the domain the quadrature fallback runs, documented; th
 series branch, since a kappa distribution's moments exist only below order 2κ − 1.
 **`GeneralizedNormal`** (Phase 4.B, Step 4.B.3) meets it the same way, derived in
 `docs/derivations/generalized_normal.md`: its Cauchy integral from `GN_TABLE` (m ∈ [2, 8] × |ξ| ≤
-10), the Laurent series beyond it, and the quadrature for m ∈ [1.5, 2) near ξ = 0; φ's m-partial is
+10), the Laurent series beyond it, and the quadrature where neither serves (m ∈ [1.5, 2) at |ξ|
+below about 6 to 9, and m > 8 at |ξ| below about 3); φ's m-partial is
 closed form through `loggamma`, so no second table.
 
-**`SkewNormal`** (Step 4.B.4) is written at Phase 4.B's hold. **`HermiteExpansion` is not
+**`SkewNormal`** (Phase 4.B, Step 4.B.4), derived in `docs/derivations/skew_normal.md`: its Cauchy
+integral from `SN_TABLE` (α ∈ [−3, 3] × ξ ∈ [−20, 20], **signed**, since a skewed shape's R is not
+even), the quadrature beyond it, and **no series branch** (`_cauchy_series` assumes a symmetric
+shape); φ's α-partial is closed form through `erfc`.
+
+**`HermiteExpansion` is not
 built** (the user, 2026-09-26). **The guard checks each
 shape's route rather than assuming it**: `test_shape_cost.jl`'s SC1 fails the instant a shape is
 registered in `SHAPE_REGISTRY` without a matching entry in `_SC_SHAPES`, and SC5 the instant one is

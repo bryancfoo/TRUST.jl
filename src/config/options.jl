@@ -18,7 +18,7 @@
 # literal (`coefficients = ["bg", "c1", 0.0]`) has one fixed field type to check element by
 # element, each entry independently a variable reference or a fixed number.
 
-# --- SHAPE_REGISTRY's four option structs ---
+# --- SHAPE_REGISTRY's five option structs ---
 
 """
     MaxwellianOptions
@@ -61,6 +61,17 @@ table's own edge, as `SuperGaussianOptions`' `m = 2.0` is.
 """
 Base.@kwdef struct GeneralizedNormalOptions
     m::Float64 = 2.0
+end
+
+"""
+    SkewNormalOptions
+
+`alpha`, the shape parameter (spec D35, D37). `SkewNormal(alpha::Real)`'s own constructor has no
+default (`alpha` is a required positional argument); `0.0` is the deck's default, the Maxwellian,
+inside the table.
+"""
+Base.@kwdef struct SkewNormalOptions
+    alpha::Float64 = 0.0
 end
 
 # --- EFFECT_REGISTRY's ten option structs ---

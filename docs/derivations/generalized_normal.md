@@ -101,8 +101,8 @@ call exactly), and chunk 6's discrimination check (item 4) confirms the same: de
 
 **Why the table stops at `m = 2`.** Near `ξ = 0`, `R(ξ) − R(0)` carries a leading `|ξ|^{m−1}` term
 (from the `|x/x₀|^{m−1}` kink of `φ'` at `x = 0`). Its coefficient **vanishes exactly at `m = 2`**
-(where `φ'` is analytic, being the Maxwellian's `−2x e^{−x²}/√π`) and the term's slope diverges as
-`m → 2⁻`: a Chebyshev fit converges cleanly on `m ∈ [2, 8]` and cannot on `m < 2` — the small first
+(where `φ'` is analytic, being the Maxwellian's `−2x e^{−x²}/√π`) and for every `m < 2` the term's
+slope at `ξ = 0` is infinite: a Chebyshev fit converges cleanly on `m ∈ [2, 8]` and cannot on `m < 2` — the small first
 panels of `GN_TABLE` (`1/32, 1/16, 1/8, 1/4, 1/2`) exist to resolve exactly this corner as `m → 2⁺`.
 
 **The Laurent series** (`_cauchy_series`, every moment finite, unlike `Kappa`'s): Level 2 found it
@@ -167,11 +167,13 @@ a coincidence.)
 `_sg_cauchy_reference`'s structure: direct quadrature (`_cauchy_upper`) for `Im ξ > 0`, the
 Plemelj principal-value quadrature (`_cauchy_real`) for real `ξ`, and an error for `Im ξ < 0`
 (`|x|^m` has no single analytic continuation off the real axis for non-integer `m`, so the residue
-continuation does not apply). **What reaches it**: `m ∈ [1.5, 2)` near `ξ = 0` where the series
-does not converge either (about **100 to 420 µs a call**, D30 item 3; Level 2 measured `2.0e-10`
-worst against BigFloat at `m = 1.5, ξ = 0` exactly, `≤ 5e-12` elsewhere), and `m > 8` where the
-series does not converge either (about **25 to 70 µs a call**; Level 2 measured `≤ 1.2e-14` against
-BigFloat at `m ∈ {10, 16, 30}`).
+continuation does not apply). **What reaches it**: whatever the table does not serve and the series does not converge on. For
+`m ∈ [1.5, 2)` that is every `|ξ|` below about 6 to 9 (the series first converges at `|ξ| = 8.75`
+for `m = 1.5`, `7.5` for `1.7`, `6.5` for `1.9` and `6.25` for `1.99`; Level 2, 2026-09-27, on a
+0.25 grid), about **100 to 420 µs a call** (D30 item 3; Level 2 measured `2.0e-10` worst against
+BigFloat at `m = 1.5, ξ = 0` exactly, `≤ 5e-12` elsewhere); for `m > 8`, every `|ξ|` below about 3
+(`2.75` to `3.0` for `m` from 8.5 to 30), about **25 to 70 µs a call** (Level 2 measured `≤ 1.2e-14`
+against BigFloat at `m ∈ {10, 16, 30}`).
 
 **Chunk 6's own throughput measurements** (Section 12 row 19, ns/call, single-threaded, this
 machine): the table (`GeneralizedNormal(3.5)` at `ξ = 1.3`) **158 ns**; the fallback below the
