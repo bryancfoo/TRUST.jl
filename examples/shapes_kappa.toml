@@ -1,0 +1,78 @@
+# Phase 4.B Step 4.B.5 / spec D39: examples/two_channel.toml with the electron shape swapped for
+# Kappa, kappa(t) varying in time. Run examples/shapes.jl once first (`julia --project=.
+# examples/shapes.jl`) to write runs/shapes_kappa_{epw,iaw}_streak.jld2.
+
+deck_version = "otis-deck-2"
+channels = ["epw", "iaw"]
+
+[[fit.regions]]
+t_range_ns = [2.2, 5.6]
+nbins = 32
+
+[channel.epw.data]
+file = "runs/shapes_kappa_epw_streak.jld2"
+lambda_range_nm = [220.0, 260.0]
+
+[channel.epw.geometry]
+lambda_probe_nm = 263.25
+theta_deg = 60.0
+k_model = "exact"
+
+[channel.epw.instrument]
+spectral_irf = { fwhm_nm = 0.5 }
+temporal_irf = { fwhm_ns = 0.08 }
+sensitivity = { scale = 2.0e-4 }
+background = [{ type = "Constant", level = 25.0 }]
+
+[channel.iaw.data]
+file = "runs/shapes_kappa_iaw_streak.jld2"
+t_shift_ns = 0.05
+
+[channel.iaw.geometry]
+lambda_probe_nm = 263.25
+theta_deg = 60.0
+k_model = "exact"
+
+[channel.iaw.instrument]
+spectral_irf = { fwhm_nm = 0.08 }
+temporal_irf = { fwhm_ns = 0.05 }
+sensitivity = { scale = 1.0e-6 }
+
+[fit.variables]
+logn = { bounds = [18.5, 20.5], init = 19.6, time_varying = true }
+T_e  = { bounds = [100.0, 2000.0], init = 800.0, time_varying = true }
+kappa_e = { bounds = [2.0, 12.0], init = 5.0, time_varying = true }
+T_D  = { bounds = [50.0, 1500.0], init = 300.0, time_varying = true }
+
+[fit.dependent]
+ne_cm3 = "10^logn"
+
+[plasma]
+n_e_cm3 = "ne_cm3"
+
+[plasma.electrons.e]
+fraction = 1.0
+T_eV = "T_e"
+u_kms = 0.0
+shape = { type = "Kappa", kappa = "kappa_e" }
+
+[plasma.ions.D]
+mass_amu = 2.014
+charge = 1
+fraction = 1.0
+T_eV = "T_D"
+u_kms = 0.0
+
+[regularizer]
+weight = 2.0e-4
+terms = [
+  { select = ["logn", "T_e"], operator = "D2", normalization = "relative" },
+  { select = ["kappa_e"], operator = "D2", normalization = "unit" },
+  { select = ["T_D"], operator = "D2", normalization = "relative" },
+]
+
+[optimizer]
+procedure = "levenberg_marquardt"
+
+[output]
+dir = "runs/shapes/kappa/joint"

@@ -65,6 +65,12 @@ IAW-only fit reproduces `T_D` but lets `T_e` and `m_e` wander; the joint fit rec
 synthesizing anything itself — run `examples/two_channel.jl` and `examples/fit_two_channel.jl`
 first. Not part of `make_figures.jl`/`FIGURE_NAMES` (FG1 asserts exactly five files).
 
+## `shapes.png`
+
+![Velocity shapes](shapes.png)
+
+*No counterpart in foo2026.* Phase 4.B Step 4.B.5 (spec D40): `Kappa`, `GeneralizedNormal` and `SkewNormal` against the Maxwellian, and what each does to the IAW and EPW features, drawn by [`make_shapes_figure.jl`](make_shapes_figure.jl) — a physics figure, not part of `make_figures.jl` (FG1 asserts exactly five files).
+
 ## Regenerating
 
 ```

@@ -289,14 +289,11 @@ and every slice entry through `reconstruct` in dual arithmetic for partials that
 zero. `L = 0` (the slice-free form `_sn_uncached` builds) widens through the same line with no
 special case.
 
-**Unlike `Kappa`'s and `GeneralizedNormal`'s, this one is load-bearing, not merely an optimization**
-(spec D38's discrimination item 7 predicted an expected pass, following D34 item 8's reasoning;
-Level 3 found it fails instead, chunk 7, 2026-09-27): deleting this method and re-deriving through
-the generic `_widen_shape` gives `g.xc` a partial of `-0.0` where the specialized copy gives `0.0`
-(both `iszero`, so no value is wrong, but `-0.0 === 0.0` is `false`, SK18) — `_sn_constants`'s chain
-of multiplications propagates a zero partial's IEEE sign through a negative intermediate value
-(`ω′·μ_δ` in `x_c`'s formula, where `μ_δ` shares `α`'s sign), which `GeneralizedNormal`'s and
-`Kappa`'s simpler `loggamma`-based constants never hit.
+**Deleting it fails SK18, unlike `Kappa`'s and `GeneralizedNormal`'s** (D38's discrimination item 7
+predicted a pass; chunk 7 found otherwise, 2026-09-27): the generic re-derivation gives `xc` a zero
+partial of `-0.0` where this copy gives `0.0`, because `x_c = −ω μ_δ` negates a sum of zero
+partials. Every value, every other partial and the whole slice are bitwise equal (Level 2, spec
+D48), so nothing downstream can see the difference; SK18's `===` does, and the method stays.
 
 Spec D35 (Phase 3's A9, `src/plasma/trace.jl`'s `_widen_shape` generic); D38's discrimination item
 7, corrected (see `dev/reports/phase4B_report.md`, chunk 7).

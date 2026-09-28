@@ -56,7 +56,7 @@ chain-ruled through `z = (x−x_c)/ω`). Multiplying by `xⁿ` and integrating b
 
     −n M_{n−1} = (2α/ω²) ∫ xⁿ ϕ(z)ϕ(αz) dx − (1/ω²) ∫ xⁿ (x−x_c) φ(x) dx.
 
-Writing `x = x_c + ωz` and expanding `ϕ(z)ϕ(αz) = τ√(2/π)/ω · [normal density of mean `x_c`,
+Writing `x = x_c + ωz` and expanding `ϕ(z)ϕ(αz) = τ/√(2π) · [normal density of mean `x_c`,
 sd `τ`]` with `τ = ω/√(1+α²)` (the product of two centred normal densities is itself a scaled
 normal density, a standard identity), and expanding `∫xⁿ(x−x_c)φ dx = M_{n+1} − x_c M_n`, both
 sides reduce to raw-moment recursions in `x_c`-centred form, giving the three-term recursion of
@@ -125,9 +125,10 @@ that the table itself, not just the shape, differs from its own value at `|ξ|`.
 **Why there is no Laurent series branch.** `_cauchy_series` (`conventions.md` Section 4,
 `distribution.jl`) was written for a symmetric shape: it skips only an *exactly* zero moment and
 declares convergence at the first term below `rtol · |sum|`. A skewed shape's odd moments are
-small but not zero, so an odd term can look negligible (`M₁ ~ 1e-17` after the code's exact-zero
-override, or genuinely tiny for a mildly skewed shape) while the next even term is not yet small
-enough — the series can report `converged = true` while wrong. Level 2 measured this directly on a
+small but not zero, so an odd term can look negligible (Level 2's scratch shape computed `M₁` to
+rounding, about `1e-17`, and the series stopped there; the package sets `M₁` to exactly zero, but
+the odd moments above it are small and nonzero for a mildly skewed shape) while the next even term
+is not yet small enough — the series can report `converged = true` while wrong. Level 2 measured this directly on a
 scratch `SkewNormal`: at `α ∈ {0.01, 0.1, 3.0}` and `ξ ∈ {±10.5, ±15}` it returned **converged, 0.7 %
 to 1.5 % wrong**. A wrong answer reported as converged is the worst failure a branch can have, so
 `SkewNormal` has **no series branch**, and `_cauchy_series` itself is not touched — it stays
@@ -179,7 +180,7 @@ identical, panel for panel, to Level 2's build quoted in spec D36 (10 panels,
 | Row | Against | Worst measured | Target |
 |---|---|---|---|
 | SK9 | the generator, 60 seeded points over the whole signed domain + every edge × `α ∈ {−3,0,3}` | 4.12e-12 | `rtol=atol=1e-8` |
-| SK10(a) | a 64-bit BigFloat principal-value quadrature, `+ξ` and `−ξ` separately | 2.52e-11 | `atol=1e-9` |
+| SK10(a) | a 64-bit BigFloat principal-value quadrature, `+ξ` and `−ξ` separately | 2.52e-11 at `+ξ`, 8.23e-12 at `−ξ` | `atol=1e-9` |
 | SK10(b) | the same, on the `\|α\| > 3` fallback | 4.44e-16 | `atol=1e-9` |
 | SK11 | `Re Zprime` at the Maxwellian edge `α=0` | 5.99e-14 | `atol=1e-9` |
 | SK13 | central differences of the generator, `∂R/∂α` | 0.088 % of its own floor | `rtol=1e-6`, floor per 8.4 |

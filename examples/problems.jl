@@ -141,6 +141,42 @@ function two_channel_problem(; nlambda_epw=256, nlambda_iaw=256, nt_epw=1024, nt
 end
 
 """
+    shapes_problem(name::Symbol) -> NamedTuple
+
+`two_channel_problem()`'s NamedTuple with three fields replaced, for `name ∈ (:kappa,
+:generalized_normal, :skew_normal)`: the `template`'s electron shape, the shape leaf (the third
+of `leaves`), and each camera's `seed` (EPW `20260927`, IAW `20260928`, the same for all three
+shapes -- distinct from `two_channel_problem()`'s own `20260924`/`20260925`). Everything else --
+the other three leaves (`n_e_cm3`, `electrons.e.T_eV`, `ions.D.T_eV`), both cameras' axes, windows
+and instrument chains -- is `two_channel_problem()`'s own.
+
+Spec D39.
+"""
+function shapes_problem(name::Symbol)
+    p = two_channel_problem()
+    bump(t) = exp(-((t - 4.4) / 1.15)^2)
+
+    shape, shape_key, shape_of_t = if name === :kappa
+        (Kappa(4.0), "electrons.e.f.kappa", t -> 3.0 + 4.0 * bump(t))
+    elseif name === :generalized_normal
+        (GeneralizedNormal(3.0), "electrons.e.f.m", t -> 2.4 + 2.5 * bump(t))
+    elseif name === :skew_normal
+        (SkewNormal(0.0), "electrons.e.f.alpha", t -> 2.0 * tanh((t - 3.9) / 0.8))
+    else
+        throw(ArgumentError("shapes_problem: name must be :kappa, :generalized_normal or :skew_normal, got $name"))
+    end
+
+    template = Plasma(n_e_cm3=1.5e19,
+        electrons=(electrons(T_eV=350.0, f=shape),),
+        ions=(ion(name="D", mass_amu=2.014, charge=1, T_eV=250),))
+    leaves = (p.leaves[1], p.leaves[2], shape_key => shape_of_t, p.leaves[4])
+    epw = merge(p.epw, (; seed=20260927))
+    iaw = merge(p.iaw, (; seed=20260928))
+
+    return (; name=String(name), template, leaves, probe=p.probe, collection=p.collection, epw, iaw, regions=p.regions)
+end
+
+"""
     synthesize_channel(problem, name::Symbol) -> StreakData
 
 One camera's synthetic streak, as that camera records it: the trace is built on the camera's
@@ -159,7 +195,8 @@ end
 
 """
     staged_joint_fit(joint_deck_path::AbstractString; optimizer = LevenbergMarquardt(),
-                     tol::Real = 1e-6) -> (; deck, problem, result, decreases, epw, iaw)
+                     tol::Real = 1e-6, shape_variable::AbstractString = "m_e") ->
+        (; deck, problem, result, decreases, epw, iaw)
 
 The user's decision of 2026-09-25 (D48 item 1, amended by D53): from a two-channel deck's own
 inits, the joint LBFGS fit reports `converged` at an objective far above a reachable one (chunk 8's
@@ -167,18 +204,20 @@ F2), so Step 4.A.4's tests and example get θ\\* by a **written-out procedure** 
 
 1. The EPW-only and IAW-only decks (`single_channel_deck_text`), each fitted alone, every variable
    free, with the deck's own optimizer (D41).
-2. The joint problem started from `logn`, `T_e` and `m_e` of the EPW-only fit and `T_D` of the
-   IAW-only fit -- **by bin index**: the single-channel axes are each channel's own `t̄`, the joint
-   axis is the pooled one, and they share the regions and so the bin count.
+2. The joint problem started from `logn`, `T_e` and `shape_variable` of the EPW-only fit and `T_D`
+   of the IAW-only fit -- **by bin index**: the single-channel axes are each channel's own `t̄`, the
+   joint axis is the pooled one, and they share the regions and so the bin count.
 3. `LevenbergMarquardt()`, then `polish`.
 
 Returns the joint `deck` and `problem`, the polished `result`, `polish`'s own `decreases`, and the
 two single-channel `FitResult`s (`epw`, `iaw`), since `slice_scatter` needs the `Deck` and
 `laplace`/`calibration_scan` need the `problem`.
 
-Spec D48 item 1, D53.
+Spec D48 item 1, D53. `shape_variable` (Phase 4.B spec D39) names the deck's electron shape
+variable in place of the literal `"m_e"`; its default reproduces every existing caller bitwise.
 """
-function staged_joint_fit(joint_deck_path::AbstractString; optimizer=LevenbergMarquardt(), tol::Real=1e-6)
+function staged_joint_fit(joint_deck_path::AbstractString; optimizer=LevenbergMarquardt(), tol::Real=1e-6,
+    shape_variable::AbstractString="m_e")
     text = read(joint_deck_path, String)
     single = mktempdir() do dir
         results = Dict{String,FitResult}()
@@ -196,7 +235,7 @@ function staged_joint_fit(joint_deck_path::AbstractString; optimizer=LevenbergMa
     problem, _, _ = OTIS.build_problem(deck)
 
     start = flatten(problem.pspec, ["logn" => epw.values["logn"], "T_e" => epw.values["T_e"],
-        "m_e" => epw.values["m_e"], "T_D" => iaw.values["T_D"]])
+        shape_variable => epw.values[shape_variable], "T_D" => iaw.values["T_D"]])
     lm = solve(problem, optimizer; start=start)
     pol = polish(problem, lm; tol=tol)
 

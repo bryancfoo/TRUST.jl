@@ -120,6 +120,23 @@ convergence status. All three write to, and read back from, the result file; `ex
 uncertainty_two_channel.jl` runs the full-resolution two-channel problem through every one of
 them, by hand. The roadmap is kept outside this tree.
 
+**Phase 4.B (shapes) is complete.** Three more velocity shapes join the Maxwellian and the projected
+super-Gaussian, each with its own Cauchy integral served from a Chebyshev table built when the
+package precompiles, so each costs about what a Maxwellian does and is differentiable in its own
+parameter: `Kappa`, the one-dimensional marginal of the isotropic kappa distribution, whose fitted
+κ is the literature's; `GeneralizedNormal`, the plain `exp(-|x|^m)` of other fitting codes (not the
+projected `SuperGaussian`); and `SkewNormal`, Azzalini's skew-normal, skewed along the scattering
+vector. Outside each table a documented quadrature runs, correct and slower. Each table is checked
+against an independent method — `Kappa`'s against a closed form by residues at integer κ, the
+other two against a high-precision quadrature — and at its Maxwellian edge against `Z′` itself.
+`examples/fit_shapes.jl` fits each shape, time-varying, from a deck on the two-channel synthetic
+problem with the three uncertainty reports beside it (median relative error of the fitted shape
+parameter against truth: 0.54% for κ, 0.65% for m, and a median absolute error of 0.012 for α);
+`examples/figures/shapes.png` shows the shapes and what each does to the ion-acoustic
+and electron-plasma features. The synthetic noise model's σ is now the realized per-pixel σ, the
+point spread included. The table machinery itself is now general (`ChebyshevTable`), with
+per-table degree caps and a signed ξ domain.
+
 ## Installing and testing
 
 ```
