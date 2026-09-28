@@ -179,6 +179,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("reproduce")
         @safetestset "reproduce" begin include("inversion/test_reproduce.jl") end
     end
+    if _wanted("regularizer piecewise")
+        @safetestset "regularizer piecewise" begin include("inversion/test_regularizer_piecewise.jl") end
+    end
 end
 
 # The slow tier (conventions.md 8.6). test/slow/ carries its OWN environment, because its files

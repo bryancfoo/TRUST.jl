@@ -1,0 +1,90 @@
+# foo2026 Section III.C: the IAW shock front, fitted with its regularization split into two
+# intervals around an unregularized gap at the shock (Phase 4.C, Step 4.C.2; OQ-47). Identical to
+# examples/iaw_shock.toml, the Fig. 5 reproduction, which does not change, except in
+# [fit.intervals], [regularizer] and [output]: every D2 term is restricted to one of two
+# regularizer intervals, pre_smooth = [0, 1.15 - delta] and post_smooth = [1.15 + delta, 4.0] ns,
+# with the gap's half-width delta = 0.1 ns fixed here, so that no regularizer row reads a bin with
+# 1.05 < t < 1.25 ns and the bins in that gap are fitted from the data alone. The variables' own
+# intervals, pre and post, are unchanged: u_ion reads u_pre and u_post, and a term's interval must
+# lie inside every selected variable's own interval (u_pre's term on pre_smooth, inside pre;
+# u_post's on post_smooth, inside post).
+#
+# Run examples/iaw_shock.jl once first to write runs/iaw_shock_streak.jld2, the streak this deck
+# fits (the same streak examples/iaw_shock.toml fits). The two decks are compared at cut-down
+# (128 x 32) by the slow tier's FR9 and by examples/diagnostics/shock_piecewise.jl.
+
+deck_version = "otis-deck-2"
+
+[data]
+file = "runs/iaw_shock_streak.jld2"
+lambda_range_nm = [262.0, 264.5]
+t_range_ns = [0.0, 4.0]
+
+[geometry]
+lambda_probe_nm = 263.25
+theta_deg = 60.0
+k_model = "exact"
+
+[fit.intervals]
+pre         = { t_range_ns = [0.0, 1.15] }
+post        = { t_range_ns = [1.15, 4.0] }
+pre_smooth  = { t_range_ns = [0.0, 1.05] }
+post_smooth = { t_range_ns = [1.25, 4.0] }
+
+[fit.variables]
+f_D    = { bounds = [0.3, 1.0], init = 0.78, time_varying = true }
+T_D    = { bounds = [50.0, 3000.0], init = 60.0, time_varying = true }
+T_C    = { bounds = [50.0, 3000.0], init = 100.0, time_varying = true }
+u_pre  = { bounds = [-200.0, 700.0], init = 250.0, time_varying = true, interval = "pre" }
+u_post = { bounds = [-200.0, 700.0], init = 40.0, time_varying = true, interval = "post" }
+
+[fit.dependent]
+f_C   = "1 - f_D"
+u_ion = "t < 1.15 ? u_pre : u_post"
+
+[plasma]
+n_e_cm3 = 6.0e19
+
+[plasma.electrons.e]
+fraction = 1.0
+T_eV = 500.0
+u_kms = 0.0
+
+[plasma.ions.D]
+mass_amu = 2.014
+charge = 1
+fraction = "f_D"
+T_eV = "T_D"
+u_kms = "u_ion"
+
+[plasma.ions.C]
+mass_amu = 12.011
+charge = 6
+fraction = "f_C"
+T_eV = "T_C"
+u_kms = "u_ion"
+
+[instrument]
+spectral_irf = { fwhm_nm = 0.08 }
+temporal_irf = { fwhm_ns = 0.05 }
+sensitivity = { scale = 1.0e-6 }
+
+[fit]
+sigma = "supplied"
+
+[regularizer]
+weight = 1.0e-1
+terms = [
+  { select = ["f_D"], operator = "D2", normalization = "unit", interval = "pre_smooth" },
+  { select = ["f_D"], operator = "D2", normalization = "unit", interval = "post_smooth" },
+  { select = ["T_D", "T_C"], operator = "D2", normalization = "relative", interval = "pre_smooth" },
+  { select = ["T_D", "T_C"], operator = "D2", normalization = "relative", interval = "post_smooth" },
+  { select = ["u_pre"], operator = "D2", normalization = "absolute", scale = 100.0, interval = "pre_smooth" },
+  { select = ["u_post"], operator = "D2", normalization = "absolute", scale = 100.0, interval = "post_smooth" },
+]
+
+[optimizer]
+procedure = "lbfgs"
+
+[output]
+dir = "runs/iaw_shock_piecewise"

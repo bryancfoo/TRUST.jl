@@ -335,3 +335,67 @@ end
         end
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# IAW shock, fitted piecewise: FR9 (Phase 4.C spec D17)
+# ------------------------------------------------------------------------------------------
+#
+# examples/iaw_shock_piecewise.toml at cut-down: FR5-FR7's own 128 x 32 streak (synthesized again
+# from the same seed, and checked to be the same data), the same Lambda = 1e-1, every D2 term on
+# pre_smooth = [0, 1.05] or post_smooth = [1.25, 4.0] ns, so bin 10 (t = 1.161 ns) carries no
+# regularizer row. Warm-started from FR's own whole-axis Lambda = 1e-1 minimizer: the theta layout
+# is the same, since the variables and their intervals are. Asserted: the mean over f_D, T_D and
+# T_C of the jump-window RSS against the truth, piecewise over whole-axis, below 0.85 (measured
+# 0.699 on this seed, 0.717 and 0.684 on two others; spec D17). Reported: each ratio, the 10-90 %
+# widths (the truth's own on the bins, whole-axis, piecewise, unregularized), the fits' statuses.
+# FR6 is not touched and stays as it is.
+
+const _FR_PIECEWISE_BOUND = 0.85
+
+function _fr_piecewise()
+    problem_nt = iaw_shock_problem(; nlambda=128, nt=32)
+    expt_truth = build_experiment(problem_nt)
+    sd = synthesize(expt_truth, problem_nt.noise; rng=Xoshiro(problem_nt.seed), source="iaw_shock_128x32")
+    whole = _FR_SHOCK.scan.results[_FR_SHOCK.idx_b]
+    return mktempdir() do dir
+        sd_path = joinpath(dir, "iaw_shock_128x32_streak.jld2")
+        write_streak(sd_path, sd; source="iaw_shock_128x32")
+        whole_problem, _, _ = OTIS.build_problem(_fr_deck_for_cutdown("iaw_shock", sd_path))
+        problem, optimizer, _ = OTIS.build_problem(_fr_deck_for_cutdown("iaw_shock_piecewise", sd_path))
+        same_data = chi2(whole_problem, whole.theta) === whole.chi2
+        same_layout = problem.pspec.ntheta == whole_problem.pspec.ntheta &&
+            problem.pspec.offsets == whole_problem.pspec.offsets &&
+            problem.pspec.bin_entries == whole_problem.pspec.bin_entries &&
+            problem.pspec.global_entries == whole_problem.pspec.global_entries
+        t0 = time()
+        pw = solve(problem, optimizer; start=whole.theta)
+        elapsed = time() - t0
+        t_ns = problem.pspec.axis_boundary
+        J = jump_window(t_ns)
+        truth = iaw_shock_truth(problem_nt.trace)
+        mean_ratio, ratios = jump_rss_ratios(pw.values, whole.values, truth, J)
+        (; pw, whole, unreg=_FR_SHOCK.scan.unregularized, same_data, same_layout, t_ns, J, truth,
+            mean_ratio, ratios, elapsed)
+    end
+end
+
+const _FR_PIECEWISE = _fr_piecewise()
+
+@testset "FR9: the shock fitted piecewise is closer to the truth across the jump" begin
+    r = _FR_PIECEWISE
+    @info "FR9 the fits" piecewise_status = r.pw.status piecewise_iterations = r.pw.iterations elapsed_s = r.elapsed whole_status = r.whole.status whole_iterations = r.whole.iterations window = string(r.J)
+    steps = iaw_shock_steps()
+    wstr(u, a, b) = (wd = jump_width(r.t_ns, u, a, b, r.J); wd === nothing ? "undefined" : string(round(wd; digits=4)))
+    for v in ("f_D", "T_D", "T_C", "u_ion")
+        a, b = steps[v]
+        rss_pw = jump_rss(r.pw.values[v], r.truth[v], r.J)
+        rss_whole = jump_rss(r.whole.values[v], r.truth[v], r.J)
+        rss_unreg = jump_rss(r.unreg.values[v], r.truth[v], r.J)
+        @info "FR9 per quantity" variable = v rss_piecewise = rss_pw rss_whole = rss_whole rss_unreg = rss_unreg ratio = rss_pw / rss_whole width_truth_ns = wstr(r.truth[v], a, b) width_whole_ns = wstr(r.whole.values[v], a, b) width_piecewise_ns = wstr(r.pw.values[v], a, b) width_unreg_ns = wstr(r.unreg.values[v], a, b)
+    end
+    @info "FR9 the mean ratio (f_D, T_D, T_C), asserted below the bound" mean_ratio = r.mean_ratio bound = _FR_PIECEWISE_BOUND
+    @test r.same_data
+    @test r.same_layout
+    @test r.whole.converged && r.pw.converged
+    @test r.mean_ratio < _FR_PIECEWISE_BOUND
+end

@@ -285,3 +285,102 @@ function single_channel_deck_text(text::AbstractString, name::AbstractString)
     TOML.print(buf, raw; sorted=true)
     return String(take!(buf))
 end
+
+# ------------------------------------------------------------------------------------------
+# The shock's jump metric (Phase 4.C spec D15): one definition for the slow tier's FR9 and
+# examples/diagnostics/shock_piecewise.jl. Functions only: fit_iaw_shock.jl and iaw_shock.jl both
+# include this file, so a script can include it twice.
+# ------------------------------------------------------------------------------------------
+
+"""
+    iaw_shock_truth(trace::PlasmaTrace) -> Dict{String,Vector{Float64}}
+
+`iaw_shock_problem`'s ground truth at its trace's bin centres, keyed and in the units of the shock
+decks' own names: `f_D` (the deuteron fraction), `T_D` and `T_C` (eV), and `u_ion` (km/s, the one
+flow the D and C ions share). Spec D15.
+"""
+function iaw_shock_truth(trace::PlasmaTrace)
+    row(path) = collect(Float64, trace.values[findfirst(p -> string(p) == path, trace.paths), :])
+    return Dict("f_D" => row("ions.D.fraction"), "T_D" => T_from_si.(row("ions.D.T"), :T_eV),
+        "T_C" => T_from_si.(row("ions.C.T"), :T_eV), "u_ion" => u_from_si.(row("ions.D.u"), :u_kms))
+end
+
+"""
+    iaw_shock_steps() -> Dict{String,Tuple{Float64,Float64}}
+
+`(a, b)` per quantity: `iaw_shock_problem`'s truth just before the shock and just after it, at
+`t_s⁺` (the post-shock temperatures decay from there). Spec D15.
+"""
+iaw_shock_steps() = Dict("f_D" => (0.78, 0.63), "T_D" => (60.0, 440.0), "T_C" => (100.0, 1550.0),
+    "u_ion" => (250.0, 40.0))
+
+"""
+    jump_window(t_ns; ts = 1.15, W = 0.5) -> Vector{Int}
+
+The bins `j` with `|t_j − ts| ≤ W`, `t_ns` in ns: the jump window J of spec D12. `ts = 1.15` ns is
+`iaw_shock_problem`'s shock time.
+"""
+jump_window(t_ns; ts=1.15, W=0.5) = findall(t -> abs(t - ts) <= W, t_ns)
+
+"""
+    jump_rss(row, truth, J) -> Float64
+
+`Σ_{j∈J} (row_j − truth_j)²`, in the quantity's own unit squared; `row` and `truth` full `nt`-bin
+rows. Spec D12.
+"""
+jump_rss(row, truth, J) = sum(abs2, row[J] .- truth[J])
+
+"""
+    jump_rss_ratios(values_a, values_b, truth, J) -> (mean, ratios)
+
+`ratios[v] = jump_rss(values_a[v], truth[v], J) / jump_rss(values_b[v], truth[v], J)` for `v` in
+`f_D`, `T_D`, `T_C`, and `mean` their mean: FR9's asserted quantity with `a` the piecewise fit and
+`b` the whole-axis one. The flow is reported, not compared (spec D12). `values_a` and `values_b` are
+`FitResult.values`-like dictionaries of full `nt`-bin rows.
+"""
+function jump_rss_ratios(values_a, values_b, truth, J)
+    ratios = Dict(v => jump_rss(values_a[v], truth[v], J) / jump_rss(values_b[v], truth[v], J)
+                  for v in ("f_D", "T_D", "T_C"))
+    return sum(values(ratios)) / 3, ratios
+end
+
+"""
+    jump_crossing(t_ns, u, level, J; ts = 1.15) -> Union{Nothing,Float64}
+
+The time at which `u` crosses `level` nearest `ts`, by linear interpolation between consecutive
+bins of the window `J`; `nothing` when it never does there. A segment lying exactly on the level
+crosses at its first bin; a non-finite value (a variable's `NaN` outside its interval) is skipped.
+Spec D12.
+"""
+function jump_crossing(t_ns, u, level, J; ts=1.15)
+    best = nothing
+    for idx in 1:(length(J)-1)
+        j, j2 = J[idx], J[idx+1]
+        a, b = u[j] - level, u[j2] - level
+        (isfinite(a) && isfinite(b)) || continue
+        if a == b
+            a == 0 || continue
+            tc = t_ns[j]
+        elseif (a <= 0 <= b) || (b <= 0 <= a)
+            tc = t_ns[j] + (t_ns[j2] - t_ns[j]) * a / (a - b)
+        else
+            continue
+        end
+        (best === nothing || abs(tc - ts) < abs(best - ts)) && (best = tc)
+    end
+    return best
+end
+
+"""
+    jump_width(t_ns, u, a, b, J; ts = 1.15) -> Union{Nothing,Float64}
+
+The 10 to 90 % width of a jump from `a` to `b`: the distance in ns between `u`'s crossings of
+`a + 0.1 (b − a)` and `a + 0.9 (b − a)` nearest `ts` (`jump_crossing`); `nothing` when either
+crossing does not exist in `J`, which is reported as undefined, never as a number. Spec D12.
+"""
+function jump_width(t_ns, u, a, b, J; ts=1.15)
+    c10 = jump_crossing(t_ns, u, a + 0.1 * (b - a), J; ts=ts)
+    c90 = jump_crossing(t_ns, u, a + 0.9 * (b - a), J; ts=ts)
+    (c10 === nothing || c90 === nothing) && return nothing
+    return abs(c90 - c10)
+end

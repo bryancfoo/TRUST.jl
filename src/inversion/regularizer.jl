@@ -141,6 +141,13 @@ deck form; this shape (a `ParameterSpec`-resolving keyword constructor, mirrorin
 `FitInterval`'s and `ParameterSpec`'s own) is Level 3's choice under rule 11 zero, flagged in the
 chunk 7 report.
 
+**A term's interval must lie inside every selected variable's own interval** (Phase 4.C spec D13):
+a time-varying fitted variable on an interval is undefined outside it (`_value_table` holds `NaN`
+there), so a term reading it there would make `R` `NaN` with no error; the constructor refuses it,
+naming the variable and both intervals. The check is on bins, not times, and is `_slot_defined_at`'s
+own: a dependent, a scalar or frozen variable, or a variable on the whole axis is defined at every
+bin and never refused.
+
 Spec D22.
 """
 function RegularizerTerm(pspec::ParameterSpec; select, operator::Symbol, normalization::Symbol,
@@ -185,6 +192,18 @@ function RegularizerTerm(pspec::ParameterSpec; select, operator::Symbol, normali
     needed = _operator_min_bins(operator)
     n >= needed || throw(ArgumentError(
         "RegularizerTerm: interval has $n bins, but operator :$operator needs at least $needed"))
+
+    # Phase 4.C spec D13: a term's bins must lie inside every selected variable's own interval.
+    for (nm, slot) in zip(selected, slots)
+        all(j -> _slot_defined_at(slot, j, pspec.variables, nvar, pspec.intervals), bins) && continue
+        v = pspec.variables[slot]
+        term_iv = intv == 0 ? "the whole axis" : "interval \"$(pspec.intervals[intv].name)\""
+        throw(ArgumentError(
+            "RegularizerTerm: the term selecting \"$nm\" is on $term_iv (bins $bins), but " *
+            "\"$nm\" is defined only on its own interval \"$(pspec.intervals[v.interval].name)\" " *
+            "(bins $(pspec.intervals[v.interval].bins)); a term's interval must lie inside every " *
+            "selected variable's own interval"))
+    end
 
     scale_f = Float64(scale)
     if normalization === :absolute && scale_f == 0.0

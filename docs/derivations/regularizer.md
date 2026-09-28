@@ -248,6 +248,41 @@ overlapping the axis (D5); a shared bin between two intervals is simply a bin th
 regularized by both terms that claim it, and "two terms may select the same variable; their
 contributions add" (D22) already covers that case with no special handling.
 
+**A term's interval must lie inside every selected variable's own interval** (Phase 4.C spec D13).
+A time-varying fitted variable declared on an interval (`interval = "pre"`) is defined only at that
+interval's bins: `_value_table` holds `NaN` at every other bin, and a dependent that reads such a
+variable outside its interval is already refused when the `ParameterSpec` is built
+(`_check_interval_reads`). A regularizer term was the one reader nothing checked: a term on a wider
+window, or on the whole axis, selecting that variable read the `NaN` at the bins beyond the
+variable's interval, and `R` came out `NaN` with no error (measured on RG's grid, for a whole-axis
+term on a variable on `[0, 1.5]` and for one on `[0, 1.9]`). `RegularizerTerm`'s constructor now
+refuses it, naming the variable, the term's interval (or "the whole axis") and the variable's own
+interval, each with its bins (RG23; PW5 through a deck). The check is **on bins, not times**, and is
+`_slot_defined_at`'s own, the rule `_value_table` uses to leave a bin `NaN`, so it refuses exactly
+the terms that would read a `NaN` and nothing else: a window wider in time that reaches no extra
+bin is not refused, and a dependent, a scalar or frozen variable, or a variable on the whole axis
+is defined at every bin and never is.
+
+**The gap.** Because a bin in no term's interval carries no row at all, two terms on two intervals
+with a gap between them leave the gap's bins fitted from the data alone: no row reads a bin in the
+gap and none reads across it (PW1: moving the gap's two values by 250 km/s leaves `R` bitwise
+unchanged, while the whole-axis `R` moves). `examples/iaw_shock_piecewise.toml` does this for the
+shock problem. Every `D2` term is restricted to `pre_smooth = [0, 1.05]` or `post_smooth = [1.25,
+4.0]` ns, so the bins within δ = 0.1 ns of the shock at 1.15 ns carry no row, while the variables
+keep `pre = [0, 1.15]` and `post = [1.15, 4.0]` (which is why the containment rule above holds:
+`u_pre`'s term on `pre_smooth` is inside `pre`, `u_post`'s on `post_smooth` inside `post`). At
+cut-down (128 × 32, 0.129 ns a bin) the gap is bin 10 alone (t = 1.161 ns) and the deck has 108
+regularizer rows against the whole-axis deck's 118; at full resolution (512 × 256, 0.0157 ns a bin)
+the same δ would leave 13 bins. **The caution that decided where it is used**: where the gap's bins
+are narrower than the instrument's temporal blur, neighbouring unregularized bins are not
+determined one by one, since the data constrain their sum through the temporal IRF and nothing
+constrains their difference. Phase 4.C's full-resolution trial, made once by Level 2 and not
+re-run, found the jumps sharper but the jump-window RSS 1.25 times the whole-axis fit's, with 13 of
+the gap's fitted values at or near a bound (a bin there is 0.016 ns against the 0.05 ns temporal
+IRF), so the piecewise deck is compared at cut-down only, where one bin (0.129 ns) is wider than
+the IRF (spec D25). The cut-down comparison is the slow tier's FR9 and
+`examples/diagnostics/shock_piecewise.jl`.
+
 ## 7. The L-curve's corner (Step 4.C.1)
 
 **What it estimates, and what it does not.** `lcurve_corner` (`src/inversion/lcurve_corner.jl`)

@@ -137,6 +137,20 @@ and electron-plasma features. The synthetic noise model's σ is now the realized
 point spread included. The table machinery itself is now general (`ChebyshevTable`), with
 per-table degree caps and a signed ξ domain.
 
+**Phase 4.C (the L-curve corner, and the shock fitted piecewise) is complete.** `lcurve_corner`
+estimates the corner of the L-curve over a weight scan's result, the point of maximum curvature of
+log R against log χ² (Hansen and O'Leary 1993), and reports it with the scan weights that bracket
+it and the curvature at every scan point; it is a report beside the scan, never a choice: nothing
+in the package calls it, and the weight a deck carries stays the user's to set. The shock problem
+is also fitted with its time regularization split into two intervals around a 0.2 ns window at
+the shock left unregularized (`examples/iaw_shock_piecewise.toml`), so that the jump is fitted from
+the data alone. At cut-down (128 × 32) its residual against the truth across the jump, averaged
+over `f_D`, `T_D` and `T_C`, is 0.70 of the whole-axis fit's at the same weight (the slow tier's
+FR9), most of the gain in `T_C`. It is not fitted at full resolution: there each unregularized bin
+is a third of the instrument's 0.05 ns temporal blur, so the data alone do not determine the gap's
+bins one by one. A regularizer term whose interval reaches outside a selected variable's own
+interval is now refused, naming both, where it used to make the regularizer's value `NaN` silently.
+
 ## Installing and testing
 
 ```

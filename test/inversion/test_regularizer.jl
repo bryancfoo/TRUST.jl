@@ -596,3 +596,30 @@ end
         @test worst <= 1e-13
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# RG23 (Phase 4.C spec D13): a term's interval must lie inside every selected variable's own
+# ------------------------------------------------------------------------------------------
+
+@testset "RG23: a term wider than a selected variable's interval is refused" begin
+    expt = _rg_expt()
+    pre = FitInterval("pre", expt.trace.axis; t_range_ns=[0.0, 1.5])       # bins 1:5
+    wide = FitInterval("wide", expt.trace.axis; t_range_ns=[0.0, 1.9])     # bins 1:6
+    inner = FitInterval("inner", expt.trace.axis; t_range_ns=[0.0, 1.05])  # bins 1:4
+    v_pre = FittedVariable("u_pre"; bounds=(-300.0, 300.0), init=50.0, time_varying=true, interval=1)
+    v_T = FittedVariable("T_D"; bounds=(50.0, 800.0), init=200.0, time_varying=true)
+    pspec = ParameterSpec(expt; variables=[v_pre, v_T], intervals=[pre, wide, inner],
+        dependents=["u_ion" => "t < 1.5 ? u_pre : 0.0"],
+        bindings=["u_ion" => "ions.D.u_kms", "T_D" => "ions.D.T_eV"])
+    @test pspec.intervals[1].bins == 1:5 && pspec.intervals[2].bins == 1:6 && pspec.intervals[3].bins == 1:4
+    @test_throws "the term selecting \"u_pre\" is on interval \"wide\" (bins 1:6), but \"u_pre\" is defined only on its own interval \"pre\" (bins 1:5)" RegularizerTerm(
+        pspec; select=["u_pre"], operator=:D2, normalization=:unit, interval="wide")
+    @test_throws "the term selecting \"u_pre\" is on the whole axis (bins 1:10)" RegularizerTerm(
+        pspec; select=["u_pre"], operator=:D2, normalization=:unit)
+    @test_throws "is defined only on its own interval \"pre\"" RegularizerTerm(
+        pspec; select=["T_D", "u_pre"], operator=:D2, normalization=:unit, interval="wide")
+    @test length(RegularizerTerm(pspec; select=["u_pre"], operator=:D2, normalization=:unit, interval="inner").rows) == 2
+    @test length(RegularizerTerm(pspec; select=["u_pre"], operator=:D2, normalization=:unit, interval="pre").rows) == 3
+    @test length(RegularizerTerm(pspec; select=["T_D"], operator=:D2, normalization=:unit, interval="wide").rows) == 4
+    @test length(RegularizerTerm(pspec; select=["u_ion"], operator=:D2, normalization=:absolute, scale=100.0).rows) == 8
+end
