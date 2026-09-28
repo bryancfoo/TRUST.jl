@@ -85,8 +85,8 @@ and the value for a negative entry.
 For `StreakCameraNoise` with `sigma_px > 0`, this is the **realized** per-pixel σ: the pre-spread
 variance `V = expected·camera_gain·noise_factor` propagated through the squared weights of the
 point spread, `σ² = (K_λ∘K_λ)·V·(K_t∘K_t)ᵀ + read_noise²` (`_spread_variance`; OQ-40 option A,
-Phase 4.B spec D8, `conventions.md` 10.4). At `sigma_px <= 0` it is today's pre-spread formula,
-bitwise.
+Phase 4.B spec D8, `conventions.md` Section 4's `AbstractNoiseModel` entry). At `sigma_px <= 0` it
+is today's pre-spread formula, bitwise.
 
 Swadling Eqs. 37, 40; spec D21, D8.
 """
@@ -195,9 +195,9 @@ end
     _spread_variance(V::AbstractMatrix, sigma_px::Real) -> Matrix
 
 The variance of a pixel after the point spread, given the pre-spread per-pixel variances `V` of
-independent pixels: `(Kl ∘ Kl) · V · (Kt ∘ Kt)ᵀ`, `∘` the elementwise square (Phase 4.B spec D8,
-`conventions.md` 10.4). Exact for the diagonal; the covariance between neighbours (Swadling Eq. 38)
-is not computed.
+independent pixels: `(Kl ∘ Kl) · V · (Kt ∘ Kt)ᵀ`, `∘` the elementwise square (Phase 4.B spec D8;
+`conventions.md` Section 4's `AbstractNoiseModel` entry, [OQ-40](../../dev/open_questions.md#oq-40)).
+Exact for the diagonal; the covariance between neighbours (Swadling Eq. 38) is not computed.
 """
 function _spread_variance(V::AbstractMatrix, sigma_px::Real)
     Kl, Kt = _point_spread_matrices(size(V, 1), size(V, 2), sigma_px)

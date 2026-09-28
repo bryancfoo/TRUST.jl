@@ -233,7 +233,7 @@ end
     @test KAPPA_TABLE.bisect_max == KAPPA_BISECT_MAX
     L = sum(KAPPA_TABLE.nxi .+ 1)
     @test length(KAPPA_TABLE.coeffs) == L * (KAPPA_TABLE.np + 1)
-    @test L == length(KAPPA_TABLE.offset) > 0 || true  # offset has one entry per panel, not per slice row
+    @test length(KAPPA_TABLE.offset) == length(KAPPA_TABLE.nxi)  # offset has one entry per panel, not per slice row
     @info "KP8 table" edges = KAPPA_TABLE.edges nxi = KAPPA_TABLE.nxi np = KAPPA_TABLE.np L = L
 end
 
@@ -735,4 +735,22 @@ end
     end
     @test worst22 <= KAPPA_TABLE.xi_max
     @info "KP24 KP22 fixture worst |xi_e|" worst22
+end
+
+# ------------------------------------------------------------------------------------------
+# KP25 (Phase 4.C spec D3): a dual exactly at the table's edges stays in the table
+# ------------------------------------------------------------------------------------------
+
+@testset "KP25: a dual exactly at the table's edges stays in the table (Phase 4.C spec D3)" begin
+    for xi in (1.0, 9.5), s in (1.0, -1.0)
+        lhs = s * ForwardDiff.derivative(t -> real(cauchy_dfdv(Kappa(s * t), xi)), s * 2.0)
+        rhs = s * ForwardDiff.derivative(t -> _cheb_table_eval(KAPPA_TABLE, _cheb_slice(KAPPA_TABLE, inv(s * t)), xi), s * 2.0)
+        @test lhs === rhs
+    end
+    f = Kappa(3.0)
+    for xi0 in (20.0, -20.0), s in (1.0, -1.0)
+        lhs = s * ForwardDiff.derivative(x -> real(cauchy_dfdv(f, s * x)), s * xi0)
+        rhs = s * ForwardDiff.derivative(x -> _cheb_table_eval(KAPPA_TABLE, f.slice, abs(s * x)), s * xi0)
+        @test lhs === rhs
+    end
 end

@@ -98,7 +98,7 @@ at `ξ = 0` has infinite slope below it).
 Section 10.2; spec D31; `docs/derivations/generalized_normal.md`.
 """
 function GeneralizedNormal(m::Real)
-    (isfinite(m) && m >= 3 / 2) || throw(ArgumentError(
+    (isfinite(m) && _primal_value(m) >= 3 / 2) || throw(ArgumentError(
         "GeneralizedNormal: m must be finite and at least 1.5; got $m"))
     FT = promote_type(typeof(m), eltype(GN_TABLE.coeffs))
     mp = FT(m)

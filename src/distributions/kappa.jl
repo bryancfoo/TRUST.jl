@@ -236,6 +236,12 @@ holds `ξ ≥ 0` and this function passes `abs(ξ)` to `_cheb_table_eval` (D13's
 table; passing the signed `ξ` would silently read outside the table for `ξ < 0`, Section 14
 item 4 of the chunk-5 prompt).
 
+**Both domain comparisons are on primal values** (`_primal_value`, Phase 4.C spec D3): ForwardDiff
+1.x orders a dual at a tie by its partials, so a dual `κ` exactly at 2 (`s = 1/κ` at `p_hi = 1/2`)
+whose partial points `s` outward, or a dual `ξ` exactly at `±20` whose partial points `|ξ|`
+outward, would otherwise leave the table for the fallback: correct, and two to three orders of
+magnitude slower (37 to 43 µs a call against 0.06 to 0.25 µs inside the table, at `ξ = 1.3`).
+
 `conventions.md` 1.5; spec D16; `docs/derivations/kappa.md`.
 """
 function cauchy_dfdv(f::Kappa, xi::Number)
@@ -243,7 +249,8 @@ function cauchy_dfdv(f::Kappa, xi::Number)
     rxi = real(xi)
     axi = abs(rxi)
     s = inv(f.kappa)
-    if axi <= KAPPA_TABLE.xi_max && KAPPA_TABLE.p_lo <= s <= KAPPA_TABLE.p_hi
+    if _primal_value(axi) <= KAPPA_TABLE.xi_max &&
+       KAPPA_TABLE.p_lo <= _primal_value(s) <= KAPPA_TABLE.p_hi
         QT = _basefloat(rxi)
         return _cheb_table_eval(KAPPA_TABLE, f.slice, axi) + im * QT(pi) * dfdx(f, rxi)
     end

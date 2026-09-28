@@ -23,8 +23,8 @@ function _save_info(path, fig)
 end
 
 # The five shapes shown in every panel, in one fixed order and color so a reader can match a
-# curve across panels from panel (a)'s legend; the Maxwellian black, the rest the default
-# categorical palette (spec D40).
+# curve across panels from the one legend below them; the Maxwellian black, the rest the default
+# categorical palette (spec D40; the legend moved below the panels at Phase 4.C spec D3).
 const _PALETTE = Makie.wong_colors()
 const _SHAPES = (
     ("Maxwellian", Maxwellian(), :black),
@@ -47,7 +47,6 @@ function panel_shapes!(ax)
     for (label, f, color) in _SHAPES
         lines!(ax, xs, f.(xs); color=color, label=label)
     end
-    axislegend(ax)
     return ax
 end
 
@@ -92,16 +91,19 @@ end
 function main(outdir=@__DIR__)
     mkpath(outdir)
 
-    fig = Figure(size=(1500, 450))
+    fig = Figure(size=(1500, 500))
 
     ax_a = Axis(fig[1, 1]; xlabel="x", ylabel="φ(x)", yscale=log10, title="Velocity shapes, variance ½")
     panel_shapes!(ax_a)
+    ylims!(ax_a, 1e-6, 2.0)
 
     ax_b = Axis(fig[1, 2]; xlabel="ω / (k c_s)", ylabel="S(k,ω) / max(S_Maxwellian)")
     panel_iaw!(ax_b)
 
     ax_c = Axis(fig[1, 3]; xlabel="λ_s (nm)", ylabel="S(k,ω) / max(S_Maxwellian)")
     panel_epw!(ax_c)
+
+    Legend(fig[2, 1:3], ax_a; orientation=:horizontal, framevisible=false)
 
     return _save_info(joinpath(outdir, "shapes.png"), fig)
 end

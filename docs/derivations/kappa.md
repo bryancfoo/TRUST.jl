@@ -117,18 +117,19 @@ converge at the table's edge. A kappa distribution's moments diverge above order
 special function — here `loggamma`, inside `_kappa_C` and inside the shape's own `C` — is never
 its own oracle; a closed form derived by a wholly different route, residues, is). For integer `κ =
 n ≥ 2`, `φ(x) ∝ (1+x²/a²)^{−n}` is a rational function of `x` with poles of order `n` at `x =
-±ia`. Closing the contour `∫φ'(x)/(x−ξ) dx` in the upper half-plane (`Im ξ > 0`) picks up the pole
-at `x = ia`:
+±ia`, so `φ'(x)` has poles of order `n + 1` there. For `Im ξ > 0`, closing the contour of
+`∫φ'(x)/(x−ξ) dx` in the upper half-plane encloses **two** singularities of the integrand: the
+simple pole at `x = ξ`, **inside** the contour because `Im ξ > 0`, with residue `φ'(ξ)`; and the
+pole of order `n + 1` at `x = ia`. The arc at infinity contributes nothing, since the integrand
+decays like `|x|^{−2n−2}`. Hence
 
-    𝒞φ(ξ) = 2πi · [φ'(ξ) + D(ξ)],   D(ξ) = d/dξ Res_{x=ia} φ(x)/(x−ξ),
+    𝒞φ(ξ) = 2πi · [φ'(ξ) + D(ξ)],   D(ξ) = Res_{x=ia} φ'(x)/(x−ξ) = d/dξ Res_{x=ia} φ(x)/(x−ξ),
 
-by the residue theorem applied to `φ(x)/(x−ξ)`, whose only singularities inside the contour (for
-`Im ξ > 0`, `x = ξ` is *outside* since the ξ appears with `Im ξ>0` while the contour picks up
-`x=ia`... to be precise: the *derivative* `𝒞φ` is `∫ φ'/(x−ξ)`, and writing `φ'` itself via its own
-value at ξ plus the residue contribution at the pole `x=ia` is what `D(ξ)` captures) — worked out
-by Leibniz's rule on `(x+ia)^{−n}(x−ξ)^{−1}` (the residue of an order-`n` pole is the
-`(n−1)`-th derivative, divided by `(n−1)!`, of the rest of the function, and `D(ξ)` is one further
-`ξ`-derivative of that):
+the pole at `x = ξ` being why `φ'(ξ)` appears beside `D(ξ)`. The second form of `D(ξ)` holds because
+`φ'(x)/(x−ξ)` and `φ(x)/(x−ξ)²` differ by `d/dx[φ(x)/(x−ξ)]`, whose residue is zero, and
+`φ(x)/(x−ξ)² = ∂/∂ξ [φ(x)/(x−ξ)]`. It is worked out by Leibniz's rule on `(x+ia)^{−n}(x−ξ)^{−1}`
+(the residue of an order-`n` pole is the `(n−1)`-th derivative, divided by `(n−1)!`, of the rest
+of the function, and `D(ξ)` is one further `ξ`-derivative of that):
 
     D(ξ)  = C · a^{2n} · (−1)^{n−1} · Σ_{j=0}^{n−1} p_j · (n − j) · (2ia)^{−n−j} · (ia − ξ)^{j−n−1},
     p_0 = 1,   p_j = p_{j−1} · (n + j − 1) / j     (p_j = (n)_j / j!, always an integer),

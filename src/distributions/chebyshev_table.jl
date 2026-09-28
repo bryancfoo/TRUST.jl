@@ -144,8 +144,8 @@ target actually used to build it), and the build's own four degree caps
 4.B spec D13, D14's CT1). `L = Σ_panel (nxi[panel]+1)` is the slice length and the struct's
 second type parameter.
 
-`p` is the table's parameter coordinate: `m` for `SG_TABLE` and `SG_DM_TABLE`, `s = 1/κ` for a
-future `KAPPA_TABLE`.
+`p` is the table's parameter coordinate: `m` for `SG_TABLE`, `SG_DM_TABLE` and `GN_TABLE`, `s = 1/κ`
+for `KAPPA_TABLE`, `α` for `SN_TABLE`.
 
 **"At the cap" and "failing at the cap" are different** (spec D9, corrected 2026-09-08 round 1):
 a panel or the p-direction that reaches its degree cap and passes the trailing-coefficient check
@@ -155,7 +155,8 @@ stopped *while still failing* the check — that, and only that, is a finding
 
 Built once per table by `_build_cheb_table(sampler, edges, tau, p_lo, p_hi; degree_start, cap_xi,
 cap_p, bisect_max)`, into a module `const` (`conventions.md` 5.6, the second named exception to
-"no global mutable state"): `SG_TABLE` and `SG_DM_TABLE` in `supergaussian_table.jl` today.
+"no global mutable state"): `SG_TABLE` and `SG_DM_TABLE` in `supergaussian_table.jl`, `KAPPA_TABLE`
+in `kappa.jl`, `GN_TABLE` in `generalized_normal.jl`, `SN_TABLE` in `skew_normal.jl`.
 **Each table states its own four caps as required keywords, with no defaults, so one table's
 need never moves another's** (Phase 4.B spec D13): `SG_DM_TABLE` already reaches
 `SG_DEGREE_CAP_M = 48`, and a later table may need a different cap without touching that one.

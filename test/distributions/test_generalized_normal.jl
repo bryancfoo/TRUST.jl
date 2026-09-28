@@ -283,6 +283,22 @@ end
     @info "GN25 worst |table(xi=10) - series(nextfloat(10))|" worst
 end
 
+# ------------------------------------------------------------------------------------------
+# GN26 (Phase 4.C spec D3): the constructor's guard compares the primal
+# ------------------------------------------------------------------------------------------
+
+@testset "GN26: the constructor's guard compares the primal (Phase 4.C spec D3)" begin
+    for s in (1.0, -1.0)
+        g = GeneralizedNormal(ForwardDiff.Dual(1.5, s))
+        @test ForwardDiff.value(g.m) === 1.5
+        @test ForwardDiff.partials(g.m)[1] === s
+    end
+    for bad in (prevfloat(1.5), ForwardDiff.Dual(prevfloat(1.5), 1.0), ForwardDiff.Dual(prevfloat(1.5), -1.0),
+                Inf, NaN)
+        @test_throws "m must be finite and at least 1.5" GeneralizedNormal(bad)
+    end
+end
+
 # --- GN10: the independent BigFloat oracle, D34's code verbatim ---
 
 function _gn_dphi_big(m::BigFloat, x::BigFloat)
