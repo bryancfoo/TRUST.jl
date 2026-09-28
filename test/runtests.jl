@@ -104,6 +104,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("weight scan")
         @safetestset "weight scan" begin include("inversion/test_weight_scan.jl") end
     end
+    if _wanted("L-curve corner")
+        @safetestset "L-curve corner" begin include("inversion/test_lcurve_corner.jl") end
+    end
     if _wanted("uncertainty")
         @safetestset "uncertainty" begin include("inversion/test_uncertainty.jl") end
     end

@@ -312,3 +312,26 @@ end
     @test all(isfinite, reg.values["u_post"][_FR_SHOCK.post_bins])
     @test all(!isfinite, reg.values["u_post"][other_of_post])
 end
+
+# ------------------------------------------------------------------------------------------
+# FR10 (Phase 4.C spec D10): the L-curve's corner on the three cut-down scans, reported
+# ------------------------------------------------------------------------------------------
+#
+# lcurve_corner over each scan above, printed in full (every curvature). Not asserted beyond
+# its structure: the scans are three and four points, so a corner may be at the scan's edge or
+# absent, which is a finding about the scans, not about the estimator (spec D10).
+
+@testset "FR10: the L-curve's corner on the three cut-down scans (reported, not asserted)" begin
+    for (label, scan) in (("EPW", _FR_EPW.scan), ("multi-flow", _FR_MULTIFLOW.scan),
+                          ("shock", _FR_SHOCK.scan))
+        c = lcurve_corner(scan)
+        @info "FR10 $label corner" text = sprint(show, MIME("text/plain"), c)
+        @test length(c.curvature) == length(scan.weights)
+        if c.status === :corner
+            @test c.weight == scan.weights[c.index]
+            @test c.lower == scan.weights[c.index-1] && c.upper == scan.weights[c.index+1]
+        else
+            @test c.status === :no_corner
+        end
+    end
+end

@@ -247,3 +247,99 @@ penalize it heavily. Nothing about interval resolution assumes intervals partiti
 overlapping the axis (D5); a shared bin between two intervals is simply a bin that gets
 regularized by both terms that claim it, and "two terms may select the same variable; their
 contributions add" (D22) already covers that case with no special handling.
+
+## 7. The L-curve's corner (Step 4.C.1)
+
+**What it estimates, and what it does not.** `lcurve_corner` (`src/inversion/lcurve_corner.jl`)
+is the maximum-curvature estimate of the global weight Λ over a weight scan's own table of `(Λ,
+chi2, R)`: the corner of the L-curve, the point of maximum curvature of `log R` against `log
+chi2` (Hansen and O'Leary 1993). It is a **report**, never a choice ([OQ-19](../../dev/open_questions.md#oq-19),
+[OQ-46](../../dev/open_questions.md#oq-46)): nothing in the package calls it, `WeightScanResult`
+gains no field from it, and the weight a deck carries stays the user's to set by hand from the
+scan and the estimate together.
+
+**The continuous curvature.** With `rho_hat(Lambda) = log chi2(Lambda)`, `eta_hat(Lambda) = log
+R(Lambda)` and primes `d/d log Lambda` (Hansen and O'Leary 1993):
+
+    kappa(Lambda) = 2 (rho_hat' eta_hat'' - rho_hat'' eta_hat') / ((rho_hat')^2 + (eta_hat')^2)^(3/2).
+
+The factor 2 is Hansen's normalization for squared norms: `kappa(Lambda)` is the geometric
+curvature of the curve `(1/2 log chi2, 1/2 log R) = (log ||r||, log ||x||)`, not of `(log chi2,
+log R)` itself. The curvature of a plane curve is independent of how the curve is parameterized,
+so Λ enters only through the order of the scan's points along it, never through its own value.
+
+**The discrete estimator.** With the scan's points `P_k = (log chi2_k, log R_k)`, `k = 1..n`, Λ
+strictly ascending, the curvature at each interior point `k = 2..n-1` is the signed Menger
+curvature of the three points `P_{k-1}, P_k, P_{k+1}`:
+
+    kappa_k = 2 (d1 x d2) / (|d1| |d2| |d1 + d2|),    d1 = P_k - P_{k-1},  d2 = P_{k+1} - P_k,
+    d1 x d2 = d1x d2y - d1y d2x,
+
+four times the triangle the three points span, over the product of its three side lengths
+(`|d1 + d2|` is the distance from `P_{k-1}` to `P_{k+1}` directly). **The sign is positive at the
+L's elbow**: as Λ grows the tangent turns from pointing down (small Λ, `R` falling fast at nearly
+flat `chi2`, `d1 ≈ (epsilon, -1)`) to pointing right (large Λ, `chi2` rising at nearly flat `R`,
+`d2 ≈ (1, -epsilon)`), and `d1 x d2 = epsilon*(-epsilon) - (-1)*1 = 1 - epsilon^2 > 0`: a
+counterclockwise turn in the `(log chi2, log R)` plane. A sign error in the cross product picks
+the *anti*-corner instead, the point where the curve turns clockwise (LC2, LC3).
+
+`kappa_k` is the geometric curvature of `(log chi2, log R)` itself — **half of Hansen's
+`kappa(Lambda)` in the limit of dense points**, since scaling a curve by 1/2 doubles its
+curvature. So only the *location* of a maximum is ever compared between the two, never a
+magnitude: LC2 checks that the estimate's bracket contains the oracle's Λ, not that the two
+curvature values agree.
+
+**The rules.** The estimate is `Lambda_{k*}`, `k* = argmax_k kappa_k` over interior `k` with
+`kappa_k > 0`, a tie going to the smaller Λ (the first, the less regularized fit — no tolerance
+on "positive": the rule is `kappa_k > 0` exactly, and every `kappa_k` is printed so a round-off-
+level "corner" is visible for what it is). The estimate is a **bracket**
+`[Lambda_{k*-1}, Lambda_{k*+1}]`, not a point, since the scan's points are few and discrete and
+the continuous curve's true corner is estimated only to lie between two of them. No interior
+`kappa_k > 0` is **no corner**, returned as `status = :no_corner` with every numeric field
+`nothing`, never `NaN` — arithmetic on `nothing` throws, so a caller who forgets to check
+`status` fails loudly rather than propagating a silent `NaN`. `k* = 2` or `k* = n - 1`, the first
+or last interior point, is **at the scan's edge**: the true corner may lie outside the scan's own
+range. Fewer than three points is refused (a curvature needs three). An interior point with a
+zero-length side (`d1` or `d2` the zero vector — two consecutive identical scan points, as a
+warm-started fit that returned its start would give) has `kappa_k = NaN` there, never zero, and
+never wins the maximum.
+
+**Λ's units** carry over unchanged from Section 2 of this document: ns⁴ for a `D2` term under the
+trace-scaled normalizations (`absolute`, `initial`, `relative`), ns² for `D1`, dimensionless for
+`I` and for `unit`. An estimate therefore belongs to one problem and one term set — comparable
+across scans of the same deck, never across a different operator, normalization or deck — **and a
+uniform rescaling of σ by a factor `c` multiplies every Λ on the curve by `c²`**, the curve's
+shape (and so its corner's *location* along it) unchanged, only its Λ-axis labels moved.
+
+**The oracle.** LC2's fixture is the analytic Tikhonov problem `min_x ||A x - b||^2 + Lambda
+||x||^2` with `A = U diag(s_i) V^T`, singular values `s_i = 10^(-(i-1)/2)`, `i = 1..8`, and data
+coefficients `beta_i = s_i + 10^-2` (a unit solution in the singular basis plus a flat noise
+floor of `10^-2`), for which
+
+    chi2(Lambda) = sum_i (Lambda beta_i / (s_i^2 + Lambda))^2,   R(Lambda) = sum_i (s_i beta_i / (s_i^2 + Lambda))^2.
+
+The oracle is `kappa(Lambda)` by centred differences in `u = log Lambda` on 2000 points uniform in
+`u` over eight decades (`[-8 ln 10, 0]`), its argmax. **Why `beta_i = s_i + 10^-2` and not every
+`beta_i` of one magnitude**: with a uniform `beta_i` the one-per-decade coarse scan has no clear
+corner (every interior curvature negative, the perpendicular residual `||b_perp|| = 0` exactly,
+and the fine grid's own maximum sits at its edge, `log10 Lambda = -9`, where `||b_perp||^2 =
+10^-2` first enters); `beta_i = s_i + 10^-2` has exactly one positive local maximum on the fine
+grid, at `log10 Lambda* = -4.1421` (`Lambda* = 7.20989540649827e-5`). Level 3's own run at Step
+4.C.1 reads the oracle at `Lambda* = 7.20989540649827e-5` (one positive local maximum, matching
+Level 2's figure exactly since the oracle depends on no random seed), and the coarse scan `Lambda
+= 10^-7, ..., 10^-1` (one per decade, seven points) gives the estimate `Lambda = 1e-4` (scan point
+4), bracket `[1e-5, 1e-3]`, containing Λ*; the seven curvatures read NaN, −0.107443, +0.144613,
++0.396487, +0.139618, −0.0159518, NaN. Λ = 10⁻⁴ is the coarse point nearest Λ* (0.142 decades
+away in log₁₀ Λ; the next-nearest coarse point is 0.858 decades away), so the bracket both
+contains the oracle and is the tightest bracket the coarse scan can offer.
+
+**Not stored.** The estimate is not written to a result file (Phase 4.C spec D7): it is
+recomputable exactly, in microseconds, from the `scan/weights`, `scan/chi2` and `scan/R` a result
+file already carries, so a stored copy would only duplicate data and risk disagreeing with a
+later recomputation; nothing in this phase reads a stored copy back; and a stored estimate inside
+the file's own `scan/` group would read as the scan having chosen something, which is exactly
+what `WeightScanResult` having no field naming an optimum (WS7) guards against. `read_result`'s
+`r.scan.weights`, `r.scan.chi2` and `r.scan.R` feed `lcurve_corner` directly and reproduce the
+estimate bitwise, the member fits' own `converged` flags apart (the file records each member's
+`scan/status`, a `String`, not the `Bool` `lcurve_corner`'s `converged` keyword wants), as
+`docs/derivations/data_layout.md` Section 3 states.

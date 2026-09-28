@@ -212,6 +212,12 @@ shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
 | `scan/rss/<variable>`, `scan/rss_normalized/<variable>` | `Float64` | `(K)` | only with a known ground truth |
 | `scan/rss_unreg/<variable>` | `Float64` | scalar | only with a known ground truth |
 
+**The L-curve's corner is not stored** (Phase 4.C spec D7): it is a report recomputed from the
+file's own `scan/weights`, `scan/chi2` and `scan/R` by `lcurve_corner(r.scan.weights, r.scan.chi2,
+r.scan.R)` (`r = read_result(path)`), bitwise the estimate the script that wrote the file saw, the
+member fits' convergence flags apart (the file carries each member's `scan/status`, not its
+`converged`).
+
 **`fit/chi2` and `fit/npixels` are the weighted total and the channel sum** (Step 4.A.3b, D40):
 `fit/chi2 = Sigma_c w_c chi2_c` (what the optimizer minimized) and `fit/npixels = Sigma_c n_c`,
 `1` and `1` for a single-channel fit. This is the version bump the `otis-result-2` text above

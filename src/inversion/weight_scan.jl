@@ -5,7 +5,9 @@
 # user-defined scalars and that the maximum-curvature estimate of Lambda_opt (Hansen and O'Leary
 # 1993) and any multidimensional search over per-term weights are Step 4.3's, to be discussed
 # with the user first -- Section 12 of the spec. This function reports the (chi2, R) trade-off at
-# each of a user-given list of weights, normalized as foo2026 Fig. 1 does, and nothing more.
+# each of a user-given list of weights, normalized as foo2026 Fig. 1 does, and nothing more. The
+# maximum-curvature estimate is lcurve_corner (Step 4.3 in part, Phase 4.C, lcurve_corner.jl): a
+# separate report the caller asks for after a scan; nothing here calls it.
 #
 # Scans are not the solver's job (conventions.md 6.8): a run over many weights or noise
 # realizations is launched from an external script or job array, never from inside the package
@@ -31,8 +33,9 @@ each row is normalized against.
 - `results`: every regularized fit's own `FitResult`, in `weights` order.
 - `unregularized`: the unregularized fit's own `FitResult`.
 
-**No field here names an optimum** ([OQ-19](../../dev/open_questions.md#oq-19)): choosing a
-weight from this table, by maximum curvature or otherwise, is Step 4.3's, not this one's (WS7).
+**No field here names an optimum** ([OQ-19](../../dev/open_questions.md#oq-19)): the
+maximum-curvature estimate is the separate report `lcurve_corner` computes from this table after
+the scan (Step 4.3 in part, Phase 4.C), never a field of it (WS7).
 
 Spec D31.
 """
@@ -91,9 +94,11 @@ parameters from that fit were used to warm-start a number of regularized fits").
 be positive and distinct, else a loud error (D39).
 
 **It reports; it never picks** ([OQ-19](../../dev/open_questions.md#oq-19), the user,
-2026-09-12): nothing here estimates a maximum-curvature Lambda_opt (Hansen and O'Leary 1993) or
-searches over per-term weights -- both are **Step 4.3**, to be discussed with the user first, and
-`WeightScanResult` has no field naming an optimum (WS7).
+2026-09-12): the maximum-curvature estimate of Lambda (Hansen and O'Leary 1993) is
+`lcurve_corner`, a separate report over this function's result (**Step 4.3** in part, Phase 4.C,
+2026-09-28), never computed here; the multidimensional search over per-term weights is deferred
+([OQ-46](../../dev/open_questions.md#oq-46)); and `WeightScanResult` has no field naming an
+optimum (WS7).
 
 `truth`, given as a `Dict{String,Vector{Float64}}` of ground-truth traces in each named
 variable's own unit, additionally fills `rss`/`rss_normalized`/`rss_unreg` with the per-parameter

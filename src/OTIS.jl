@@ -35,6 +35,7 @@ include("inversion/regularizer.jl")       # new (3.3): AbstractRegularizerTerm, 
 include("inversion/objective.jl")         # new (3.4a): objective, FitResult
 include("inversion/optimizers.jl")        # new (3.4b): AbstractOptimizer, the four optimizers, solve
 include("inversion/weight_scan.jl")       # new (3.5): weight_scan, WeightScanResult
+include("inversion/lcurve_corner.jl")     # new (4.C.1): lcurve_corner, LCurveCorner; needs WeightScanResult
 include("inversion/uncertainty.jl")       # new (4.A.4a): normal_matrices, gn_decrease, polish, laplace, calibration_scan
 include("config/options.jl")              # new (3.6a): option structs, spec D32
 include("config/registry.jl")             # new (3.6a): component registries, spec D32
@@ -116,6 +117,9 @@ export AbstractOptimizer, LBFGS, LevenbergMarquardt, NoisyGradientDescent, Optim
 
 # inversion (3.5)
 export weight_scan, WeightScanResult
+
+# inversion (4.C.1)
+export lcurve_corner, LCurveCorner
 
 # inversion (4.A.4a): the uncertainty reports
 export polish, gn_decrease, normal_matrices, laplace, LaplaceResult, calibration_scan,
