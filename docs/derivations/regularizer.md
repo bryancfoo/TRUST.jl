@@ -275,9 +275,10 @@ cut-down (128 × 32, 0.129 ns a bin) the gap is bin 10 alone (t = 1.161 ns) and 
 regularizer rows against the whole-axis deck's 118; at full resolution (512 × 256, 0.0157 ns a bin)
 the same δ would leave 13 bins. **The caution that decided where it is used**: where the gap's bins
 are narrower than the instrument's temporal blur, neighbouring unregularized bins are not
-determined one by one, since the data constrain their sum through the temporal IRF and nothing
-constrains their difference. Phase 4.C's full-resolution trial, made once by Level 2 and not
-re-run, found the jumps sharper but the jump-window RSS 1.25 times the whole-axis fit's, with 13 of
+determined one by one, since the temporal IRF averages neighbouring bins together, so the data
+constrain their sum well and their difference only weakly. Phase 4.C's full-resolution trial,
+made once by Level 2 and not re-run, found the jumps sharper but the jump-window RSS 1.25 times
+the whole-axis fit's, with 13 of
 the gap's fitted values at or near a bound (a bin there is 0.016 ns against the 0.05 ns temporal
 IRF), so the piecewise deck is compared at cut-down only, where one bin (0.129 ns) is wider than
 the IRF (spec D25). The cut-down comparison is the slow tier's FR9 and

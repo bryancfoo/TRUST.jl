@@ -6,6 +6,8 @@
 # weight -- and WeightScanResult gains no field. The caller asks for it after a scan and reads
 # the estimate, its bracket and every curvature; the weight is still the user's to choose.
 
+using Printf: @printf, @sprintf
+
 """
     LCurveCorner
 
