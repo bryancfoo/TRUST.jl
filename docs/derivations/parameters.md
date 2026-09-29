@@ -71,6 +71,20 @@ therefore guarantees `a <= x <= b` and finiteness for every finite `y`, never st
 the extremes; `FittedVariable`'s own `init` is required strictly inside precisely because *that*
 value is read once and never subject to this saturation the way an optimizer's iterate can be.
 
+**Near a bound, and the saturation warning** (Phase 4.D, Step 4.D.1;
+[OQ-49](../../dev/open_questions.md#oq-49)). An iterate whose `x` is within `BOUND_PROXIMITY_TOL =
+1e-3` of the range `b − a` from a bound has `dx/dy ≤ 1e-3 (b − a)`, so a unit step in `y` moves `x` by
+at most a thousandth of the range and the coordinate has in effect stopped: L-BFGS can throw one
+coordinate there in a single line search and leave it, while the rest of the fit converges normally
+(Phase 4.B's A14: TS2's bin 1 `m_e` on 2.0). `FitResult.near_bound` flags such an entry; `solve`
+relabels a gradient-norm stop `:saturated` only when `SATURATION_FRACTION = 0.5` of the coordinates
+are flagged, and `gn_decrease` leaves flagged entries out, so a few saturated coordinates pass both.
+**`fit(deck)` therefore warns on any flagged fitted entry**, naming each variable and its bins
+(`_warn_near_bound`), and the result file lists them (`fit/near_bound_entries/*`,
+`data_layout.md` Section 3). The warning is a report: `converged` keeps its meaning
+([OQ-36](../../dev/open_questions.md#oq-36)) and nothing is restarted or refitted. The remedy is the
+deck's, not the fitter's: do not put a bound where the answer may lie.
+
 ## 2. The expression grammar
 
 A dependent's text is parsed with `Meta.parse` and lowered into a typed tree

@@ -69,6 +69,32 @@ function _near_bound_fraction(result::FitResult)
 end
 
 """
+    _near_bound_entries(result::FitResult) -> Vector{@NamedTuple{variable::String, bin::Int, bound::Symbol}}
+
+Every fitted entry of `result` within `BOUND_PROXIMITY_TOL` of a bound (Phase 4.D spec D6,
+[OQ-49](../../dev/open_questions.md#oq-49) option (a)): one `(variable, bin, bound)` per `true` in
+`result.near_bound[v.name]`, over the **fitted** variables (`v.vary`), exactly the entries
+`_near_bound_fraction` counts, in `pspec.variables` order and then ascending bin. `bin` is the bin's
+index on the fitted axis for a time-varying variable and `0` for a scalar one, which has no bin;
+`bound` is `:lower` or `:upper`, whichever bound the value is nearer, the rule `show(::FitResult)`
+prints. A time-varying variable's `NaN` outside its own interval is never near a bound
+(`_near_bound(NaN, a, b)` is `false`), so it never appears. A report: nothing reads it to change a
+fit, and `converged` does not depend on it (OQ-36).
+"""
+function _near_bound_entries(result::FitResult)
+    entries = @NamedTuple{variable::String, bin::Int, bound::Symbol}[]
+    for v in result.pspec.variables
+        v.vary || continue
+        vals = result.values[v.name]
+        for j in findall(result.near_bound[v.name])
+            bound = vals[j] - v.lower <= v.upper - vals[j] ? :lower : :upper
+            push!(entries, (variable=v.name, bin=v.time_varying ? j : 0, bound=bound))
+        end
+    end
+    return entries
+end
+
+"""
     _iso8601_utc_now() -> String
 
 The current UTC time as an ISO-8601 string with an explicit `"Z"` (UTC) suffix, millisecond
@@ -147,6 +173,12 @@ a loud error (`"scatter was computed at a different θ than result.theta"`).
 All three groups are written inside `otis-result-3` (D17 forbids a *second* bump within the phase,
 not a dataset added inside the one bump already made); **RE1's exact key set is unchanged**, since
 none is written without its keyword.
+
+**`fit/near_bound_entries/*` (Phase 4.D spec D7), only when some fitted entry is near a bound**:
+`variable` (`String`), `bin` (`Int64`, the bin on the fitted axis, `0` for a scalar variable) and
+`bound` (`"lower"` or `"upper"`), one element per entry of `_near_bound_entries(result)`, in its
+order. Written for every caller, with no keyword, since it is read off `result` alone, as
+`fit/near_bound_fraction` is; inside `otis-result-3`, and RE1's fixture has no such entry.
 
 When `problem` is given, `problem.pspec === result.pspec` is required (a loud error otherwise,
 naming what to pass instead): `write_result` has no other way to know the problem it is given is
@@ -234,6 +266,13 @@ function write_result(path::AbstractString, result::FitResult;
         f["fit/status"] = string(result.status)
         f["fit/termination"] = string(result.termination)
         f["fit/near_bound_fraction"] = _near_bound_fraction(result)
+        # Phase 4.D spec D7: the near-bound entries listed, only when there is at least one.
+        entries = _near_bound_entries(result)
+        if !isempty(entries)
+            f["fit/near_bound_entries/variable"] = String[e.variable for e in entries]
+            f["fit/near_bound_entries/bin"] = Int64[e.bin for e in entries]
+            f["fit/near_bound_entries/bound"] = String[string(e.bound) for e in entries]
+        end
         gn_decrease === nothing || (f["fit/gn_decrease"] = Float64(gn_decrease))
         f["fit/optimizer"] = result.optimizer
         f["fit/elapsed"] = Float64(result.elapsed)
@@ -368,6 +407,10 @@ themselves `Dict{String,Vector{Float64}}` and `rss_unreg` `Dict{String,Float64}`
 file carries no ground truth). `fit.gn_decrease` is `nothing` when the file carries none (Phase
 4.B spec D5).
 
+**`fit.near_bound_entries`** (Phase 4.D spec D7): `nothing` when the file carries no
+`fit/near_bound_entries/*` group, else `(; variable, bin, bound)`, a `Vector{String}`, a
+`Vector{Int64}` and a `Vector{String}` of one element per entry.
+
 **`laplace` (D47)**: `nothing` when the file carries no `laplace/*` group, else `(; decrease,
 sigma_post, sigma_samp, near_bound)`, `sigma_post`/`sigma_samp`/`near_bound` each
 `Dict{String,Vector}` keyed by variable name.
@@ -432,6 +475,9 @@ function read_result(path::AbstractString)
             near_bound_fraction=f["fit/near_bound_fraction"], optimizer=f["fit/optimizer"],
             elapsed=f["fit/elapsed"],
             gn_decrease=haskey(f, "fit/gn_decrease") ? f["fit/gn_decrease"] : nothing,
+            near_bound_entries=haskey(f, "fit/near_bound_entries") ?
+                (variable=f["fit/near_bound_entries/variable"], bin=f["fit/near_bound_entries/bin"],
+                 bound=f["fit/near_bound_entries/bound"]) : nothing,
         )
 
         trajectory = (

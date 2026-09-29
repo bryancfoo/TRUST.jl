@@ -143,6 +143,10 @@ end
     @test chi2n_epw_joint <= 1.1 * chi2n_epw_alone
     @test chi2n_iaw_joint <= 1.1 * chi2n_iaw_alone
 
+    # Phase 4.D spec D9: the saturation warning fit(deck) prints (spec D5), on the staged fit,
+    # printed beside the recorded failure below (bin 1's m_e on its lower bound 2.0, Phase 4.B's
+    # A14). A printed line only: nothing is asserted on it, and the assertion below is unchanged.
+    OTIS._warn_near_bound(st.result)
     @test sum(count, values(st.result.near_bound)) == 0
 
     @info "TS2 chi2/n" chi2n_epw_joint chi2n_epw_alone chi2n_iaw_joint chi2n_iaw_alone

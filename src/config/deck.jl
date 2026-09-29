@@ -1670,6 +1670,53 @@ function _warn_fit_minimum(result::FitResult, decrease::Real, fraction::Real)
 end
 
 """
+    _near_bound_message(result::FitResult, entries) -> String
+
+The text of `_warn_near_bound`'s warning (Phase 4.D spec D5): a first line with the count, then one
+line per fitted variable with an entry, `"  <name>: bin 1 (lower bound 2.0)"`, `"bins 3, 4 (upper
+bound 300.0)"`, or `"scalar (upper bound 150.0)"` for a scalar variable, the lower bound's entries
+before the upper's, variables in `pspec.variables` order.
+"""
+function _near_bound_message(result::FitResult, entries)
+    n = length(entries)
+    head = n == 1 ? "fit: 1 fitted entry is" : "fit: $n fitted entries are"
+    lines = String[head * " within BOUND_PROXIMITY_TOL of a bound, where dx/dy -> 0 and an entry " *
+                   "may have stalled short of a minimum (the result is as fitted; `converged` does not see this):"]
+    for v in result.pspec.variables
+        mine = [e for e in entries if e.variable == v.name]
+        isempty(mine) && continue
+        parts = String[]
+        for (side, bnd) in ((:lower, v.lower), (:upper, v.upper))
+            bins = [e.bin for e in mine if e.bound === side]
+            isempty(bins) && continue
+            place = bins == [0] ? "scalar" : (length(bins) == 1 ? "bin " : "bins ") * join(bins, ", ")
+            push!(parts, "$place ($side bound $bnd)")
+        end
+        push!(lines, "  $(v.name): " * join(parts, "; "))
+    end
+    return join(lines, "\n")
+end
+
+"""
+    _warn_near_bound(result::FitResult) -> Vector{@NamedTuple{variable::String, bin::Int, bound::Symbol}}
+
+[OQ-49](../../dev/open_questions.md#oq-49) option (a), the user's decision of 2026-09-29 (Phase 4.D
+spec D5): one `@warn` when **any** fitted entry of `result` is within `BOUND_PROXIMITY_TOL` of a
+bound, naming each variable and its bins (`_near_bound_message`), silent when there is none;
+returns `_near_bound_entries(result)` either way. It changes nothing: the fit, its `converged` and
+its `status` (OQ-36) and the result `fit(deck)` writes are exactly as they would be without it.
+`SATURATION_FRACTION`'s warning (`_warn_fit_minimum`) still fires beside it at its own threshold;
+this one sees the single saturated coordinate that one cannot (Phase 4.B's A14). Called by
+`fit(deck)` after `solve`, and by the slow tier's TS2 and FR11 on fits `fit(deck)` does not make.
+"""
+function _warn_near_bound(result::FitResult)
+    entries = _near_bound_entries(result)
+    isempty(entries) && return entries
+    @warn _near_bound_message(result, entries) near_bound_fraction = _near_bound_fraction(result) status = result.status converged = result.converged
+    return entries
+end
+
+"""
     fit(path::AbstractString) -> FitResult
     fit(deck::Deck) -> FitResult
 
@@ -1691,6 +1738,12 @@ OQ-36 says and is not changed: a converged fit may still warn. The check costs o
 128` on the two-channel problem, about a minute at `ntheta = 768` on `examples/epw_ablation.toml`'s
 full-resolution problem (Phase 4.B spec D28, measured 2026-09-26).
 
+**The saturation warning** (Phase 4.D spec D5, [OQ-49](../../dev/open_questions.md#oq-49) option
+(a)): after the minimum check, `fit` calls `_warn_near_bound(result)`, one warning naming every
+fitted entry within `BOUND_PROXIMITY_TOL` of a bound (a variable and its bins, or `scalar`), silent
+when there is none, and `write_result` lists the same entries in `fit/near_bound_entries/*`. Neither
+changes the fit: its `theta`, `converged` and `status` are `solve`'s.
+
 Spec D33, D40.
 """
 function fit(deck::Deck)
@@ -1701,6 +1754,7 @@ function fit(deck::Deck)
     result = solve(problem, optimizer; start=start)
     decrease = _fit_gn_decrease(problem, result)
     _warn_fit_minimum(result, decrease, _near_bound_fraction(result))
+    _warn_near_bound(result)
     dir = deck.sections["output"]["dir"]
     mkpath(dir)
     eff = effective_deck(deck, problem, optimizer)

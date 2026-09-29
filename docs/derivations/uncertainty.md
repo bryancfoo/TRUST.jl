@@ -71,6 +71,11 @@ column of `J` is *identically* zero and `JᵀJ` restricted to the full set is si
 — Level 2 measured eigenvalues of -2.2e-10 with a near-bound entry left in, and a `cholesky` call
 over that set throws `PosDefException`.
 
+A near-bound entry left out here is not left out of the record: `fit(deck)` names every one in a
+warning and the result file lists them (`_warn_near_bound`, `fit/near_bound_entries/*`, Phase 4.D
+spec D5, D7), so a small `gn_decrease` with entries on their bounds reads "at a minimum over the
+free entries", never "at a minimum".
+
 ## 4. `polish`: reaching the minimum
 
 From a starting θ (typically an optimizer's own "converged" result, D43's own table shows this can

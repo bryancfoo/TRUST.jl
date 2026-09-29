@@ -399,3 +399,23 @@ const _FR_PIECEWISE = _fr_piecewise()
     @test r.whole.converged && r.pw.converged
     @test r.mean_ratio < _FR_PIECEWISE_BOUND
 end
+
+# ------------------------------------------------------------------------------------------
+# FR11 (Phase 4.D spec D9): the near-bound entries of the three reproductions' reported fits
+# ------------------------------------------------------------------------------------------
+#
+# The saturation warning fit(deck) prints (spec D5), on the fit each reproduction reports: EPW at
+# Lambda = 2e-4 (FR2's), multi-flow at 5e-3 (FR4's) and the shock at 1e-1 (FR6's), which a
+# weight_scan and _fr_shown make and fit(deck) never sees. Reported, not asserted: the one assertion
+# per fit checks only that the warning's list is the fit's own flags. Phase 4.C summary A3 found 30
+# entries on the shock's fit at full resolution; at cut-down Level 2 measured 19 (EPW), 30
+# (multi-flow) and 0 (shock, so its warning is silent) on 2026-09-29.
+
+@testset "FR11: the near-bound entries of the reproductions' reported fits (reported)" begin
+    for (label, r) in (("EPW, Lambda = 2e-4", _FR_EPW.shown), ("multi-flow, Lambda = 5e-3", _FR_MULTIFLOW.shown),
+                       ("shock, Lambda = 1e-1", _FR_SHOCK.scan.results[_FR_SHOCK.idx_b]))
+        entries = OTIS._warn_near_bound(r)
+        @info "FR11 $label: the near-bound entries" entries = length(entries) near_bound_fraction = OTIS._near_bound_fraction(r) status = r.status converged = r.converged
+        @test length(entries) == sum(count(r.near_bound[v.name]) for v in r.pspec.variables if v.vary)
+    end
+end

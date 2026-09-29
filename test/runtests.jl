@@ -167,6 +167,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("deck")
         @safetestset "deck" begin include("config/test_deck.jl") end
     end
+    if _wanted("near-bound warning")
+        @safetestset "near-bound warning" begin include("config/test_deck_near_bound.jl") end
+    end
     if _wanted("channel deck")
         @safetestset "channel deck" begin include("config/test_channel_deck.jl") end
     end

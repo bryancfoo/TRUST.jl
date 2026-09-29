@@ -193,6 +193,9 @@ shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
 | `fit/termination` | `String` | scalar, Optim's finer code (`:none` for the non-Optim optimizers) | yes |
 | `fit/near_bound_fraction` | `Float64` | scalar, `_near_bound_fraction(result)` | yes |
 | `fit/gn_decrease` | `Float64` | scalar, the Gauss–Newton predicted decrease at `fit/theta` over the free entries; `NaN` when `JᵀJ` there is not positive definite (Phase 4.B spec D5) | only when `write_result` is given it, which `fit(deck)` always does |
+| `fit/near_bound_entries/variable` | `String` | `(N_nb)`: the variable of each fitted entry within `BOUND_PROXIMITY_TOL` of a bound, in `pspec.variables` order, then ascending bin | only when there is at least one such entry (Phase 4.D spec D7) |
+| `fit/near_bound_entries/bin` | `Int64` | `(N_nb)`: the entry's bin on the fitted axis; `0` for a scalar variable | with `variable` |
+| `fit/near_bound_entries/bound` | `String` | `(N_nb)`: `"lower"` or `"upper"`, the bound the value is nearer | with `variable` |
 | `fit/elapsed` | `Float64` | scalar, seconds | yes |
 | `trajectory/iteration` | `Int64` | `(n_iter)` | yes |
 | `trajectory/objective`, `trajectory/chi2`, `trajectory/R` | `Float64` | `(n_iter)` | yes |
@@ -217,6 +220,13 @@ file's own `scan/weights`, `scan/chi2` and `scan/R` by `lcurve_corner(r.scan.wei
 r.scan.R)` (`r = read_result(path)`), bitwise the estimate the script that wrote the file saw, the
 member fits' convergence flags apart (the file carries each member's `scan/status`, not its
 `converged`).
+
+**`fit/near_bound_entries/*` is optional inside `otis-result-3`** (Phase 4.D spec D7): written, by
+every caller of `write_result`, only when some fitted (`vary`) variable has an entry within
+`BOUND_PROXIMITY_TOL` of a bound, one element per entry, the same entries `fit(deck)`'s saturation
+warning names; a file without it reads back `fit.near_bound_entries === nothing`. It is the list
+form of the `variables/<name>/near_bound` flags over the fitted variables (a frozen variable's
+flags are written there and never listed here), so the two always agree (NB4).
 
 **`fit/chi2` and `fit/npixels` are the weighted total and the channel sum** (Step 4.A.3b, D40):
 `fit/chi2 = Sigma_c w_c chi2_c` (what the optimizer minimized) and `fit/npixels = Sigma_c n_c`,
