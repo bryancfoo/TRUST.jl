@@ -210,3 +210,34 @@ EPW χ²/n near its sharp feature**: with the outlying bin left out it reads 9.2
 hypothesis said, but by about a factor 3 over `Kappa`, not 13. **Nothing was changed on the strength
 of it** (OQ-50, option (a)): the table, the series, the fallback and the forward model are as they
 were.
+
+## 8. The one-bin excursion: the model's wavelength sampling (Step 4.E.1)
+
+Section 7's fit leaves one time bin's m far from the truth although it converged (bin 25, m 5.4658
+against 4.6111). `examples/diagnostics/generalized_normal_excursion.jl` (Phase 4.E spec D12) measures
+why, in the order [OQ-52](../../dev/open_questions.md#oq-52) sets.
+
+**The derivatives are correct.** At the fit, central differences of the objective agree with its AD
+gradient within 3.5e-6 of each coordinate's curvature scale, along bin 25's and bin 21's four
+coordinates, and at bin 25's largest EPW pixel the m-partials of R, πφ′ and φ agree with central
+differences of this table's generator within 1.7e-8. **The fit is a genuine local minimum**: a refit
+started from the truth stays there (m 4.5251), with an objective 2.59e5 lower and EPW χ²/n 9.6179
+against Section 7's 41.2117. The staged fit's EPW-only stage puts bin 25 at m 5.4798 from the deck's
+init of 3.0; the same staged fit from an init of 4.5 reaches the truth's basin.
+
+**The minimum is made by the forward model's wavelength sampling.** At large m the flat top leaves the
+electron-plasma-wave resonance (ξ ≈ 1.9) almost undamped: dφ/dx there is −5.544e-4 at the fitted m and
+−4.037e-3 at the truth. So the resonance's full width at half maximum falls to 0.203 of a wavelength
+pixel (1.395 at the truth; one pixel is 0.157 nm, the spectral instrument function 0.5 nm). The model
+evaluates the spectrum at each pixel's centre wavelength and then convolves those samples with the
+instrument function, where a real spectrometer convolves the continuous spectrum first. The two agree
+while the spectrum varies slowly across a pixel and part when it does not: at the fit the resonance's
+peak falls between two pixel centres, 16.7 times the largest value a pixel sees, and the objective along
+m swings between humps and dips as the peak moves across the pixel grid. The fit sits in one of those
+dips.
+
+**What it means.** Every pixel stays inside `GN_TABLE`, and nothing in the shape, its table or its
+derivatives is wrong; any electron shape whose electron-plasma-wave resonance becomes narrower than a
+wavelength pixel meets the same approximation, and for this one that happens at large m. The synthetic
+data are made by the same model, so the examples cannot see it as a misfit. **Nothing was changed** (the
+user, 2026-09-30: record the diagnosis, no fix).

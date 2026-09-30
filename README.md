@@ -162,6 +162,17 @@ two-channel example is mostly one time bin whose fitted exponent leaves the trut
 the camera's point spread; the point spread accounts for a smaller excess near the profile's peak.
 Nothing was changed on the strength of it.
 
+**Phase 4.E (the `GeneralizedNormal` excursion) is complete.** The one time bin whose fitted exponent
+left the truth in Phase 4.D's two-channel fit (m 5.4658 against 4.6111) was diagnosed by
+`examples/diagnostics/generalized_normal_excursion.jl`. The derivatives are correct and the fit is a
+genuine local minimum; a refit from the truth finds a basin whose EPW χ²/n is 9.6179 rather than
+41.2117. The minimum comes from the forward model evaluating the spectrum at pixel-centre wavelengths
+before the spectral instrument function: at large m the flat-topped shape leaves the
+electron-plasma-wave resonance almost undamped and a fifth of a pixel wide, so the sampled model can
+hide its peak between pixels. A real spectrometer blurs the spectrum before it reaches the pixels, so
+this is an approximation of the model, not of the instrument; it matters only for a resonance narrower
+than a wavelength pixel. Nothing was changed.
+
 ## Installing and testing
 
 ```
