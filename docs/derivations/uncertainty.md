@@ -300,3 +300,11 @@ model's own frozen σ. **The coverage tests (`test/slow/test_uncertainty.jl`, D5
 intervals can be checked against a noise model with no such mismatch; **the two-channel example
 (D55) keeps `StreakCameraNoise`, as it always has, and reports the ratio without asserting it** —
 that is the finding this section records, not something to fix.
+
+**Measured on a fit, 2026-09-29** (Phase 4.D spec D18, `examples/diagnostics/generalized_normal_blur.jl`):
+on the two-channel shapes problem with `Kappa` electrons, the staged fit reads χ²/n 3.2335 (EPW) and
+2.6375 (IAW) with the point spread, evenly across the time bins, and 0.9956 and 1.0250 with the spread
+switched off at synthesis (`sigma_px = 0`): the factor of about 3 is the averaged σ's understatement
+under the spread's correlation ([OQ-43](../../dev/open_questions.md#oq-43), deferred), not a misfit.
+(The scatter ratio of about half quoted above is from before Step 4.B.1 made σ the realized one;
+since then it reads 1.5 to 1.8, OQ-40's as-built record.)

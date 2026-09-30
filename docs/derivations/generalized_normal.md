@@ -181,3 +181,30 @@ table (`GeneralizedNormal(1.7)` at `ξ = 1.3`) **153 µs**; the fallback above t
 near the table's own `ξ` range (`GeneralizedNormal(12.0)` at `ξ = 1.3`) **39.0 µs**; the series
 (`GeneralizedNormal(3.5)` at `ξ = 12.0`) **940 ns**. Both fallback figures sit inside Level 2's
 D32 ranges (100–420 µs and 25–70 µs respectively).
+
+## 7. The two-channel fit's EPW χ²/n (Step 4.D.2)
+
+On the two-channel shapes problem (`examples/problems.jl`'s `shapes_problem(:generalized_normal)`,
+m(t) from 2.4 to 4.9), the staged fit of Step 4.B.5 reads EPW χ²/n **41.2117** against **3.2335** for
+`Kappa` on the same problem (Phase 4.B's A22). The hypothesis was the camera's point spread, which
+blurs the data's mean with a kernel the forward model does not carry
+([OQ-40](../../dev/open_questions.md#oq-40), B1 not ordered), acting on the flat-topped shape's
+sharp EPW feature. The test (`examples/diagnostics/generalized_normal_blur.jl`, Phase 4.D spec D18)
+re-synthesizes the problem with the spread off (`sigma_px = 0`) and refits it the same way, with
+`Kappa` as the control, since switching the spread off changes σ as well as the image.
+
+| | EPW χ²/n | without its worst bin | worst bin: χ²/n, fitted m against the truth | IAW χ²/n |
+|---|---|---|---|---|
+| `GeneralizedNormal`, spread on | 41.2117 | 9.2203 | 25: 1032.94, 5.4658 against 4.6111 | 3.0569 |
+| `GeneralizedNormal`, spread off | 4.8550 | 1.0418 | 29: 123.06, 5.0162 against 3.8875 | 1.0339 |
+| `Kappa`, spread on | 3.2335 | | | 2.6375 |
+| `Kappa`, spread off | 0.9956 | | | 1.0250 |
+
+**The spread is not the cause of the headline number.** Most of it is one time bin whose fitted m
+leaves the truth, with the spread and without it (a different bin each time), while every other bin
+fits: the fit converged, `gn_decrease` is 1e-7 or less, and no entry is near a bound, so one bin's m
+sits in another minimum, and why is not established. **The spread does raise the shape's EPW χ²/n
+near its sharp feature**: with the outlying bin left out it reads 9.2203 against `Kappa`'s 3.2335, the
+excess in the bins around the profile's peak, and 1.0418 with the spread off, as the hypothesis said,
+but by about a factor 3 over `Kappa`, not 13. **Nothing was changed on the strength of it** (OQ-50,
+option (a)): the table, the series, the fallback and the forward model are as they were.

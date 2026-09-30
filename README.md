@@ -151,6 +151,17 @@ is a third of the instrument's 0.05 ns temporal blur, so the data alone do not d
 bins one by one. A regularizer term whose interval reaches outside a selected variable's own
 interval is now refused, naming both, where it used to make the regularizer's value `NaN` silently.
 
+**Phase 4.D (consolidation) is complete.** `fit(deck)` now warns whenever a fitted entry ends within
+`BOUND_PROXIMITY_TOL` of one of its bounds, naming the variable and its bins, and the result file
+lists those entries (`fit/near_bound_entries`); the fit and its `converged` are unchanged. One
+coordinate stuck on a bound used to pass without a word: the slow tier's cut-down reproductions carry
+19 such entries on the EPW problem and 30 on the multi-flow one. A sweep of `src/` for comparisons
+on automatic-differentiation duals fixed 26 sites where a dual exactly at a boundary was admitted or
+refused differently from its plain value. And `GeneralizedNormal`'s EPW χ²/n of about 41 on the
+two-channel example is mostly one time bin whose fitted exponent leaves the truth, with or without
+the camera's point spread; the point spread accounts for a smaller excess near the profile's peak.
+Nothing was changed on the strength of it.
+
 ## Installing and testing
 
 ```
