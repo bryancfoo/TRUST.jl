@@ -636,3 +636,13 @@ _sg22_oracle(a, t) = quadgk(s -> s^(a - 1) * exp(-s), t, t + 1, Inf; rtol = 1e-1
     @test worst_plain <= 1e-12
     @test worst_dual <= 1e-12
 end
+
+# ------------------------------------------------------------------------------------------
+# SG23 (Phase 4.D spec D15): the dual-m constructor's guard compares the primal
+# ------------------------------------------------------------------------------------------
+
+@testset "SG23: the dual-m constructor's guard compares the primal (Phase 4.D spec D15)" begin
+    for s in (1.0, -1.0)
+        @test_throws "m must be positive" SuperGaussian(ForwardDiff.Dual(0.0, s))
+    end
+end

@@ -71,7 +71,10 @@ end
     CompareNode{F,L<:AbstractExprNode,R<:AbstractExprNode}
 
 A comparison `lhs f rhs`, `f` one of `<, <=, ==, !=, >, >=`, stored by value as a type parameter
-for the same reason as `CallNode`. Spec D6.
+for the same reason as `CallNode`. **Its operands are compared on their primal values**
+(`_primal_value`, Phase 4.D spec D14): ForwardDiff 1.x orders a dual at a tie by its partials, so
+at `x == 2` exactly a dual pass would otherwise take a different branch of a conditional than the
+plain pass at the same θ. Spec D6.
 """
 struct CompareNode{F,L<:AbstractExprNode,R<:AbstractExprNode} <: AbstractExprNode
     f::F
@@ -108,7 +111,7 @@ _eval(n::ConstNode, vals::AbstractVector{T}, t) where {T} = convert(T, n.value)
 _eval(n::SlotNode,  vals, t) = @inbounds vals[n.slot]
 _eval(::TimeNode,   vals::AbstractVector{T}, t) where {T} = convert(T, t)
 _eval(n::CallNode,  vals, t) = n.f(map(a -> _eval(a, vals, t), n.args)...)
-_eval(n::CompareNode, vals, t) = n.f(_eval(n.lhs, vals, t), _eval(n.rhs, vals, t))
+_eval(n::CompareNode, vals, t) = n.f(_primal_value(_eval(n.lhs, vals, t)), _primal_value(_eval(n.rhs, vals, t)))
 _eval(n::IfElseNode,  vals, t) = _eval(n.cond, vals, t) ? _eval(n.iftrue, vals, t) :
                                                           _eval(n.iffalse, vals, t)
 

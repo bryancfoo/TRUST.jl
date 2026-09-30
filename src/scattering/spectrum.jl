@@ -116,10 +116,10 @@ function _convective_gain(gain::Symbol, d, k, k_s, probe::ProbeBeam, collection:
     gain in (:convective, :weak) || throw(ArgumentError(
         "spectrum: gain must be :none, :convective or :weak; got :$gain"))
 
-    iszero(probe.a0_sq) && throw(ArgumentError(
+    iszero(_primal_value(probe.a0_sq)) && throw(ArgumentError(
         "_convective_gain: gain = :$gain needs the probe's intensity, but a0_sq == 0 " *
         "(build the ProbeBeam with intensity_wcm2 or intensity_wm2)"))
-    iszero(probe.diameter) && throw(ArgumentError(
+    iszero(_primal_value(probe.diameter)) && throw(ArgumentError(
         "_convective_gain: gain = :$gain needs the probe's beam diameter, but diameter == 0 " *
         "(build the ProbeBeam with diameter_um or diameter_m)"))
     s = sin(collection.theta)

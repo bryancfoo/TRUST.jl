@@ -50,7 +50,7 @@ function _validate_species_set(specs::Tuple, kind::String)
     end
 
     for sp in specs
-        (0 <= sp.fraction <= 1) || throw(ArgumentError(
+        (0 <= _primal_value(sp.fraction) <= 1) || throw(ArgumentError(
             "fraction $(sp.fraction) for species \"$(sp.name)\" is outside [0, 1]"))
     end
 
@@ -64,7 +64,7 @@ end
 function Plasma(; electrons, ions = (), kwargs...)
     n_e_raw = _si_value(:n_e, kwargs)
     _reject_extra_kwargs(kwargs, (:n_e_cm3, :n_e_m3))
-    n_e_raw > 0 || throw(ArgumentError("n_e must be positive; got $n_e_raw m^-3"))
+    _primal_value(n_e_raw) > 0 || throw(ArgumentError("n_e must be positive; got $n_e_raw m^-3"))
 
     electron_specs = Tuple(electrons)
     ion_specs = Tuple(ions)

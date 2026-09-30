@@ -517,3 +517,25 @@ end
     end
     @test all(M .=== EPW_MEASURE)
 end
+
+# ------------------------------------------------------------------------------------------
+# EF22 (Phase 4.D spec D15): the effects' guards compare primal values
+# ------------------------------------------------------------------------------------------
+
+@testset "EF22: the effects' guards compare primal values (Phase 4.D spec D15)" begin
+    template = Plasma(n_e_cm3=1e19, electrons=[electrons(T_eV=100.0)])
+    for s in (1.0, -1.0)
+        # an admissible zero is admitted, whatever the seed (effects.jl :213, :228, :292, :316)
+        @test ForwardDiff.value(KSmearing(half_angle_rad=ForwardDiff.Dual(0.0, s)).half_angle) === 0.0
+        @test ForwardDiff.value(reconstruct(KSmearing(half_angle_rad=0.0),
+            (half_angle=ForwardDiff.Dual(0.0, s),)).half_angle) === 0.0
+        @test ForwardDiff.value(GradientSmearing(template; leaf="electrons.e.T",
+            width=ForwardDiff.Dual(0.0, s)).width) === 0.0
+        @test ForwardDiff.value(reconstruct(GradientSmearing(template; leaf="electrons.e.T", width=0.0),
+            (width=ForwardDiff.Dual(0.0, s),)).width) === 0.0
+        # an inadmissible zero is refused, whatever the seed (:485, :562, :569)
+        @test_throws "sigma must be strictly positive" OTIS.GaussianKernel(ForwardDiff.Dual(0.0, s))
+        @test_throws "SpectralIRF: FWHM must be strictly positive" SpectralIRF(fwhm_m=ForwardDiff.Dual(0.0, s))
+        @test_throws "TemporalIRF: FWHM must be strictly positive" TemporalIRF(fwhm_s=ForwardDiff.Dual(0.0, s))
+    end
+end

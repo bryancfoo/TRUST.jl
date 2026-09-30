@@ -120,3 +120,15 @@ end
     @test_throws "ion \"D\" has charge 0" ion(name = "D", mass_amu = 2, charge = 0, T_eV = 300)
     @test_throws "ion \"D\" has charge -1; an ion's charge number must be a positive integer" ion(name = "D", mass_amu = 2, charge = -1, T_eV = 300)
 end
+
+# ------------------------------------------------------------------------------------------
+# S12 (Phase 4.D spec D15): the species guards compare primal values
+# ------------------------------------------------------------------------------------------
+
+@testset "S12: the species guards compare primal values (Phase 4.D spec D15)" begin
+    for s in (1.0, -1.0)
+        @test_throws "temperature must be positive" electrons(T_keV=ForwardDiff.Dual(0.0, s))
+        @test_throws "mass must be positive" ion(mass_kg=ForwardDiff.Dual(0.0, s), charge=1, T_eV=100.0)
+        @test_throws "temperature must be positive" ion(mass_amu=2.014, charge=1, T_keV=ForwardDiff.Dual(0.0, s))
+    end
+end

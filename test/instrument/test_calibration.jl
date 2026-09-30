@@ -234,3 +234,16 @@ end
     @test_throws "dispersion_scale must satisfy" reconstruct(e, (offset=0.0, dispersion_scale=1.0))
     @test_throws "dispersion_scale must satisfy" reconstruct(e, (offset=0.0, dispersion_scale=-1.0))
 end
+
+# ------------------------------------------------------------------------------------------
+# WC14 (Phase 4.D spec D15): the dispersion-scale check compares the primal value
+# ------------------------------------------------------------------------------------------
+
+@testset "WC14: the dispersion-scale check compares the primal value (Phase 4.D spec D15)" begin
+    for s in (1.0, -1.0), edge in (1.0, -1.0)
+        @test_throws "abs(dispersion_scale) < 1" WavelengthCalibration(lambda_offset_m=0.0,
+            dispersion_scale=ForwardDiff.Dual(edge, s))
+        @test_throws "abs(dispersion_scale) < 1" reconstruct(WavelengthCalibration(lambda_offset_m=0.0),
+            (offset=0.0, dispersion_scale=ForwardDiff.Dual(edge, s)))
+    end
+end

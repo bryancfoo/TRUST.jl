@@ -40,11 +40,11 @@ function ProbeBeam(; kwargs...)
     _reject_extra_kwargs(kwargs, (:lambda_probe_nm, :lambda_probe_m, :polarization_deg,
         :polarization_rad, :intensity_wcm2, :intensity_wm2, :diameter_um, :diameter_m))
 
-    lambda_raw > 0 || throw(ArgumentError(
+    _primal_value(lambda_raw) > 0 || throw(ArgumentError(
         "ProbeBeam: lambda_probe must be positive; got $lambda_raw m"))
-    intensity_raw >= 0 || throw(ArgumentError(
+    _primal_value(intensity_raw) >= 0 || throw(ArgumentError(
         "ProbeBeam: intensity must be non-negative; got $intensity_raw W/m^2"))
-    diameter_raw >= 0 || throw(ArgumentError(
+    _primal_value(diameter_raw) >= 0 || throw(ArgumentError(
         "ProbeBeam: diameter must be non-negative; got $diameter_raw m"))
 
     FT = float(promote_type(typeof(lambda_raw), typeof(polarization_raw), typeof(intensity_raw),
@@ -152,7 +152,7 @@ function Collection(; k_model::Symbol=:exact, k_probe=nothing, k_scatter=nothing
     _reject_extra_kwargs(kwargs, (:theta_deg, :theta_rad, :lambda_center_nm, :lambda_center_m,
         :dispersion_nm_px, :dispersion_m_px, :npixels, :reference_pixel))
 
-    0 <= theta_raw <= π || throw(ArgumentError(
+    0 <= _primal_value(theta_raw) <= π || throw(ArgumentError(
         "Collection: theta must be between 0 and pi radians; got $theta_raw rad"))
 
     FT = float(promote_type(typeof(theta_raw), typeof(lambda_center_raw), typeof(dispersion_raw),
@@ -219,13 +219,13 @@ function wavevector(probe::ProbeBeam, collection::Collection, lambda_s, plasma::
 
     if collection.k_model === :exact
         k = FTk(sqrt(k_i^2 + k_s^2 - 2 * k_i * k_s * cos(collection.theta)))
-        if iszero(k)
+        if iszero(_primal_value(k))
             throw(ArgumentError("wavevector: k = 0 at theta = $(collection.theta) rad with lambda_s " *
                 "equal to the probe wavelength; this geometry probes no wavevector"))
         end
     else
         s = sin(collection.theta / 2)
-        if iszero(s)
+        if iszero(_primal_value(s))
             throw(ArgumentError("wavevector: k = 0 at theta = $(collection.theta) rad with lambda_s " *
                 "equal to the probe wavelength; this geometry probes no wavevector"))
         end
@@ -301,7 +301,7 @@ end
 # --- show methods (spec D29) ---
 
 function Base.show(io::IO, p::ProbeBeam)
-    lam = round(lambda_from_si(p.lambda, :lambda_nm); sigdigits=12)
+    lam = round(lambda_from_si(_primal_value(p.lambda), :lambda_nm); sigdigits=12)
     print(io, "ProbeBeam($lam nm)")
 end
 
@@ -314,7 +314,7 @@ function Base.show(io::IO, ::MIME"text/plain", p::ProbeBeam)
 end
 
 function Base.show(io::IO, c::Collection)
-    th = round(theta_from_si(c.theta, :theta_deg); sigdigits=12)
+    th = round(theta_from_si(_primal_value(c.theta), :theta_deg); sigdigits=12)
     print(io, "Collection($th deg, :$(c.k_model))")
 end
 

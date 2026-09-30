@@ -210,7 +210,7 @@ end
 function KSmearing(; nodes::Integer=5, kwargs...)
     half_angle_raw = _si_value(:half_angle, kwargs)
     _reject_extra_kwargs(kwargs, (:half_angle_deg, :half_angle_rad))
-    (isfinite(half_angle_raw) && half_angle_raw >= 0) || throw(ArgumentError(
+    (isfinite(half_angle_raw) && _primal_value(half_angle_raw) >= 0) || throw(ArgumentError(
         "KSmearing: half angle must be finite and non-negative; got $half_angle_raw rad"))
     _check_nodes(nodes)
     offsets, weights = _legendre_offsets_weights(half_angle_raw, nodes)
@@ -225,7 +225,7 @@ parameters(e::KSmearing) = (half_angle=e.half_angle,)
 
 function reconstruct(::KSmearing{NQ}, values::NamedTuple) where {NQ}
     half_angle = values.half_angle
-    (isfinite(half_angle) && half_angle >= 0) || throw(ArgumentError(
+    (isfinite(half_angle) && _primal_value(half_angle) >= 0) || throw(ArgumentError(
         "KSmearing: half angle must be finite and non-negative; got $half_angle rad"))
     offsets, weights = _legendre_offsets_weights(half_angle, Val(NQ))
     FT = eltype(offsets)
@@ -289,7 +289,7 @@ function GradientSmearing(template::Plasma; leaf::AbstractString, width::Real, n
         throw(ArgumentError(
             "GradientSmearing: smear the density as \"n_e\" with a dimensionless (log) width, not \"$leaf\""))
     end
-    (isfinite(width) && width >= 0) || throw(ArgumentError(
+    (isfinite(width) && _primal_value(width) >= 0) || throw(ArgumentError(
         "GradientSmearing: width must be finite and non-negative; got $width"))
     _check_nodes(nodes)
     si_path, factor = _leaf_si_path(leaf)
@@ -313,7 +313,7 @@ parameters(e::GradientSmearing) = (width=e.width,)
 
 function reconstruct(e::GradientSmearing{NQ}, values::NamedTuple) where {NQ}
     width = values.width
-    (isfinite(width) && width >= 0) || throw(ArgumentError(
+    (isfinite(width) && _primal_value(width) >= 0) || throw(ArgumentError(
         "GradientSmearing: width must be finite and non-negative; got $width"))
     offsets, weights = _hermite_offsets_weights(width, Val(NQ))
     FT = eltype(offsets)
@@ -387,7 +387,7 @@ function _check_calibration(offset, dispersion_scale)
         "WavelengthCalibration: offset must be finite; got $offset m"))
     isfinite(dispersion_scale) || throw(ArgumentError(
         "WavelengthCalibration: dispersion_scale must be finite; got $dispersion_scale"))
-    abs(dispersion_scale) < 1 || throw(ArgumentError(
+    abs(_primal_value(dispersion_scale)) < 1 || throw(ArgumentError(
         "WavelengthCalibration: dispersion_scale must satisfy abs(dispersion_scale) < 1; got $dispersion_scale"))
     return nothing
 end
@@ -482,7 +482,7 @@ using `sigma = 0` as the identity.**
 struct GaussianKernel{FT<:Real} <: AbstractIRFKernel
     sigma::FT
     function GaussianKernel{FT}(sigma::FT) where {FT<:Real}
-        (isfinite(sigma) && sigma > 0) || throw(ArgumentError(
+        (isfinite(sigma) && _primal_value(sigma) > 0) || throw(ArgumentError(
             "GaussianKernel: sigma must be strictly positive; got $sigma"))
         return new{FT}(sigma)
     end
@@ -559,14 +559,14 @@ end
 function SpectralIRF(; kwargs...)
     fwhm_raw = _si_value(:fwhm_lambda, kwargs)
     _reject_extra_kwargs(kwargs, (:fwhm_nm, :fwhm_m))
-    fwhm_raw > 0 || throw(ArgumentError("SpectralIRF: FWHM must be strictly positive; got $fwhm_raw m"))
+    _primal_value(fwhm_raw) > 0 || throw(ArgumentError("SpectralIRF: FWHM must be strictly positive; got $fwhm_raw m"))
     return SpectralIRF(GaussianKernel(_sigma_from_fwhm(fwhm_raw)))
 end
 
 function TemporalIRF(; kwargs...)
     fwhm_raw = _si_value(:fwhm_t, kwargs)
     _reject_extra_kwargs(kwargs, (:fwhm_ns, :fwhm_s))
-    fwhm_raw > 0 || throw(ArgumentError("TemporalIRF: FWHM must be strictly positive; got $fwhm_raw s"))
+    _primal_value(fwhm_raw) > 0 || throw(ArgumentError("TemporalIRF: FWHM must be strictly positive; got $fwhm_raw s"))
     return TemporalIRF(GaussianKernel(_sigma_from_fwhm(fwhm_raw)))
 end
 

@@ -754,3 +754,13 @@ end
         @test lhs === rhs
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# KP26 (Phase 4.D spec D15): the constructor's guard compares the primal
+# ------------------------------------------------------------------------------------------
+
+@testset "KP26: the constructor's guard compares the primal (Phase 4.D spec D15)" begin
+    for s in (1.0, -1.0)
+        @test_throws "kappa must be finite and greater than 3/2" Kappa(ForwardDiff.Dual(1.5, s))
+    end
+end

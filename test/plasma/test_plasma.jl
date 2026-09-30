@@ -182,3 +182,18 @@ end
     @test typeof(p.ions["C"].T) === FT
     @test isconcretetype(typeof(p))
 end
+
+# ------------------------------------------------------------------------------------------
+# Q19 (Phase 4.D spec D15): the plasma's guards compare primal values
+# ------------------------------------------------------------------------------------------
+
+@testset "Q19: the plasma's guards compare primal values (Phase 4.D spec D15)" begin
+    for s in (1.0, -1.0)
+        p1 = Plasma(n_e_cm3=1e19, electrons=[electrons(T_eV=100.0, fraction=ForwardDiff.Dual(1.0, s))])
+        @test ForwardDiff.value(p1.electrons.e.fraction) === 1.0
+        p2 = Plasma(n_e_cm3=1e19, electrons=[electrons(name="a", T_eV=100.0, fraction=ForwardDiff.Dual(0.0, s)),
+                                             electrons(name="b", T_eV=100.0, fraction=1.0)])
+        @test ForwardDiff.value(p2.electrons.a.fraction) === 0.0
+        @test_throws "n_e must be positive" Plasma(n_e_m3=ForwardDiff.Dual(0.0, s), electrons=[electrons(T_eV=100.0)])
+    end
+end

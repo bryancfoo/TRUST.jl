@@ -174,3 +174,18 @@ end
     @info "CG8 AD check" ad fd floor_
     @test isapprox(ad, fd; rtol=1e-6, atol=floor_)
 end
+
+# ------------------------------------------------------------------------------------------
+# CG9 (Phase 4.D spec D15): the gain's missing-input checks compare primal values
+# ------------------------------------------------------------------------------------------
+
+@testset "CG9: the gain's missing-input checks compare primal values (Phase 4.D spec D15)" begin
+    # Both checks come before _convective_gain reads its dielectric argument, so none is built.
+    collection = Collection(theta_deg=60, k_model=:exact)
+    for s in (1.0, -1.0)
+        probe_i = ProbeBeam(lambda_probe_nm=263.25, intensity_wm2=ForwardDiff.Dual(0.0, s), diameter_um=100.0)
+        @test_throws "a0_sq == 0" OTIS._convective_gain(:convective, nothing, 1.0, 1.0, probe_i, collection)
+        probe_d = ProbeBeam(lambda_probe_nm=263.25, intensity_wcm2=1e15, diameter_m=ForwardDiff.Dual(0.0, s))
+        @test_throws "diameter == 0" OTIS._convective_gain(:convective, nothing, 1.0, 1.0, probe_d, collection)
+    end
+end

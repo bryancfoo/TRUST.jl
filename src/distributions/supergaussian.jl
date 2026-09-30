@@ -139,7 +139,7 @@ matching exactly what a fit needs.
 Spec D3, D4; Phase 3.C spec D6; `docs/derivations/supergaussian.md`.
 """
 function SuperGaussian(m::ForwardDiff.Dual)
-    m > 0 || throw(ArgumentError("SuperGaussian: m must be positive; got $m"))
+    _primal_value(m) > 0 || throw(ArgumentError("SuperGaussian: m must be positive; got $m"))
     FT = promote_type(typeof(m), eltype(SG_TABLE.coeffs))
     m_p = FT(m)
     x0_p = FT(_sg_x0(m_p))

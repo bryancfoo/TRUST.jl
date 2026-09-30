@@ -92,7 +92,7 @@ always takes this route, since the table never serves `s > 1/2`.
 Section 10.1; spec D16; `docs/derivations/kappa.md`.
 """
 function Kappa(kappa::Real)
-    (isfinite(kappa) && kappa > 3 / 2) || throw(ArgumentError(
+    (isfinite(kappa) && _primal_value(kappa) > 3 / 2) || throw(ArgumentError(
         "Kappa: kappa must be finite and greater than 3/2; got $kappa"))
     FT = promote_type(typeof(kappa), eltype(KAPPA_TABLE.coeffs))
     k = FT(kappa)

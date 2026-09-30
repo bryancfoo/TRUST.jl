@@ -392,3 +392,31 @@ end
     @test_throws "disagrees with the collection's dispersion at bin" Experiment(
         trace = trace, probe = probe, collection = collection, lambda_m = axis_bad)
 end
+
+# ------------------------------------------------------------------------------------------
+# GE17 (Phase 4.D spec D15): ProbeBeam, Collection and wavevector compare primal values
+# ------------------------------------------------------------------------------------------
+
+@testset "GE17: ProbeBeam, Collection and wavevector compare primal values (Phase 4.D spec D15)" begin
+    for s in (1.0, -1.0)
+        # an admissible value exactly at its edge is admitted, whatever the seed (geometry.jl :45, :47, :155)
+        p = ProbeBeam(lambda_probe_nm=263.25, intensity_wm2=ForwardDiff.Dual(0.0, s),
+            diameter_m=ForwardDiff.Dual(0.0, s))
+        @test ForwardDiff.value(p.a0_sq) === 0.0 && ForwardDiff.value(p.diameter) === 0.0
+        @test ForwardDiff.partials(p.diameter)[1] === s
+        c = Collection(theta_rad=ForwardDiff.Dual(0.0, s))
+        @test ForwardDiff.value(c.theta) === 0.0 && ForwardDiff.partials(c.theta)[1] === s
+        # an inadmissible value exactly at its edge is refused, whatever the seed (:43, :222, :228)
+        @test_throws "lambda_probe must be positive" ProbeBeam(lambda_probe_m=ForwardDiff.Dual(0.0, s))
+        pr = ProbeBeam(lambda_probe_nm=263.25)
+        @test_throws "k = 0 at theta" wavevector(pr, Collection(theta_rad=0.0), pr.lambda,
+            Plasma(n_e_cm3=ForwardDiff.Dual(1e19, s), electrons=[electrons(T_eV=100.0)]))
+        @test_throws "k = 0 at theta" wavevector(pr, Collection(theta_rad=ForwardDiff.Dual(0.0, s),
+            k_model=:approximate), pr.lambda, Plasma(n_e_cm3=1e19, electrons=[electrons(T_eV=100.0)]))
+        # the one-line show of a dual probe or collection prints the primal (:304, :317)
+        @test sprint(show, ProbeBeam(lambda_probe_nm=ForwardDiff.Dual(263.25, s))) ==
+            sprint(show, ProbeBeam(lambda_probe_nm=263.25))
+        @test sprint(show, Collection(theta_deg=ForwardDiff.Dual(60.0, s))) ==
+            sprint(show, Collection(theta_deg=60.0))
+    end
+end

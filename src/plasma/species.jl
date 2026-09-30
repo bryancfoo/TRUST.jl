@@ -106,7 +106,7 @@ function electrons(; name = "e", f::F = Maxwellian(), fraction = 1, kwargs...) w
     T = _si_value(:T, kwargs)
     u = _si_value(:u, kwargs, 0.0)
     _reject_extra_kwargs(kwargs, (:name, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction))
-    T > 0 || throw(ArgumentError("temperature must be positive; got $T J for species \"$name\""))
+    _primal_value(T) > 0 || throw(ArgumentError("temperature must be positive; got $T J for species \"$name\""))
 
     mass = ELECTRON_MASS
     charge = -1
@@ -130,8 +130,8 @@ function ion(; name = "i", charge::Integer, f::F = Maxwellian(), fraction = 1, k
     T = _si_value(:T, kwargs)
     u = _si_value(:u, kwargs, 0.0)
     _reject_extra_kwargs(kwargs, (:name, :mass_amu, :mass_kg, :charge, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction))
-    mass > 0 || throw(ArgumentError("mass must be positive; got $mass kg for species \"$name\""))
-    T > 0 || throw(ArgumentError("temperature must be positive; got $T J for species \"$name\""))
+    _primal_value(mass) > 0 || throw(ArgumentError("mass must be positive; got $mass kg for species \"$name\""))
+    _primal_value(T) > 0 || throw(ArgumentError("temperature must be positive; got $T J for species \"$name\""))
     charge >= 1 || throw(ArgumentError("ion \"$name\" has charge $charge; an ion's charge number must be a positive integer (negative ions are out of scope)"))
 
     FT = float(promote_type(typeof(mass), typeof(u), typeof(T), typeof(fraction), _shape_eltype(f)))
