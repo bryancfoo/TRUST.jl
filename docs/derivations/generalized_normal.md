@@ -201,10 +201,12 @@ re-synthesizes the problem with the spread off (`sigma_px = 0`) and refits it th
 | `Kappa`, spread off | 0.9956 | | | 1.0250 |
 
 **The spread is not the cause of the headline number.** Most of it is one time bin whose fitted m
-leaves the truth, with the spread and without it (a different bin each time), while every other bin
-fits: the fit converged, `gn_decrease` is 1e-7 or less, and no entry is near a bound, so one bin's m
-sits in another minimum, and why is not established. **The spread does raise the shape's EPW χ²/n
-near its sharp feature**: with the outlying bin left out it reads 9.2203 against `Kappa`'s 3.2335, the
-excess in the bins around the profile's peak, and 1.0418 with the spread off, as the hypothesis said,
-but by about a factor 3 over `Kappa`, not 13. **Nothing was changed on the strength of it** (OQ-50,
-option (a)): the table, the series, the fallback and the forward model are as they were.
+leaves the truth, with the spread and without it (a different bin each time), while every other
+bin's m stays within 0.11 of the truth: the fit converged, `gn_decrease` is 4.746e-7 and 1.994e-7,
+far below the 1e-2 (`GN_DECREASE_WARN`) at which `fit(deck)` warns, and no entry is near a bound, so
+one bin's m sits in another minimum, and why is not established. **The spread does raise the shape's
+EPW χ²/n near its sharp feature**: with the outlying bin left out it reads 9.2203 against `Kappa`'s
+3.2335, the excess in the bins around the profile's peak, and 1.0418 with the spread off, as the
+hypothesis said, but by about a factor 3 over `Kappa`, not 13. **Nothing was changed on the strength
+of it** (OQ-50, option (a)): the table, the series, the fallback and the forward model are as they
+were.

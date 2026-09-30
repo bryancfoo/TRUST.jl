@@ -190,9 +190,9 @@ spectral IRF shows it (Phase 4.A: χ²/n 7.2 and a +200 eV `T_D` bias on 24 wave
 fast fixtures therefore use `GaussianNoise`.
 
 **Its effect on a fit, measured once** (Phase 4.D spec D18): on the two-channel shapes problem the
-blur raises `GeneralizedNormal`'s EPW χ²/n in the bins around the profile's peak, to 9.2203 over the
-whole trace against `Kappa`'s 3.2335 once the fit's one outlying bin is left out, and switching the
-spread off at synthesis brings both to about 1 (`generalized_normal.md` Section 7).
+blur raises `GeneralizedNormal`'s EPW χ²/n in the bins around the profile's peak: 9.2203 with the
+fit's one outlying bin left out, against 3.2335 for `Kappa` over all its bins. With the spread
+switched off at synthesis the same two read 1.0418 and 0.9956 (`generalized_normal.md` Section 7).
 
 **Reproducibility.** `synthesize` draws every pixel in fixed **column-major** order (wavelength
 fastest, then time) on a single thread, so one `rng` seed gives the same image regardless of
