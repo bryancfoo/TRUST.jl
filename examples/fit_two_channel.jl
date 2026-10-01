@@ -1,12 +1,14 @@
-# Phase 4.A Step 4.A.3c: the synthetic two-channel problem, full resolution. Spec D41, Section 9.3.
+# Phase 4.A Step 4.A.3c: the synthetic two-channel problem, full resolution. Spec D41, Section 9.3;
+# moved to the deck at Phase 4.F Step 4.F.1 (spec D8).
 # Run: julia --project=. examples/fit_two_channel.jl
 #
-# Runs the joint deck (examples/two_channel.toml) and the two single-channel decks derived from it
-# in code (never committed, OTIS._with... no -- single_channel_deck_text, examples/problems.jl),
-# each keeping every variable free (D41: the point of the figure is what each channel alone can
-# and cannot recover). Writes runs/two_channel/{joint,epw,iaw}/result.jld2 -- fit's own output,
-# per deck. The figure itself is drawn separately, in the figures environment
-# (examples/figures/make_two_channel_figure.jl), which reads these three result files back.
+# Two fits, each through fit(deck), each writing its own result file and effective deck:
+# examples/two_channel.toml, the joint fit from the deck's own inits (runs/two_channel/joint/), and
+# examples/two_channel_staged.toml, procedure = "staged" (runs/two_channel/staged/), whose two
+# stages are the EPW-only and IAW-only fits, every variable free (D41: the point of the figure is
+# what each channel alone can and cannot recover), and whose final fit is the staged joint fit.
+# The figure itself is drawn separately, in the figures environment
+# (examples/figures/make_two_channel_figure.jl), which reads the joint fit and the two stages back.
 
 using OTIS
 using OTIS: _near_bound_fraction
@@ -31,15 +33,14 @@ function _truth_at(problem, t_ns::AbstractVector)
     )
 end
 
-function _medians(result::FitResult, problem_nt)
-    t_ns = t_from_si.(result.pspec.axis, :t_ns)
-    truth = _truth_at(problem_nt, t_ns)
-    return Dict{String,Float64}(v => median(abs.(result.values[v] .- truth[v]) ./ truth[v])
-                                 for v in keys(truth))
+# The median relative error of each quantity, from its values on the axis `axis_s` (s).
+function _medians(values::AbstractDict, axis_s::AbstractVector, problem_nt)
+    truth = _truth_at(problem_nt, t_from_si.(axis_s, :t_ns))
+    return Dict{String,Float64}(v => median(abs.(values[v] .- truth[v]) ./ truth[v]) for v in keys(truth))
 end
 
 function _report(label::AbstractString, result::FitResult, problem_nt)
-    med = _medians(result, problem_nt)
+    med = _medians(result.values, result.pspec.axis, problem_nt)
     for v in sort(collect(keys(med)))
         @info "fit_two_channel: $label per-variable median" variable = v median_rel_error = med[v]
     end
@@ -50,30 +51,33 @@ function _report(label::AbstractString, result::FitResult, problem_nt)
     return med
 end
 
+# A stage of the staged fit, as read_result returns it (stages.channels[name]).
+function _report_stage(label::AbstractString, s, problem_nt)
+    values = Dict{String,Vector{Float64}}(v => s.variables[v].values for v in ("T_e", "m_e", "T_D"))
+    values["ne_cm3"] = s.dependents["ne_cm3"].values
+    med = _medians(values, s.axis, problem_nt)
+    for v in sort(collect(keys(med)))
+        @info "fit_two_channel: $label per-variable median" variable = v median_rel_error = med[v]
+    end
+    @info "fit_two_channel: $label" status = s.status converged = s.converged iterations = s.iterations elapsed_s = s.elapsed chi2_per_n = s.chi2 / s.npixels near_bound_fraction = s.near_bound_fraction
+    return med
+end
+
 function run_two_channel()
     problem_nt = two_channel_problem()
-    text = read(joinpath(_FTC_EXAMPLES_DIR, "two_channel.toml"), String)
 
     t_joint = @elapsed joint = fit(joinpath(_FTC_EXAMPLES_DIR, "two_channel.toml"))
     med_joint = _report("joint", joint, problem_nt)
 
-    epw_dir = joinpath(dirname(_FTC_EXAMPLES_DIR), "runs", "two_channel", "epw")
-    mkpath(epw_dir)
-    epw_deck_path = joinpath(epw_dir, "deck.toml")
-    write(epw_deck_path, single_channel_deck_text(text, "epw"))
-    t_epw = @elapsed epw = fit(epw_deck_path)
-    med_epw = _report("epw-only", epw, problem_nt)
+    t_staged = @elapsed staged = fit(joinpath(_FTC_EXAMPLES_DIR, "two_channel_staged.toml"))
+    med_staged = _report("staged joint", staged, problem_nt)
+    r = read_result(joinpath(dirname(_FTC_EXAMPLES_DIR), "runs", "two_channel", "staged", "result.jld2"))
+    med_epw = _report_stage("epw-only (stage 1)", r.stages.channels["epw"], problem_nt)
+    med_iaw = _report_stage("iaw-only (stage 2)", r.stages.channels["iaw"], problem_nt)
 
-    iaw_dir = joinpath(dirname(_FTC_EXAMPLES_DIR), "runs", "two_channel", "iaw")
-    mkpath(iaw_dir)
-    iaw_deck_path = joinpath(iaw_dir, "deck.toml")
-    write(iaw_deck_path, single_channel_deck_text(text, "iaw"))
-    t_iaw = @elapsed iaw = fit(iaw_deck_path)
-    med_iaw = _report("iaw-only", iaw, problem_nt)
+    @info "fit_two_channel: end to end" t_joint_s = t_joint t_staged_s = t_staged
 
-    @info "fit_two_channel: end to end" t_joint_s = t_joint t_epw_s = t_epw t_iaw_s = t_iaw t_sum_single_s = t_epw + t_iaw
-
-    return (; joint, epw, iaw, med_joint, med_epw, med_iaw)
+    return (; joint, staged, med_joint, med_staged, med_epw, med_iaw)
 end
 
 run_two_channel()

@@ -139,7 +139,8 @@ end
                  laplace::Union{Nothing,LaplaceResult} = nothing,
                  calibration_scan::Union{Nothing,CalibrationScanResult} = nothing,
                  scatter::Union{Nothing,ScatterResult} = nothing,
-                 gn_decrease::Union{Nothing,Real} = nothing) -> path
+                 gn_decrease::Union{Nothing,Real} = nothing,
+                 stages::Union{Nothing,NamedTuple} = nothing) -> path
 
 Writes `result` (and, if given, `scan`, `laplace` and `calibration_scan`) to `path` as a JLD2 file
 of plain numeric arrays and strings (`docs/derivations/data_layout.md` Section 3, spec D34, D40,
@@ -180,6 +181,14 @@ none is written without its keyword.
 order. Written for every caller, with no keyword, since it is read off `result` alone, as
 `fit/near_bound_fraction` is; inside `otis-result-3`, and RE1's fixture has no such entry.
 
+**`stages` (Phase 4.F spec D7), only when given** (`fit(deck)` passes `_staged_fit`'s return for a
+deck with `procedure = "staged"`): `stages/names`, `stages/start` (the joint fit's start, in `y`),
+`stages/polish_decreases`, `stages/sources/variable` and `stages/sources/channel`, and, per stage,
+`stages/channels/<name>/` with `axis`, `theta`, `frozen` (the variables the stage froze), `chi2`,
+`objective`, `npixels`, `iterations`, `converged` (`UInt8`), `status`, `termination`, `optimizer`,
+`elapsed`, `near_bound_fraction`, `variables/<v>/values`, `vary`, `near_bound`, and
+`dependents/<d>/values`. Inside `otis-result-3`, no bump; RE1's exact key set is unchanged.
+
 When `problem` is given, `problem.pspec === result.pspec` is required (a loud error otherwise,
 naming what to pass instead): `write_result` has no other way to know the problem it is given is
 the one `result` was actually fitted from, and the residual needs the problem's own `pixel_index`,
@@ -195,7 +204,8 @@ function write_result(path::AbstractString, result::FitResult;
     laplace::Union{Nothing,LaplaceResult}=nothing,
     calibration_scan::Union{Nothing,CalibrationScanResult}=nothing,
     scatter::Union{Nothing,ScatterResult}=nothing,
-    gn_decrease::Union{Nothing,Real}=nothing)
+    gn_decrease::Union{Nothing,Real}=nothing,
+    stages::Union{Nothing,NamedTuple}=nothing)
     pspec = result.pspec
     nt = nbins(pspec.trace)
     unit_keys = _variable_unit_keys(pspec.bindings)
@@ -380,6 +390,41 @@ function write_result(path::AbstractString, result::FitResult;
                 f["$prefix/n_near_bound"] = Int64.(scatter.n_near_bound[name])
             end
         end
+
+        # Phase 4.F spec D7: the staged procedure's stages, only when given (fit(deck) passes
+        # _staged_fit's return for a staged deck).
+        if stages !== nothing
+            f["stages/names"] = String[st.name for st in stages.stages]
+            f["stages/start"] = Vector{Float64}(stages.start)
+            f["stages/polish_decreases"] = Vector{Float64}(stages.decreases)
+            f["stages/sources/variable"] = String[first(p) for p in stages.sources]
+            f["stages/sources/channel"] = String[last(p) for p in stages.sources]
+            for st in stages.stages
+                r = st.result
+                prefix = "stages/channels/$(st.name)"
+                f["$prefix/axis"] = Vector{Float64}(r.pspec.axis)
+                f["$prefix/theta"] = Vector{Float64}(r.theta)
+                f["$prefix/frozen"] = String[name for name in st.frozen]
+                f["$prefix/chi2"] = Float64(r.chi2)
+                f["$prefix/objective"] = Float64(r.objective)
+                f["$prefix/npixels"] = Int64(r.npixels)
+                f["$prefix/iterations"] = Int64(r.iterations)
+                f["$prefix/converged"] = UInt8(r.converged)
+                f["$prefix/status"] = string(r.status)
+                f["$prefix/termination"] = string(r.termination)
+                f["$prefix/optimizer"] = r.optimizer
+                f["$prefix/elapsed"] = Float64(r.elapsed)
+                f["$prefix/near_bound_fraction"] = _near_bound_fraction(r)
+                for v in r.pspec.variables
+                    f["$prefix/variables/$(v.name)/values"] = Vector{Float64}(r.values[v.name])
+                    f["$prefix/variables/$(v.name)/vary"] = UInt8(v.vary)
+                    f["$prefix/variables/$(v.name)/near_bound"] = UInt8.(r.near_bound[v.name])
+                end
+                for dep in r.pspec.dependents
+                    f["$prefix/dependents/$(dep.name)/values"] = Vector{Float64}(r.values[dep.name])
+                end
+            end
+        end
     end
     return path
 end
@@ -395,7 +440,7 @@ end
 Reads a result written by `write_result`, returning plain arrays and strings, like `read_trace`'s
 own `:arrays` mode: `(; layout_version, meta, deck, axis_name, axis, axis_unit,
 axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan, laplace,
-calibration_scan, scatter)`. `variables` and `dependents` are `Dict{String,<:NamedTuple}` keyed by name;
+calibration_scan, scatter, stages)`. `variables` and `dependents` are `Dict{String,<:NamedTuple}` keyed by name;
 `leaves` is `Dict{String,Vector{Float64}}` keyed by SI leaf path; `fit` and `trajectory` are
 `NamedTuple`s of the file's own `fit/*` and `trajectory/*` datasets; `channels` (D40) is a
 `Vector{<:NamedTuple}`, one per channel in channel order, each `(; name, weight, chi2, npixels,
@@ -423,6 +468,14 @@ sigma_post, sigma_samp, near_bound)`, `sigma_post`/`sigma_samp`/`near_bound` eac
 coarse_bin, counts, status, decrease, values, near_bound, s_stat, n_near_bound)`, `values`,
 `near_bound`, `s_stat` and `n_near_bound` each `Dict{String,<:AbstractArray}` keyed by variable
 name, in the same forms as `calibration_scan`'s.
+
+**`stages` (Phase 4.F spec D7)**: `nothing` when the file carries no `stages/*` group, else `(; names,
+start, polish_decreases, sources, channels)`, `sources` a `Dict{String,String}` from each fitted
+variable to its stage's channel, `channels` a `Dict{String,Any}` from each stage's channel name to
+`(; axis, theta, frozen, chi2, objective, npixels, iterations, converged, status, termination,
+optimizer, elapsed, near_bound_fraction, variables, dependents)`, `variables` and `dependents` keyed by
+name in the same forms as the file's own top-level ones (`variables[v].values`, `.vary`,
+`.near_bound`; `dependents[d].values`).
 
 Throws, naming the version found and expected, if `layout_version` does not match
 `RESULT_LAYOUT_VERSION`.
@@ -576,8 +629,37 @@ function read_result(path::AbstractString)
             )
         end
 
+        stages = nothing
+        if haskey(f, "stages")
+            records = Dict{String,Any}()
+            for nm in f["stages/names"]
+                prefix = "stages/channels/$nm"
+                svars = Dict{String,Any}()
+                for v in _read_group(f, "$prefix/variables")
+                    vp = "$prefix/variables/$v"
+                    svars[v] = (values=f["$vp/values"], vary=f["$vp/vary"], near_bound=f["$vp/near_bound"])
+                end
+                sdeps = Dict{String,Any}()
+                for d in _read_group(f, "$prefix/dependents")
+                    sdeps[d] = (values=f["$prefix/dependents/$d/values"],)
+                end
+                records[nm] = (axis=f["$prefix/axis"], theta=f["$prefix/theta"],
+                    frozen=f["$prefix/frozen"], chi2=f["$prefix/chi2"],
+                    objective=f["$prefix/objective"], npixels=f["$prefix/npixels"],
+                    iterations=f["$prefix/iterations"], converged=f["$prefix/converged"],
+                    status=f["$prefix/status"], termination=f["$prefix/termination"],
+                    optimizer=f["$prefix/optimizer"], elapsed=f["$prefix/elapsed"],
+                    near_bound_fraction=f["$prefix/near_bound_fraction"], variables=svars,
+                    dependents=sdeps)
+            end
+            stages = (names=f["stages/names"], start=f["stages/start"],
+                polish_decreases=f["stages/polish_decreases"],
+                sources=Dict{String,String}(zip(f["stages/sources/variable"], f["stages/sources/channel"])),
+                channels=records)
+        end
+
         return (; layout_version=version, meta, deck, axis_name, axis, axis_unit,
             axis_boundary_unit, variables, dependents, leaves, fit, trajectory, channels, scan,
-            laplace, calibration_scan, scatter)
+            laplace, calibration_scan, scatter, stages)
     end
 end

@@ -280,6 +280,32 @@ has no `scatter/variables/<name>` group at all.
 | `scatter/variables/<name>/s_stat` | `Float64` | `(N_coarse)`, **never divided by `sqrt(m)`** | yes |
 | `scatter/variables/<name>/n_near_bound` | `Int64` | `(N_coarse)` | yes |
 
+**`stages/` group, inside the same `otis-result-3` (Phase 4.F, Step 4.F.1, spec D7).** Not a version
+bump, in the style of `scan/` and `scatter/` above: written only when `write_result` is given the
+`stages` keyword, which `fit(deck)` passes for a deck with `procedure = "staged"` (Section 4), so an
+older `otis-result-3` file reads back exactly as before and `read_result`'s `stages` field is
+`nothing` for it. The stages' own records sit under `stages/channels/<name>/`, never directly under
+`stages/`, since a channel may be called `names` or `start`. A stage record carries `axis`,
+`variables` and `dependents` in the same form as the file's own, so a reader of the top level reads a
+stage the same way.
+
+| Dataset | Type | Shape | Required |
+|---|---|---|---|
+| `stages/names` | `String` | `(N_channels)`, channel order | only with `stages` |
+| `stages/start` | `Float64` | `(ntheta)`, the joint fit's start in `y` | yes |
+| `stages/polish_decreases` | `Float64` | `(n_polish)`, `polish`'s Gauss–Newton decreases | yes |
+| `stages/sources/variable`, `stages/sources/channel` | `String` | `(N_fitted)`, each fitted variable of the joint fit and the stage its start came from | yes |
+| `stages/channels/<name>/axis` | `Float64` | `(N_t)`, s, the stage's own fitted axis | yes, one group per channel |
+| `stages/channels/<name>/theta` | `Float64` | `(ntheta_stage)`, the stage's minimizer in `y` | yes |
+| `stages/channels/<name>/frozen` | `String` | `(k)`, the variables this stage froze at their `init` (may be empty) | yes |
+| `stages/channels/<name>/chi2`, `objective`, `elapsed`, `near_bound_fraction` | `Float64` | scalar | yes |
+| `stages/channels/<name>/npixels`, `iterations` | `Int64` | scalar | yes |
+| `stages/channels/<name>/converged` | `UInt8` | scalar | yes |
+| `stages/channels/<name>/status`, `termination`, `optimizer` | `String` | scalar | yes |
+| `stages/channels/<name>/variables/<v>/values` | `Float64` | `(N_t)` or `(1)` | yes, one group per variable |
+| `stages/channels/<name>/variables/<v>/vary`, `near_bound` | `UInt8` | scalar; `(N_t)` or `(1)` | yes |
+| `stages/channels/<name>/dependents/<d>/values` | `Float64` | `(N_t)` | yes, one group per dependent |
+
 **`read_trace` gains an `as` keyword** (`:arrays`, unchanged and default, or `:trace`, spec D35),
 once the component registry (`conventions.md` 7.2) exists to look shape names up in; the trace
 layout itself, `TRACE_LAYOUT_VERSION` and `read_streak`/`write_streak`/`write_trace` are
@@ -324,3 +350,30 @@ one-channel channel-form deck can name it anything the deck's `channels` list sa
 
 `write_result`/`read_result` (`src/data/result.jl`) are this layout's readers and writers, on the
 same footing as `write_streak`/`read_streak` and `write_trace`/`read_trace` above.
+
+**The staged procedure** (Phase 4.F, Step 4.F.1, spec D3 to D7; [OQ-54](../../dev/open_questions.md#oq-54),
+the user's decision of 2026-09-30). A channel-form deck with two or more channels may say
+
+```toml
+[optimizer]
+procedure = "staged"
+
+[optimizer.staged]
+stage_procedure = "lbfgs"                 # default "noisy_descent_lbfgs"
+joint_procedure = "levenberg_marquardt"   # the default
+polish_tol = 1.0e-6                       # the default
+start_from = { T_D = "iaw" }              # default: no entry
+```
+
+and `fit(deck)` then fits each channel alone, in `channels` order, from a single-channel deck derived
+from this one (that channel's `data`, `geometry` and `instrument`, weight 1, `procedure =
+stage_procedure`, every variable that reaches no part of that channel's model frozen at its
+`init`); starts the joint problem from the stages' fitted values, by variable name, each fitted
+variable from the first channel whose model it reaches unless `start_from` names another; runs
+`joint_procedure` on the joint problem; and polishes to `polish_tol`. Each stage's record is written
+under `stages/` (Section 3); the warnings and the result are the final fit's. `stage_procedure` and
+`joint_procedure` take any value `procedure` itself takes except `"staged"`, and the option tables
+`[optimizer.lbfgs]`, `[optimizer.levenberg_marquardt]` and `[optimizer.noisy_descent]` apply to
+whichever stage runs that optimizer. `"staged"` on a shorthand deck or a one-channel deck is
+refused by `read_deck`, as is an `[optimizer.staged]` table under any other procedure. A new key
+inside `[optimizer]` is not a deck-version bump: `otis-deck-2` stays.

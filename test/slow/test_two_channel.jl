@@ -109,14 +109,27 @@ function _ts_two_channel()
             @info "TS1: joint fit worst bin" variable = v t_ns = wb.t_ns fit = wb.fit truth = wb.truth rel_error = wb.rel
         end
 
-        # TS2 (D53), on the same temporary joint deck: the staged fit (EPW-only, IAW-only, then
-        # the joint LM + polish started from their values).
-        t_staged = @elapsed st = staged_joint_fit(joint_deck_path)
-        @info "TS2: staged_joint_fit done" elapsed_s = t_staged decrease = st.decreases[end]
+        # TS2 (D53; through fit(deck) since Phase 4.F, spec D9): examples/two_channel_staged.toml,
+        # procedure = "staged", on the same two streaks -- the EPW-only and IAW-only stages, then
+        # the joint LM + polish started from their values. fit(deck) pins BLAS to one thread
+        # (conventions.md 6.6), so the count is restored after it for the slow files that follow.
+        staged_dir = joinpath(dir, "staged")
+        text_staged = read(joinpath(_TS_EXAMPLES_DIR, "two_channel_staged.toml"), String)
+        text_staged = replace(text_staged, "runs/two_channel_epw_streak.jld2" => replace(path_epw, "\\" => "/"))
+        text_staged = replace(text_staged, "runs/two_channel_iaw_streak.jld2" => replace(path_iaw, "\\" => "/"))
+        text_staged = replace(text_staged, "runs/two_channel/staged" => replace(staged_dir, "\\" => "/"))
+        staged_deck_path = joinpath(dir, "staged_deck.toml")
+        write(staged_deck_path, text_staged)
+        nblas = pin_blas_threads()
+        pin_blas_threads(nblas)
+        t_staged = @elapsed staged = fit(staged_deck_path)
+        pin_blas_threads(nblas)
+        st = read_result(joinpath(staged_dir, "result.jld2"))
+        @info "TS2: fit(deck), procedure = \"staged\", done" elapsed_s = t_staged decrease = st.stages.polish_decreases[end] blas_threads_restored = nblas
         flush(stderr)
-        med_st = _ts_report("staged joint", st.result, problem_nt)
+        med_st = _ts_report("staged joint", staged, problem_nt)
 
-        (; joint, epw, iaw, med_joint, med_epw, med_iaw, epw_td_move, st, med_st)
+        (; joint, epw, iaw, med_joint, med_epw, med_iaw, epw_td_move, staged, st, med_st)
     end
 end
 
@@ -130,24 +143,24 @@ const _TS_TWO_CHANNEL = _ts_two_channel()
     @test r.med_joint["T_D"] <= 0.2
 end
 
-@testset "TS2: the staged fit (D53)" begin
+@testset "TS2: the staged fit through fit(deck) (D53; Phase 4.F spec D9)" begin
+    staged = _TS_TWO_CHANNEL.staged
     st = _TS_TWO_CHANNEL.st
-    @test st.decreases[end] <= 1e-6
+    @test st.stages.polish_decreases[end] <= 1e-6
 
-    epw_summary = st.result.channels[findfirst(c -> c.name == "epw", st.result.channels)]
-    iaw_summary = st.result.channels[findfirst(c -> c.name == "iaw", st.result.channels)]
+    epw_summary = staged.channels[findfirst(c -> c.name == "epw", staged.channels)]
+    iaw_summary = staged.channels[findfirst(c -> c.name == "iaw", staged.channels)]
     chi2n_epw_joint = epw_summary.chi2 / epw_summary.npixels
     chi2n_iaw_joint = iaw_summary.chi2 / iaw_summary.npixels
-    chi2n_epw_alone = st.epw.chi2 / st.epw.npixels
-    chi2n_iaw_alone = st.iaw.chi2 / st.iaw.npixels
+    chi2n_epw_alone = st.stages.channels["epw"].chi2 / st.stages.channels["epw"].npixels
+    chi2n_iaw_alone = st.stages.channels["iaw"].chi2 / st.stages.channels["iaw"].npixels
     @test chi2n_epw_joint <= 1.1 * chi2n_epw_alone
     @test chi2n_iaw_joint <= 1.1 * chi2n_iaw_alone
 
-    # Phase 4.D spec D9: the saturation warning fit(deck) prints (spec D5), on the staged fit,
-    # printed beside the recorded failure below (bin 1's m_e on its lower bound 2.0, Phase 4.B's
-    # A14). A printed line only: nothing is asserted on it, and the assertion below is unchanged.
-    OTIS._warn_near_bound(st.result)
-    @test sum(count, values(st.result.near_bound)) == 0
+    # The saturation warning (Phase 4.D spec D5) is printed by fit(deck) itself now, beside the
+    # recorded failure below (bin 1's m_e on its lower bound 2.0, Phase 4.B's A14). The assertion
+    # is unchanged.
+    @test sum(count, values(staged.near_bound)) == 0
 
     @info "TS2 chi2/n" chi2n_epw_joint chi2n_epw_alone chi2n_iaw_joint chi2n_iaw_alone
 end

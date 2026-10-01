@@ -215,31 +215,24 @@ two single-channel `FitResult`s (`epw`, `iaw`), since `slice_scatter` needs the 
 
 Spec D48 item 1, D53. `shape_variable` (Phase 4.B spec D39) names the deck's electron shape
 variable in place of the literal `"m_e"`; its default reproduces every existing caller bitwise.
+
+**Reduced to a call at Step 4.F.1** (Phase 4.F spec D8): the procedure is the package's own
+`procedure = "staged"` (`OTIS._staged_fit`), called with the deck's own `procedure` for the two
+stages, `optimizer` for the joint fit, `tol` for `polish` and `T_D` taken from the IAW stage;
+every other fitted variable comes from the EPW stage, the first-listed channel, which for these
+decks is exactly `logn`, `T_e` and `shape_variable` (checked). Bitwise the procedure above.
 """
 function staged_joint_fit(joint_deck_path::AbstractString; optimizer=LevenbergMarquardt(), tol::Real=1e-6,
     shape_variable::AbstractString="m_e")
-    text = read(joint_deck_path, String)
-    single = mktempdir() do dir
-        results = Dict{String,FitResult}()
-        for name in ("epw", "iaw")
-            path = joinpath(dir, "$name.toml")
-            write(path, single_channel_deck_text(text, name))
-            p, opt, st = OTIS.build_problem(read_deck(path))
-            results[name] = solve(p, opt; start=st)
-        end
-        results
-    end
-    epw, iaw = single["epw"], single["iaw"]
-
     deck = read_deck(joint_deck_path)
-    problem, _, _ = OTIS.build_problem(deck)
-
-    start = flatten(problem.pspec, ["logn" => epw.values["logn"], "T_e" => epw.values["T_e"],
-        shape_variable => epw.values[shape_variable], "T_D" => iaw.values["T_D"]])
-    lm = solve(problem, optimizer; start=start)
-    pol = polish(problem, lm; tol=tol)
-
-    return (; deck, problem, result=pol.result, decreases=pol.decreases, epw, iaw)
+    st = OTIS._staged_fit(deck; stage_procedure=deck.sections["optimizer"]["procedure"],
+        joint_optimizer=optimizer, polish_tol=tol, start_from=Dict{String,Any}("T_D" => "iaw"))
+    [s.name for s in st.stages] == ["epw", "iaw"] || error(
+        "staged_joint_fit: the deck's channels must be [\"epw\", \"iaw\"]")
+    Dict(st.sources)[shape_variable] == "epw" || error(
+        "staged_joint_fit: \"$shape_variable\" did not start from the EPW stage")
+    return (; deck, problem=st.problem, result=st.result, decreases=st.decreases,
+        epw=st.stages[1].result, iaw=st.stages[2].result)
 end
 
 """
@@ -259,6 +252,27 @@ function with_wavelength_calibration(text::AbstractString)
         instrument = get!(chan, "instrument", Dict{String,Any}())
         instrument["wavelength_calibration"] = Dict{String,Any}("lambda_offset_nm" => 0.0)
     end
+    buf = IOBuffer()
+    TOML.print(buf, raw; sorted=true)
+    return String(take!(buf))
+end
+
+"""
+    with_staged_procedure(text::AbstractString; stage_procedure, start_from = Dict{String,Any}()) -> String
+
+Parses the channel-form deck `text`, sets its `[optimizer]` `procedure = "staged"` with an
+`[optimizer.staged]` table of `stage_procedure` and `start_from` (`joint_procedure` and
+`polish_tol` left to their defaults, `"levenberg_marquardt"` and `1e-6`; every other key of
+`[optimizer]` kept), and re-serializes with `TOML.print(...; sorted = true)`, as
+`with_wavelength_calibration` does. The committed decks are not edited: the diagnostics derive
+single-channel decks from their text (Phase 4.F spec D8).
+"""
+function with_staged_procedure(text::AbstractString; stage_procedure, start_from=Dict{String,Any}())
+    raw = TOML.parse(text)
+    opt = get!(raw, "optimizer", Dict{String,Any}())
+    opt["procedure"] = "staged"
+    opt["staged"] = Dict{String,Any}("stage_procedure" => stage_procedure,
+        "start_from" => Dict{String,Any}(start_from))
     buf = IOBuffer()
     TOML.print(buf, raw; sorted=true)
     return String(take!(buf))

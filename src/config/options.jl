@@ -179,6 +179,26 @@ Base.@kwdef struct RationalBackgroundOptions
     denominator::Vector{Float64} = Float64[]
 end
 
+# --- the staged procedure's option struct (Phase 4.F spec D3) ---
+
+"""
+    StagedProcedureOptions
+
+The deck keys of `[optimizer.staged]`, read only with `procedure = "staged"` (Phase 4.F spec D3,
+[OQ-54](../../dev/open_questions.md#oq-54)): `stage_procedure`, the procedure each single-channel
+stage runs; `joint_procedure`, the procedure the joint fit runs from the stages' values; both any
+value `procedure` itself takes except `"staged"`, a name or a list. `polish_tol`, the tolerance
+`polish` runs to after the joint fit. `start_from`, a table `variable = "channel"` naming, for a
+variable fitted in more than one stage, the stage its start is taken from (the first-listed
+channel's otherwise).
+"""
+Base.@kwdef struct StagedProcedureOptions
+    stage_procedure::Union{String,Vector{String}} = "noisy_descent_lbfgs"
+    joint_procedure::Union{String,Vector{String}} = "levenberg_marquardt"
+    polish_tol::Float64 = 1e-6
+    start_from::Dict{String,Any} = Dict{String,Any}()
+end
+
 # --- KERNEL_REGISTRY's two option structs ---
 
 """

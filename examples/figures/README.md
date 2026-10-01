@@ -60,10 +60,11 @@ against the truth, for the joint fit and for each single-channel fit with every 
 free: the EPW-only fit reproduces `n_e`, `T_e` and `m_e` but lets `T_D` wander to its bound; the
 IAW-only fit reproduces `T_D` but lets `T_e` and `m_e` wander; the joint fit recovers all four.
 **Generated separately from the five above**, by
-[`make_two_channel_figure.jl`](make_two_channel_figure.jl), which reads the three result files
-`examples/fit_two_channel.jl` writes (`runs/two_channel/{joint,epw,iaw}/result.jld2`) rather than
-synthesizing anything itself — run `examples/two_channel.jl` and `examples/fit_two_channel.jl`
-first. Not part of `make_figures.jl`/`FIGURE_NAMES` (FG1 asserts exactly five files).
+[`make_two_channel_figure.jl`](make_two_channel_figure.jl), which reads the two result files
+`examples/fit_two_channel.jl` writes (`runs/two_channel/joint/result.jld2`, the joint fit, and
+`runs/two_channel/staged/result.jld2`, whose `stages/` group carries the EPW-only and IAW-only fits,
+Phase 4.F) rather than synthesizing anything itself — run `examples/two_channel.jl` and
+`examples/fit_two_channel.jl` first. Not part of `make_figures.jl`/`FIGURE_NAMES` (FG1 asserts exactly five files).
 
 ## `shapes.png`
 
@@ -81,7 +82,7 @@ julia --project=examples/figures examples/figures/make_figures.jl
 These five PNGs are committed and regenerated only when the physics, the profiles or the
 plotting API change — not routinely, and never hand-edited (`conventions.md` 10.4).
 `two_channel_fit.png` is regenerated the same way, but by its own script, after
-`examples/fit_two_channel.jl` has written its three result files:
+`examples/fit_two_channel.jl` has written its two result files:
 
 ```
 julia --project=. examples/two_channel.jl

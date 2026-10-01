@@ -716,31 +716,56 @@ end
 # [optimizer]
 # ------------------------------------------------------------------------------------------
 
-const _OPTIMIZER_TOP_KEYS = ("procedure", "lbfgs", "levenberg_marquardt", "noisy_descent")
+const _OPTIMIZER_TOP_KEYS = ("procedure", "lbfgs", "levenberg_marquardt", "noisy_descent", "staged")
 # _PROCEDURE_NAMES and _PROCEDURE_BASE_NAMES are optimizers.jl's own (Step 4.A.0, D22 item 1):
 # this file used to redefine both, with a different order, and the redefinition silently won
 # by include order, so every message below printed the wrong list.
 
-function _check_procedure_name(nm)
-    nm isa AbstractString && nm in _PROCEDURE_NAMES || throw(ArgumentError(
-        "read_deck: unknown procedure \"$nm\"; valid values are $_PROCEDURE_NAMES, or a list of " *
-        "$_PROCEDURE_BASE_NAMES"))
+"""
+    STAGED_PROCEDURE
+
+`"staged"`: the deck's one `procedure` value that is not an optimizer (Phase 4.F spec D3,
+[OQ-54](../../dev/open_questions.md#oq-54)). `fit(deck)` fits each channel alone, then every
+channel jointly from those fits, then `polish`es (`_staged_fit`). Not in `_PROCEDURE_NAMES`, which
+names optimizers and is `optimizers.jl`'s own (OP20 pins it); this file alone accepts it.
+"""
+const STAGED_PROCEDURE = "staged"
+
+function _check_procedure_name(nm; staged_ok::Bool=true)
+    nm isa AbstractString && (nm in _PROCEDURE_NAMES || (staged_ok && nm == STAGED_PROCEDURE)) ||
+        throw(ArgumentError(
+        "read_deck: unknown procedure \"$nm\"; valid values are $_PROCEDURE_NAMES" *
+        (staged_ok ? ", \"$STAGED_PROCEDURE\"," : ",") * " or a list of $_PROCEDURE_BASE_NAMES"))
     return String(nm)
 end
 
-function _validate_optimizer_section(given::AbstractDict)
-    _check_known_keys(given, _OPTIMIZER_TOP_KEYS, "optimizer")
-    procedure_raw = get(given, "procedure", "noisy_descent_lbfgs")
-    procedure = if procedure_raw isa AbstractVector
-        for nm in procedure_raw
+"""
+    _validate_procedure(raw, where; staged_ok) -> String or Vector{Any}
+
+One `procedure` value (D30): a name of `_PROCEDURE_NAMES` (or `"staged"` when `staged_ok`), or a
+list of `_PROCEDURE_BASE_NAMES`. `where` names the key in the message when it is not
+`optimizer.procedure` (Phase 4.F spec D3: the staged table's two procedures, where `"staged"` is
+refused by name).
+"""
+function _validate_procedure(raw, where::AbstractString; staged_ok::Bool)
+    if raw isa AbstractVector
+        for nm in raw
             nm isa AbstractString && nm in _PROCEDURE_BASE_NAMES || throw(ArgumentError(
                 "read_deck: unknown procedure \"$nm\"; valid values are $_PROCEDURE_NAMES, or a " *
                 "list of $_PROCEDURE_BASE_NAMES"))
         end
-        Any[String(nm) for nm in procedure_raw]
-    else
-        _check_procedure_name(procedure_raw)
+        return Any[String(nm) for nm in raw]
     end
+    (!staged_ok && raw == STAGED_PROCEDURE) && throw(ArgumentError(
+        "read_deck: \"$where\" cannot be \"$STAGED_PROCEDURE\": a stage is one fit, so it names an " *
+        "optimizer, $_PROCEDURE_NAMES, or a list of $_PROCEDURE_BASE_NAMES"))
+    return _check_procedure_name(raw; staged_ok=staged_ok)
+end
+
+function _validate_optimizer_section(given::AbstractDict)
+    _check_known_keys(given, _OPTIMIZER_TOP_KEYS, "optimizer")
+    procedure = _validate_procedure(get(given, "procedure", "noisy_descent_lbfgs"),
+        "optimizer.procedure"; staged_ok=true)
     out = Dict{String,Any}("procedure" => procedure)
     empty_names = Set{String}()
     for (key, ctor) in OPTIMIZER_REGISTRY
@@ -749,7 +774,56 @@ function _validate_optimizer_section(given::AbstractDict)
         entry isa AbstractDict || throw(ArgumentError("read_deck: \"optimizer.$key\" must be a table"))
         out[key] = _fill_option_fields(ctor, entry, empty_names, "optimizer.$key", false)
     end
+    if procedure == STAGED_PROCEDURE
+        entry = get(given, "staged", Dict{String,Any}())
+        entry isa AbstractDict || throw(ArgumentError("read_deck: \"optimizer.staged\" must be a table"))
+        st = _fill_option_fields(StagedProcedureOptions, entry, empty_names, "optimizer.staged", false)
+        for key in ("stage_procedure", "joint_procedure")
+            st[key] = _validate_procedure(st[key], "optimizer.staged.$key"; staged_ok=false)
+        end
+        tol = st["polish_tol"]
+        (isfinite(tol) && tol > 0) || throw(ArgumentError(
+            "read_deck: \"optimizer.staged.polish_tol\" must be a finite number > 0; got $tol"))
+        st["start_from"] isa AbstractDict || throw(ArgumentError(
+            "read_deck: \"optimizer.staged.start_from\" must be a table of variable = \"channel\""))
+        st["start_from"] = Dict{String,Any}(String(k) => v for (k, v) in st["start_from"])
+        out["staged"] = st
+    elseif haskey(given, "staged")
+        throw(ArgumentError(
+            "read_deck: [optimizer.staged] is read only with procedure = \"$STAGED_PROCEDURE\"; this " *
+            "deck's procedure is $(repr(procedure)), so the table would be silently ignored"))
+    end
     return out
+end
+
+"""
+    _check_staged_deck(sections, channel_names) -> nothing
+
+`procedure = "staged"`'s two cross-section checks (Phase 4.F spec D3), run by `read_deck` once
+the channels and the variables are known: the deck is in the channel form with two or more
+channels; and every `start_from` entry names a fitted (`vary`) variable and a channel of
+`channels`.
+"""
+function _check_staged_deck(sections::AbstractDict, channel_names::Union{Nothing,Vector{String}})
+    sections["optimizer"]["procedure"] == STAGED_PROCEDURE || return nothing
+    channel_names === nothing && throw(ArgumentError(
+        "read_deck: procedure \"$STAGED_PROCEDURE\" fits each channel alone and then every channel " *
+        "jointly, so it needs a channel-form deck with two or more channels; this deck is in the " *
+        "shorthand form (bare [data], [geometry], [instrument])"))
+    length(channel_names) >= 2 || throw(ArgumentError(
+        "read_deck: procedure \"$STAGED_PROCEDURE\" fits each channel alone and then every channel " *
+        "jointly, so it needs a channel-form deck with two or more channels; this deck has one, " *
+        "\"$(only(channel_names))\""))
+    for (name, chan) in sections["optimizer"]["staged"]["start_from"]
+        entry = get(sections["fit_variables"], name, nothing)
+        (entry !== nothing && entry["vary"]) || throw(ArgumentError(
+            "read_deck: \"optimizer.staged.start_from\" names \"$name\", which is not a fitted " *
+            "variable of [fit.variables] (declared, with vary = true)"))
+        (chan isa AbstractString && chan in channel_names) || throw(ArgumentError(
+            "read_deck: \"optimizer.staged.start_from.$name\" must name a channel of \"channels\", " *
+            "$channel_names; got $(repr(chan))"))
+    end
+    return nothing
 end
 
 # ------------------------------------------------------------------------------------------
@@ -981,6 +1055,7 @@ function read_deck(path::AbstractString)
         _validate_regularizer_section(raw["regularizer"]) : nothing
 
     sections["optimizer"] = _validate_optimizer_section(get(raw, "optimizer", Dict{String,Any}()))
+    _check_staged_deck(sections, is_channel_form ? String[e["name"] for e in channel_entries] : nothing)
 
     sections["output"] = haskey(raw, "output") ? _validate_output_section(raw["output"]) : nothing
 
@@ -1293,6 +1368,10 @@ end
 
 function _build_optimizer(section::AbstractDict)
     procedure = section["procedure"]
+    # Phase 4.F spec D3: a staged deck's optimizer is its joint stage's, built from the same
+    # option tables; the stages themselves are _staged_fit's.
+    procedure == STAGED_PROCEDURE && return _build_optimizer(
+        merge(section, Dict{String,Any}("procedure" => section["staged"]["joint_procedure"])))
     keys_ = procedure == "noisy_descent_lbfgs" ? ["noisy_descent", "lbfgs"] :
             procedure isa AbstractVector ? procedure : [procedure]
     members = [_build_one_optimizer(k, section) for k in keys_]
@@ -1632,6 +1711,153 @@ function effective_deck(deck::Deck, problem::AbstractFitProblem, ::AbstractOptim
 end
 
 # ------------------------------------------------------------------------------------------
+# The staged procedure (Phase 4.F, Step 4.F.1; OQ-54, the user's decision of 2026-09-30)
+# ------------------------------------------------------------------------------------------
+
+"""
+    _variable_channels(pspec::ParameterSpec, nchannels::Int) -> Vector{Vector{Int}}
+
+For each variable of `pspec.variables`, in order, the channels whose model it reaches, ascending
+(Phase 4.F spec D5): every channel through a `:leaf` binding (the plasma is shared), channel `c`
+through an `:effect` binding of channel `c`, each counted for the variable itself and for every
+variable a bound dependent reads, directly or through earlier dependents. Empty for a variable
+bound to nothing.
+"""
+function _variable_channels(pspec::ParameterSpec, nchannels::Int)
+    nvar = length(pspec.variables)
+    dep_vars = Vector{Set{Int}}(undef, length(pspec.dependents))
+    for (k, dep) in enumerate(pspec.dependents)
+        refs = Set{Int}()
+        _referenced_slots!(refs, dep.node)
+        acc = Set{Int}()
+        for r in refs
+            r <= nvar ? push!(acc, r) : union!(acc, dep_vars[r-nvar])
+        end
+        dep_vars[k] = acc
+    end
+    reach = [Set{Int}() for _ in 1:nvar]
+    for b in pspec.bindings
+        vars = b.slot <= nvar ? Set([b.slot]) : dep_vars[b.slot-nvar]
+        chans = b.kind === :leaf ? (1:nchannels) : (b.channel:b.channel)
+        for i in vars
+            union!(reach[i], chans)
+        end
+    end
+    return [sort!(collect(r)) for r in reach]
+end
+
+"""
+    _stage_deck(deck::Deck, c::Int, procedure, frozen::AbstractVector{<:AbstractString}) -> Deck
+
+Channel `c`'s single-channel deck, derived from the parsed channel deck (Phase 4.F spec D4), as
+`examples/problems.jl`'s `single_channel_deck_text` derives it from text: `channels` is that one
+channel, its weight `1.0` (a weight only scales a channel against others); `[optimizer]` is the
+channel deck's own option tables with `procedure = procedure` and no `staged` table; every name in
+`frozen` is `vary = false`, at its `init`. Everything else (the variables, dependents, intervals,
+regions, plasma, regularizer, output) is the channel deck's own, deep-copied.
+"""
+function _stage_deck(deck::Deck, c::Int, procedure, frozen::AbstractVector{<:AbstractString})
+    s = deepcopy(deck.sections)
+    entry = s["channels"][c]
+    entry["weight"] = 1.0
+    s["channels"] = Dict{String,Any}[entry]
+    opt = Dict{String,Any}(k => v for (k, v) in s["optimizer"] if k != "staged")
+    opt["procedure"] = procedure
+    s["optimizer"] = opt
+    for name in frozen
+        s["fit_variables"][name]["vary"] = false
+    end
+    return Deck(deck.deck_version, s)
+end
+
+"""
+    _staged_fit(deck::Deck; stage_procedure, joint_optimizer, polish_tol, start_from) -> NamedTuple
+
+The staged procedure (Phase 4.F spec D4 to D6, [OQ-54](../../dev/open_questions.md#oq-54)), on a
+channel deck with two or more channels. Each keyword defaults to the deck's own
+`[optimizer.staged]` (`joint_optimizer` built from `joint_procedure` and the deck's option tables
+by `_build_optimizer`), which is how `fit(deck)` and `examples/fit_shapes.jl` call it; a deck whose
+procedure is not `"staged"` is fitted the same way when all four are given
+(`examples/problems.jl`'s `staged_joint_fit`). The procedure:
+
+1. `build_problem(deck)`, the joint problem; each fitted variable's reach (`_variable_channels`);
+   **every fitted variable's source stage, before anything is fitted**: the channel `start_from`
+   names, or else the first channel, in `channels` order, that it reaches. A variable that reaches
+   no channel, or a `start_from` channel it does not reach, is a loud error naming it.
+2. For each channel in order, its stage deck (`_stage_deck`, every variable that does not reach
+   that channel frozen at its `init`), `build_problem`, `solve` with `stage_procedure`'s optimizer
+   from the deck's own start.
+3. The joint start `flatten(pspec, name => values)` over the fitted variables, each from its
+   source stage's `FitResult.values` (a scalar variable's one value), by bin index: the stages
+   share the deck's regions and so the bin count.
+4. `solve(problem, joint_optimizer; start)`, then `polish(problem, result; tol = polish_tol)`.
+
+Returns `(; deck, problem, optimizer = joint_optimizer, start, result, decreases, stages,
+sources)`: `result` and `decreases` `polish`'s; `stages` one `(; name, deck, problem, result,
+frozen)` per channel; `sources` one `name => channel` per fitted variable, in `pspec.variables`
+order. Pins nothing: `fit(deck)` pins BLAS before calling it (`conventions.md` 6.6).
+"""
+function _staged_fit(deck::Deck;
+    stage_procedure=deck.sections["optimizer"]["staged"]["stage_procedure"],
+    joint_optimizer::AbstractOptimizer=_build_optimizer(deck.sections["optimizer"]),
+    polish_tol::Real=deck.sections["optimizer"]["staged"]["polish_tol"],
+    start_from::AbstractDict=deck.sections["optimizer"]["staged"]["start_from"])
+    chan_list = _channel_list(deck.sections)
+    nch = length(chan_list)
+    names = String[c["name"] for c in chan_list]
+    (haskey(deck.sections, "channels") && nch >= 2) || throw(ArgumentError(
+        "fit: the staged procedure needs a channel-form deck with two or more channels"))
+
+    problem, _, _ = build_problem(deck)
+    pspec = problem.pspec
+    reach = _variable_channels(pspec, nch)
+
+    sources = Pair{String,String}[]
+    source_index = Dict{String,Int}()
+    frozen = [String[] for _ in 1:nch]
+    for (i, v) in enumerate(pspec.variables)
+        v.vary || continue
+        chans = reach[i]
+        isempty(chans) && throw(ArgumentError(
+            "fit: procedure \"staged\": the fitted variable \"$(v.name)\" reaches no channel's " *
+            "model (it is bound to nothing, directly or through a dependent), so no stage fits it"))
+        for c in 1:nch
+            c in chans || push!(frozen[c], v.name)
+        end
+        src = first(chans)
+        if haskey(start_from, v.name)
+            src = findfirst(==(start_from[v.name]), names)
+            src in chans || throw(ArgumentError(
+                "fit: [optimizer.staged] start_from takes \"$(v.name)\" from channel " *
+                "\"$(names[src])\", whose stage freezes it: it reaches only $(names[chans])"))
+        end
+        push!(sources, v.name => names[src])
+        source_index[v.name] = src
+    end
+
+    stages = NamedTuple[]
+    for c in 1:nch
+        sdeck = _stage_deck(deck, c, stage_procedure, frozen[c])
+        p_c, opt_c, start_c = build_problem(sdeck)
+        r_c = solve(p_c, opt_c; start=start_c)
+        push!(stages, (name=names[c], deck=sdeck, problem=p_c, result=r_c, frozen=frozen[c]))
+    end
+
+    values = Pair{String,Any}[]
+    for v in pspec.variables
+        v.vary || continue
+        row = stages[source_index[v.name]].result.values[v.name]
+        push!(values, v.name => (v.time_varying ? row : row[1]))
+    end
+    start = flatten(pspec, values)
+    joint = solve(problem, joint_optimizer; start=start)
+    pol = polish(problem, joint; tol=polish_tol)
+
+    return (; deck, problem, optimizer=joint_optimizer, start, result=pol.result,
+        decreases=pol.decreases, stages, sources)
+end
+
+# ------------------------------------------------------------------------------------------
 # fit
 # ------------------------------------------------------------------------------------------
 
@@ -1707,7 +1933,8 @@ returns `_near_bound_entries(result)` either way. It changes nothing: the fit, i
 its `status` (OQ-36) and the result `fit(deck)` writes are exactly as they would be without it.
 `SATURATION_FRACTION`'s warning (`_warn_fit_minimum`) still fires beside it at its own threshold;
 this one sees the single saturated coordinate that one cannot (Phase 4.B's A14). Called by
-`fit(deck)` after `solve`, and by the slow tier's TS2 and FR11 on fits `fit(deck)` does not make.
+`fit(deck)` after `solve`, and by the slow tier's FR11 on fits `fit(deck)` does not make (TS2's
+staged fit goes through `fit(deck)` since Phase 4.F, spec D9).
 """
 function _warn_near_bound(result::FitResult)
     entries = _near_bound_entries(result)
@@ -1744,14 +1971,27 @@ fitted entry within `BOUND_PROXIMITY_TOL` of a bound (a variable and its bins, o
 when there is none, and `write_result` lists the same entries in `fit/near_bound_entries/*`. Neither
 changes the fit: its `theta`, `converged` and `status` are `solve`'s.
 
+**The staged procedure** (Phase 4.F spec D3 to D7, [OQ-54](../../dev/open_questions.md#oq-54)):
+with `procedure = "staged"`, `fit` pins BLAS and runs `_staged_fit` in place of `build_problem`
+and `solve`: each channel fitted alone, the joint fit started from those fits, then `polish`. Every
+check, warning and file this docstring describes is the final fit's, and `write_result` also
+writes the stages' results (`stages/*`).
+
 Spec D33, D40.
 """
 function fit(deck::Deck)
     deck.sections["output"] === nothing && throw(ArgumentError(
         "fit: the deck has no \"[output]\" section (needs \"dir\")"))
-    problem, optimizer, start = build_problem(deck)
-    pin_blas_threads()
-    result = solve(problem, optimizer; start=start)
+    staged = nothing
+    if deck.sections["optimizer"]["procedure"] == STAGED_PROCEDURE
+        pin_blas_threads()
+        staged = _staged_fit(deck)
+        problem, optimizer, result = staged.problem, staged.optimizer, staged.result
+    else
+        problem, optimizer, start = build_problem(deck)
+        pin_blas_threads()
+        result = solve(problem, optimizer; start=start)
+    end
     decrease = _fit_gn_decrease(problem, result)
     _warn_fit_minimum(result, decrease, _near_bound_fraction(result))
     _warn_near_bound(result)
@@ -1759,7 +1999,7 @@ function fit(deck::Deck)
     mkpath(dir)
     eff = effective_deck(deck, problem, optimizer)
     write_result(joinpath(dir, "result.jld2"), result; problem=problem, deck=eff, source="fit",
-        gn_decrease=decrease)
+        gn_decrease=decrease, stages=staged)
     open(joinpath(dir, "effective_deck.toml"), "w") do io
         write(io, eff)
     end

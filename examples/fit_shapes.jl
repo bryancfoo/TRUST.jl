@@ -10,6 +10,11 @@
 # The wavelength calibration is added in code, through with_wavelength_calibration, into a copy
 # of each deck written under runs/shapes/<name>/uncertainty/ (not committed, runs/ is gitignored);
 # examples/shapes_<name>.toml itself is not edited.
+#
+# The staged fit is the deck's own since Phase 4.F (spec D8): the copy is also given procedure =
+# "staged" in code (with_staged_procedure: each stage with the deck's own Levenberg-Marquardt, T_D
+# from the IAW stage), and OTIS._staged_fit runs it -- the function fit(deck) runs, called here
+# because the uncertainty reports below need its problem, which fit(deck) does not return.
 
 using OTIS
 using Statistics: median
@@ -37,10 +42,12 @@ function _fit_one_shape(spec)
     text = with_wavelength_calibration(read(deck_source, String))
     joint_outdir = replace(joinpath(outdir, "joint"), "\\" => "/")
     text = replace(text, "dir = \"runs/shapes/$(nm)/joint\"" => "dir = \"$joint_outdir\"")
+    text = with_staged_procedure(text; stage_procedure="levenberg_marquardt",
+        start_from=Dict{String,Any}("T_D" => "iaw"))
     deckpath = joinpath(outdir, "deck.toml")
     write(deckpath, text)
 
-    t_staged = @elapsed st = staged_joint_fit(deckpath; shape_variable=spec.shape_variable)
+    t_staged = @elapsed st = OTIS._staged_fit(read_deck(deckpath))
     @info "fit_shapes[$nm]: staged fit done" elapsed_s = t_staged decrease = st.decreases[end] status = st.result.status
     flush(stderr)
     for c in st.result.channels
