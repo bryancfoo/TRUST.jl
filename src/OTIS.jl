@@ -22,6 +22,7 @@ include("instrument/effects.jl")          # new (2.2): needs ProbeBeam, Collecti
 include("instrument/background.jl")       # new (2.2)
 include("instrument/experiment.jl")       # new (2.2): needs the effects and PlasmaTrace
 include("instrument/measure.jl")          # new (2.2/2.3): needs Experiment and spectrum!
+include("instrument/resonance.jl")        # new (4.F.2): the EPW resonance's width; needs PixelIntegration, dielectric
 include("data/streak.jl")                 # new (2.4)
 include("data/io.jl")                     # new (2.4): needs StreakData and PlasmaTrace
 include("data/warp.jl")                   # new (3.8): WarpMap, dewarp, read_warpmap; needs StreakData
@@ -71,7 +72,7 @@ export ProbeBeam, Collection, wavevector, polarization_factor, kdirection, detec
 # instrument (2.2, 2.3, 2.3a, 2.3b)
 export AbstractInstrumentEffect, SpectralIRF, TemporalIRF, KSmearing, GradientSmearing,
        WavelengthCalibration, Sensitivity, ConstantBackground, PolynomialBackground,
-       ImageBackground, RationalBackground, GaussianKernel, TabulatedKernel
+       ImageBackground, RationalBackground, GaussianKernel, TabulatedKernel, PixelIntegration
 export Experiment, measure, ideal_streak, ideal_streak!, islinear, stage, samples, apply!
 export foreach_bin!, pin_blas_threads
 

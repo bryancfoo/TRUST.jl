@@ -28,6 +28,7 @@
 
 import TOML
 using LinearAlgebra: PosDefException
+using Printf: @sprintf
 
 const DECK_VERSION = "otis-deck-2"
 
@@ -575,7 +576,7 @@ end
 const _INSTRUMENT_SINGLE_REGISTRY_NAME = Dict{String,String}(
     "spectral_irf" => "SpectralIRF", "temporal_irf" => "TemporalIRF", "k_smearing" => "KSmearing",
     "gradient_smearing" => "GradientSmearing", "wavelength_calibration" => "WavelengthCalibration",
-    "sensitivity" => "Sensitivity")
+    "sensitivity" => "Sensitivity", "pixel_integration" => "PixelIntegration")
 const _INSTRUMENT_TOP_KEYS = (keys(_INSTRUMENT_SINGLE_REGISTRY_NAME)..., "background")
 
 const _INSTRUMENT_OPTIONS = Dict{String,Any}(
@@ -583,7 +584,7 @@ const _INSTRUMENT_OPTIONS = Dict{String,Any}(
     "KSmearing" => KSmearingOptions, "GradientSmearing" => GradientSmearingOptions,
     "WavelengthCalibration" => WavelengthCalibrationOptions, "Sensitivity" => SensitivityOptions,
     "Constant" => ConstantBackgroundOptions, "Polynomial" => PolynomialBackgroundOptions,
-    "Rational" => RationalBackgroundOptions)
+    "Rational" => RationalBackgroundOptions, "PixelIntegration" => PixelIntegrationOptions)
 
 """
     _SIGMA_PER_FWHM
@@ -1248,7 +1249,8 @@ const _EFFECT_CTOR = Dict{String,Any}(
     "SpectralIRF" => SpectralIRF, "TemporalIRF" => TemporalIRF, "KSmearing" => KSmearing,
     "GradientSmearing" => GradientSmearing, "WavelengthCalibration" => WavelengthCalibration,
     "Sensitivity" => Sensitivity, "Constant" => ConstantBackground,
-    "Polynomial" => PolynomialBackground, "Rational" => RationalBackground)
+    "Polynomial" => PolynomialBackground, "Rational" => RationalBackground,
+    "PixelIntegration" => PixelIntegration)
 
 """
     _build_effect_and_pending!(pending, regname, filled, vals, template) -> AbstractInstrumentEffect
@@ -1536,8 +1538,8 @@ function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
         chan = chan_list[c]
         pending = Tuple{String,Any,Symbol,Int,Float64,String}[]
         effects = AbstractInstrumentEffect[]
-        for key in ("k_smearing", "gradient_smearing", "wavelength_calibration", "spectral_irf",
-                    "temporal_irf", "sensitivity")
+        for key in ("k_smearing", "gradient_smearing", "wavelength_calibration", "pixel_integration",
+                    "spectral_irf", "temporal_irf", "sensitivity")
             haskey(chan["instrument"], key) || continue
             regname = _INSTRUMENT_SINGLE_REGISTRY_NAME[key]
             push!(effects, _build_effect_and_pending!(pending, regname, chan["instrument"][key], vals, template))
@@ -1858,6 +1860,100 @@ function _staged_fit(deck::Deck;
 end
 
 # ------------------------------------------------------------------------------------------
+# The resonance-width check (Phase 4.F, Step 4.F.2; OQ-53, the user's decision of 2026-09-30)
+# ------------------------------------------------------------------------------------------
+
+"""
+    _resonance_widths(result::FitResult) -> Vector{Vector{Float64}}
+
+One vector per channel of `result.experiments`, one entry per bin of the fitted axis: the
+narrowest EPW resonance's full width at half maximum in that channel's wavelength pixels at the
+bin's fitted plasma (`_epw_resonance_widths`), `Inf` where the window holds no resonance or the
+bin's plasma has a non-finite leaf (a variable outside its interval). Phase 4.F spec D13.
+"""
+function _resonance_widths(result::FitResult)
+    out = Vector{Vector{Float64}}()
+    for expt in result.experiments
+        first_order = _prefactor_flag(expt.prefactor)
+        tr = expt.trace
+        w = fill(Inf, nbins(tr))
+        for j in 1:nbins(tr)
+            all(isfinite, view(tr.values, :, j)) || continue
+            ws = _epw_resonance_widths(plasma(tr, j), expt.probe, expt.collection, expt.lambda,
+                first_order)
+            isempty(ws) || (w[j] = minimum(ws))
+        end
+        push!(out, w)
+    end
+    return out
+end
+
+"""
+    _narrow_resonance_entries(result, widths) -> Vector{@NamedTuple{channel::String, bin::Int, fwhm_px::Float64, subsamples::Int}}
+
+Every bin of every channel whose resonance is narrower than `RESONANCE_WIDTH_WARN` pixels and
+whose channel's sub-sample count (`_subsamples` over its effects, 1 without a `PixelIntegration`)
+is below `_recommended_subsamples` of that width; `subsamples` is the channel's count today.
+Channels in order, then bins ascending. Phase 4.F spec D15.
+"""
+function _narrow_resonance_entries(result::FitResult, widths)
+    entries = @NamedTuple{channel::String, bin::Int, fwhm_px::Float64, subsamples::Int}[]
+    for (c, expt) in enumerate(result.experiments)
+        n = maximum(_subsamples, expt.effects; init=1)
+        for (j, w) in enumerate(widths[c])
+            (w < RESONANCE_WIDTH_WARN && n < _recommended_subsamples(w)) || continue
+            push!(entries, (channel=result.channels[c].name, bin=j, fwhm_px=w, subsamples=n))
+        end
+    end
+    return entries
+end
+
+"""
+    _narrow_resonance_message(result::FitResult, entries) -> String
+
+The text of `_warn_narrow_resonance`'s warning (Phase 4.F spec D15): a first line with the count
+and the reason, then one line per channel with an entry, its bins and widths in pixels to two
+decimals, and the key to refit with, `pixel_integration = { subsamples = N }`, `N`
+`_recommended_subsamples` of the channel's narrowest width, in that channel's instrument table
+(`[instrument]` for a shorthand deck's one channel, `"main"`).
+"""
+function _narrow_resonance_message(result::FitResult, entries)
+    n = length(entries)
+    head = n == 1 ? "fit: 1 bin has" : "fit: $n bins have"
+    lines = String[head * " an EPW resonance narrower than RESONANCE_WIDTH_WARN = " *
+                   "$RESONANCE_WIDTH_WARN wavelength pixel, which the model's sampling of each pixel " *
+                   "aliases (the result is as fitted; refit with the key named for each channel):"]
+    for chan in unique(e.channel for e in entries)
+        mine = [e for e in entries if e.channel == chan]
+        bins = (length(mine) == 1 ? "bin " : "bins ") * join((e.bin for e in mine), ", ")
+        fwhm = join((@sprintf("%.2f", e.fwhm_px) for e in mine), ", ")
+        rec = _recommended_subsamples(minimum(e.fwhm_px for e in mine))
+        table = (length(result.channels) == 1 && chan == "main") ? "[instrument]" :
+                "[channel.$chan.instrument]"
+        push!(lines, "  $chan: $bins (FWHM $fwhm px; $(mine[1].subsamples) per pixel now); " *
+                     "$table pixel_integration = { subsamples = $rec }")
+    end
+    return join(lines, "\n")
+end
+
+"""
+    _warn_narrow_resonance(result::FitResult) -> Vector{@NamedTuple{channel::String, bin::Int, fwhm_px::Float64, subsamples::Int}}
+
+[OQ-53](../../dev/open_questions.md#oq-53) (a), the user's decision of 2026-09-30 (Phase 4.F spec
+D13 to D16): one `@warn` when a fitted bin's EPW resonance is narrower than
+`RESONANCE_WIDTH_WARN` pixels and its channel samples each pixel at fewer points than the width
+asks for (`_narrow_resonance_entries`), naming the channels, bins and the count to refit with;
+silent otherwise; returns the entries either way. A report: the fit, its `converged`, `status`,
+`theta` and every dataset `write_result` writes are exactly as they would be without it.
+"""
+function _warn_narrow_resonance(result::FitResult)
+    entries = _narrow_resonance_entries(result, _resonance_widths(result))
+    isempty(entries) && return entries
+    @warn _narrow_resonance_message(result, entries) threshold = RESONANCE_WIDTH_WARN status = result.status converged = result.converged
+    return entries
+end
+
+# ------------------------------------------------------------------------------------------
 # fit
 # ------------------------------------------------------------------------------------------
 
@@ -1977,6 +2073,12 @@ and `solve`: each channel fitted alone, the joint fit started from those fits, t
 check, warning and file this docstring describes is the final fit's, and `write_result` also
 writes the stages' results (`stages/*`).
 
+**The resonance-width check** (Phase 4.F spec D13 to D16, [OQ-53](../../dev/open_questions.md#oq-53)):
+after the saturation warning, `fit` calls `_warn_narrow_resonance(result)`, one warning when a
+fitted bin's EPW resonance is narrower than `RESONANCE_WIDTH_WARN` wavelength pixels and its
+channel does not yet sample each pixel finely enough, naming the bins and the
+`pixel_integration` count to refit with; silent otherwise. It changes nothing.
+
 Spec D33, D40.
 """
 function fit(deck::Deck)
@@ -1995,6 +2097,7 @@ function fit(deck::Deck)
     decrease = _fit_gn_decrease(problem, result)
     _warn_fit_minimum(result, decrease, _near_bound_fraction(result))
     _warn_near_bound(result)
+    _warn_narrow_resonance(result)
     dir = deck.sections["output"]["dir"]
     mkpath(dir)
     eff = effective_deck(deck, problem, optimizer)

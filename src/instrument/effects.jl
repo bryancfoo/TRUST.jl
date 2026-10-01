@@ -460,6 +460,120 @@ function samples(e::WavelengthCalibration, p::Plasma, probe::ProbeBeam, collecti
     return ((one(FT), p, probe, collection, axis),)
 end
 
+"""
+    PixelIntegration <: AbstractInstrumentEffect
+
+The detector pixel's integration over its own width, sampled ([OQ-53](../../dev/open_questions.md#oq-53),
+the user's decision of 2026-09-30; Phase 4.F spec D10): the spectrum the kernel evaluates for the
+pixel at `λ_l` is the mean of its values at the `N = subsamples` points
+
+    λ_l + (i − (N+1)/2) · Δ_l / N,    i = 1, …, N,    Δ_l = (λ_{l+1} − λ_{l−1}) / 2
+
+(one-sided at the axis's two ends: `Δ_1 = λ_2 − λ_1`, `Δ_n = λ_n − λ_{n−1}`), equal weights `1/N`,
+so that the spectral IRF convolves pixel-averaged samples rather than pixel-centre ones. `N = 1`
+is the pixel centre, exactly today's model: weight `1.0` and an offset of `0.0`.
+
+**The innermost in-kernel effect, always**: `Experiment` sorts it after every other effect of
+chain order 1 (`_kernel_rank`), so it receives the axis `WavelengthCalibration` has already
+perturbed and its `Δ_l` is that axis's own spacing, and every node of `KSmearing` and
+`GradientSmearing` is sub-sampled. At most one per chain (`_chain_class`). No fittable parameter.
+The count is a field, not a type parameter, so every count shares one compiled kernel.
+
+Built with `PixelIntegration(; subsamples::Integer = 1)`; `subsamples` a positive integer.
+
+Spec D10, D11 (Phase 4.F, Step 4.F.2, 2026-09-30).
+"""
+struct PixelIntegration <: AbstractInstrumentEffect
+    subsamples::Int
+    function PixelIntegration(; subsamples::Integer=1)
+        subsamples >= 1 || throw(ArgumentError(
+            "PixelIntegration: subsamples must be a positive integer; got $subsamples"))
+        return new(Int(subsamples))
+    end
+end
+
+stage(::PixelIntegration) = :kernel
+_chain_order(::PixelIntegration) = 1
+islinear(::PixelIntegration) = false
+_chain_class(::PixelIntegration) = :PixelIntegration
+parameters(::PixelIntegration) = NamedTuple()
+reconstruct(e::PixelIntegration, ::NamedTuple) = e
+
+"""
+    _kernel_rank(effect::AbstractInstrumentEffect) -> Int
+
+The order of an effect among those of one `_chain_order` (spec D11): `0` for every effect but
+`PixelIntegration`, `1` for it, so `Experiment`'s stable sort puts it after every other in-kernel
+effect, whatever order the chain was given in, and leaves every other chain exactly as before.
+"""
+_kernel_rank(::AbstractInstrumentEffect) = 0
+_kernel_rank(::PixelIntegration) = 1
+
+"""
+    _prepare(e::PixelIntegration, lambda, t)
+
+`nothing`, after checking that `lambda` has at least two pixels: one pixel has no width to
+integrate over.
+"""
+function _prepare(::PixelIntegration, lambda::AbstractVector, t::AbstractVector)
+    length(lambda) >= 2 || throw(ArgumentError(
+        "PixelIntegration: the wavelength axis needs at least two pixels to give a pixel a width; got $(length(lambda))"))
+    return nothing
+end
+
+"""
+    _SubsampledAxis{FT<:Real,V<:AbstractVector} <: AbstractVector{FT}
+
+The lazy, never-materialized axis of one `PixelIntegration` sample: `a[l] = base[l] + c · Δ_l`,
+`Δ_l` the centred spacing of `base` at `l` (one-sided at the ends), `c = (i − (N+1)/2)/N`.
+Computed on indexing, as `_CalibratedAxis` is, so a sample costs no `N_λ`-element allocation in
+the value pass or the dual pass.
+
+Spec D10.
+"""
+struct _SubsampledAxis{FT<:Real,V<:AbstractVector} <: AbstractVector{FT}
+    base::V
+    c::FT
+end
+
+"""
+    _subsample_lambda(lambda::AbstractVector, l::Int, c) -> Real
+
+`lambda[l] + c · Δ_l`, `Δ_l` the centred spacing of `lambda` at `l`, one-sided at the two ends
+(spec D10): the one formula for a sub-sample's wavelength, read by `_SubsampledAxis` and by the
+kernel's own fold over `PixelIntegration` (`measure.jl`).
+"""
+@inline function _subsample_lambda(lambda::AbstractVector, l::Int, c)
+    n = length(lambda)
+    lo = l == 1 ? 1 : l - 1
+    hi = l == n ? n : l + 1
+    return lambda[l] + c * ((lambda[hi] - lambda[lo]) / (hi - lo))
+end
+
+Base.size(a::_SubsampledAxis) = size(a.base)
+Base.IndexStyle(::Type{<:_SubsampledAxis}) = IndexLinear()
+@inline Base.getindex(a::_SubsampledAxis, l::Int) = _subsample_lambda(a.base, l, a.c)
+
+"""
+    samples(e::PixelIntegration, p::Plasma, probe::ProbeBeam, collection::Collection, lambda::AbstractVector) -> Vector
+
+`N = e.subsamples` samples, each the plasma, the probe and the collection untouched and the axis
+a lazy `_SubsampledAxis` of `lambda`, each weighted `1/N`: the in-kernel effect's contract, as a
+`Vector` rather than a tuple since `N` is a runtime value. The kernel never calls it: it folds the
+same samples, in the same order, through its own method of `_accumulate!` (`measure.jl`, spec
+D11), since `PixelIntegration` is always the last in-kernel effect.
+
+Spec D10.
+"""
+function samples(e::PixelIntegration, p::Plasma, probe::ProbeBeam, collection::Collection,
+                  lambda::AbstractVector)
+    N = e.subsamples
+    FT = promote_type(eltype(lambda), Float64)
+    w = 1.0 / N
+    return [(w, p, probe, collection, _SubsampledAxis{FT,typeof(lambda)}(lambda, FT((i - (N + 1) / 2) / N)))
+            for i in 1:N]
+end
+
 # --- D12: the post-kernel IRFs and Sensitivity ---
 
 """
@@ -794,5 +908,6 @@ end
 Base.show(io::IO, e::WavelengthCalibration) =
     @printf(io, "WavelengthCalibration(%+.3f nm, dispersion_scale = %.3e)",
         lambda_from_si(e.offset, :lambda_nm), e.dispersion_scale)
+Base.show(io::IO, e::PixelIntegration) = print(io, "PixelIntegration($(e.subsamples) subsamples)")
 Base.show(io::IO, e::Sensitivity{FT,Nothing,Nothing}) where {FT} = @printf(io, "Sensitivity(%.1e)", e.scale)
 Base.show(io::IO, e::Sensitivity) = @printf(io, "Sensitivity(%.1e, response curve)", e.scale)

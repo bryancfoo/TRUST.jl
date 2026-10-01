@@ -179,6 +179,17 @@ Base.@kwdef struct RationalBackgroundOptions
     denominator::Vector{Float64} = Float64[]
 end
 
+"""
+    PixelIntegrationOptions
+
+The deck key for `PixelIntegration` (Phase 4.F spec D12): `subsamples`, the points per pixel,
+`1` by default. A deck without the key builds no `PixelIntegration` at all; `subsamples = 1`
+builds one that is the pixel centre exactly.
+"""
+Base.@kwdef struct PixelIntegrationOptions
+    subsamples::Int = 1
+end
+
 # --- the staged procedure's option struct (Phase 4.F spec D3) ---
 
 """

@@ -4,7 +4,8 @@
 > Julia 1.12.7. This document's parts 1 to 4 are written at Step 2.2, alongside
 > `src/instrument/effects.jl`, `src/instrument/background.jl` and
 > `src/instrument/experiment.jl`. Part 5 (the noise model) is Step 2.5's; Part 6
-> (`RationalBackground`) is Step 2.3b's.
+> (`RationalBackground`) is Step 2.3b's; Part 7 (`PixelIntegration` and the resonance-width check)
+> is Phase 4.F's Step 4.F.2 (2026-09-30).
 
 ## 1. The chain
 
@@ -13,7 +14,9 @@ order ([OQ-13](../../dev/open_questions.md#oq-13)):
 
 - **Group 1, inside the per-bin kernel**: effects that change what physics is evaluated rather
   than acting on the streak — `KSmearing`, `GradientSmearing`, `WavelengthCalibration`. Any
-  number of these may be given; they run in the user's own relative order.
+  number of these may be given; they run in the user's own relative order. `PixelIntegration`
+  (Section 7) is one more, at most one per chain, and always runs last of them, whatever the
+  order given.
 - **Group 2, after the per-bin loop, in this fixed order**: `SpectralIRF`, `TemporalIRF`,
   `Sensitivity`, then any number of backgrounds.
 
@@ -124,7 +127,7 @@ this effect be pushed through as a fixed linear operator?*
 |---|---|---|
 | `SpectralIRF`, `TemporalIRF`, `Sensitivity` | `true` | each is a fixed matrix or scalar multiplication of the streak |
 | `ConstantBackground`, `PolynomialBackground`, `ImageBackground` | `false` | **affine**, not linear: `effect(aP+bQ) - a·effect(P) - b·effect(Q) = (1-a-b)·B`, tested directly (EF15, BG4) |
-| `KSmearing`, `GradientSmearing`, `WavelengthCalibration` | `false` | these act on the **plasma** or the **evaluation axis**, not the streak — `effect(aP+bQ) = a·effect(P)+b·effect(Q)` is not even a meaningful statement about them, since they change what is evaluated rather than post-processing a value that already exists |
+| `KSmearing`, `GradientSmearing`, `WavelengthCalibration`, `PixelIntegration` | `false` | these act on the **plasma** or the **evaluation axis**, not the streak — `effect(aP+bQ) = a·effect(P)+b·effect(Q)` is not even a meaningful statement about them, since they change what is evaluated rather than post-processing a value that already exists |
 
 Every effect with `islinear(e) == true` satisfies the linear identity to round-off (EF14); every
 background satisfies the affine identity instead (EF15, BG4); the three kernel effects have
@@ -233,3 +236,81 @@ Like the other three backgrounds, `stage = :detector`, `_chain_order = 5`, `isli
 e.numerator, denominator = e.denominator)`, both tuple-valued, which is why `_effect_eltype`
 (spec D16) flattens a tuple-valued parameter generically rather than special-casing
 `PolynomialBackground`'s `coefficients` by name (spec D46).
+
+## 7. `PixelIntegration` and the resonance-width check
+
+**Decided by the user, 2026-09-30** ([OQ-53](../../dev/open_questions.md#oq-53); Phase 4.F spec
+D10 to D16, Step 4.F.2). **Why.** The per-bin kernel evaluates the spectrum at each pixel's centre
+wavelength, and `SpectralIRF` then convolves those samples; a detector integrates the blurred
+spectrum over each pixel instead. The two agree while the spectrum varies slowly across a pixel.
+An electron-plasma-wave resonance can be far narrower than one: its width follows the Landau
+damping at the resonance's `ξ`, which falls steeply with `m` for a flat-topped shape and, for any
+shape, exponentially with `ξ`, that is with `α`. Phase 4.E found a `GeneralizedNormal` resonance
+0.198 of a pixel wide (bin 25 of the two-channel shapes fit, `m` 5.4658), whose true peak is 16.7
+times the largest value any pixel centre sees, and an objective along `m` with spurious minima, one
+of which the fit sat in (`generalized_normal.md` Section 8). The synthetic data are made by the
+same sampled model, so a synthetic fit cannot see the error as a misfit; real data can.
+
+**The sampled integral.** `PixelIntegration(subsamples = N)` replaces the pixel-centre value by the
+mean of `N` equally spaced samples across the pixel:
+
+    S̄_l = (1/N) Σ_{i=1}^{N} S(λ_l + (i − (N+1)/2) · Δ_l / N),    Δ_l = (λ_{l+1} − λ_{l−1}) / 2,
+
+one-sided at the two ends of the axis (`Δ_1 = λ_2 − λ_1`, `Δ_n = λ_n − λ_{n−1}`). On a uniform axis
+`Δ_l` is the pitch and the points are the midpoints of `N` equal sub-pixels: the midpoint rule for
+the pixel's mean (a box), equal weights. On a non-uniform axis the pixel is taken symmetric about
+its centre with the centred spacing as its width, exact for a uniform axis and first-order
+otherwise. `SpectralIRF` then convolves `S̄`, so the order of operations is the detector's: blur,
+then integrate, with the integral applied to the unblurred spectrum, which the linearity of the
+convolution allows.
+
+**Where it sits.** It is an in-kernel effect (`stage = :kernel`, `_chain_order = 1`), at most one per
+chain, with no fittable parameter, and `Experiment` always sorts it **after** every other in-kernel
+effect (`_kernel_rank`), so that every node of `KSmearing` and `GradientSmearing` is sub-sampled and
+the axis it sub-samples is `WavelengthCalibration`'s perturbed one, with that axis's own spacing
+`(1 + dispersion_scale) · Δ`. The kernel folds it with its own method of `_accumulate!`
+(`src/instrument/measure.jl`), the same samples, weights and order as `samples(::PixelIntegration)`
+(PI3 checks them bitwise against each other): through `samples`' lazy axes, the per-bin dual pass
+allocated 14 400 bytes a bin with every in-kernel parameter bound (Level 2, 2026-09-30), and through
+the method it allocates none. **`N = 1` is today's model exactly**: the method returns the
+pixel-centre fold itself, and a deck that does not name the key builds no `PixelIntegration` at all.
+
+**How finely.** Measured on Phase 4.E's bin 25 (one bin, the two-channel EPW window of 256 pixels,
+`SpectralIRF` 0.5 nm and `Sensitivity`; the largest difference from `N = 64` over the largest value
+of the `N = 64` column; PI5):
+
+| `N` | 1 | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|---|
+| error | 0.692 | 0.103 | 0.198 | 0.0118 | 7.7e-4 |
+
+**Not monotonic**: at `N = 4` the sub-sample spacing, 0.25 of a pixel, is still wider than the
+0.198-pixel line, which is aliased again. Once the spacing is half the line's width or less the
+error falls as the midpoint rule's does, so the count the check recommends (below) is the smallest
+power of two at or above `2 / w`, `w` the width in pixels: 16 here. The cost is about `N` times the
+forward model and the Jacobian (Phase 4.F spec D18).
+
+**The resonance-width check** (`src/instrument/resonance.jl`, `fit(deck)`). After its other warnings,
+`fit(deck)` evaluates, at every bin's fitted plasma and for every channel, the width of each EPW
+resonance in the channel's window:
+
+- **Where.** `Re ε(k(λ_l), ω(λ_l))` on the pixel axis; a resonance lies between two pixels where it
+  changes sign **and** `|ω| > ω_pe` at both. The Bohm–Gross branch (`ω² ≈ ω_pe² + 3k²⟨v²⟩`) is always
+  above `ω_pe`, which drops the strongly damped crossing nearer the probe and every ion-acoustic
+  crossing (Phase 4.E's bin 25 has two sign changes, at pixels 145 and 187; the second lies below
+  `ω_pe`).
+- **How wide.** The spectrum on a grid of 64 points per pixel over 8 pixels either side; its maximum;
+  the half-maximum crossing on each side, interpolated linearly between grid points; the full width
+  between them in pixels of the channel's axis. Against a grid sixteen times finer it agrees to
+  0.03 % (RW1). A side that never falls to half the maximum inside the grid gives an infinite width.
+  A line narrower than the grid's step reads at about one step, 0.016 pixel: the width is then an
+  upper bound, and the count recommended for it a lower bound.
+- **When it warns.** A width below `RESONANCE_WIDTH_WARN = 1.0` pixel, in a channel whose count is
+  below the recommended one; one warning naming each channel's bins, widths and the key to refit
+  with, `pixel_integration = { subsamples = N }`; silent otherwise. It changes nothing.
+- **What it ignores.** The in-kernel effects: every `KSmearing` or `GradientSmearing` node's line is
+  as narrow as the unsmeared one and is sampled the same way, and the calibration's offset moves a
+  line, not its width.
+- **What one pixel leaves.** A line just over a pixel wide is silent, yet the pixel-centre model
+  misses it after the spectral IRF by 8 % of the peak at 1.05 pixels and by about 1 % from 1.5 pixels
+  on (Phase 4.F spec D14): 19σ and 2 to 3σ at the shapes problem's peak signal-to-noise of 221. The
+  threshold is the user's decision, "about one pixel", and is recorded with those numbers beside it.

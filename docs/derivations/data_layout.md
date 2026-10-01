@@ -377,3 +377,9 @@ under `stages/` (Section 3); the warnings and the result are the final fit's. `s
 whichever stage runs that optimizer. `"staged"` on a shorthand deck or a one-channel deck is
 refused by `read_deck`, as is an `[optimizer.staged]` table under any other procedure. A new key
 inside `[optimizer]` is not a deck-version bump: `otis-deck-2` stays.
+
+**`pixel_integration`** (Phase 4.F, Step 4.F.2, spec D12): an `[instrument]` or
+`[channel.<name>.instrument]` key, `pixel_integration = { subsamples = N }`, a positive integer,
+builds `PixelIntegration(subsamples = N)` (`instrument.md` Section 7). Without the key no
+`PixelIntegration` is built, which is today's model; `subsamples = 1` builds one that is the same
+model exactly. Also not a version bump.

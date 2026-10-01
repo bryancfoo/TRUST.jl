@@ -40,6 +40,7 @@ const EFFECT_REGISTRY = Dict{String,Any}(
     "Polynomial" => PolynomialBackground,
     "Image" => ImageBackground,
     "Rational" => RationalBackground,
+    "PixelIntegration" => PixelIntegration,
 )
 
 """

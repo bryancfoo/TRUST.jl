@@ -176,6 +176,12 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("staged fit")
         @safetestset "staged fit" begin include("config/test_deck_staged.jl") end
     end
+    if _wanted("pixel integration")
+        @safetestset "pixel integration" begin include("instrument/test_pixel_integration.jl") end
+    end
+    if _wanted("resonance width")
+        @safetestset "resonance width" begin include("config/test_deck_resonance.jl") end
+    end
     if _wanted("noise")
         @safetestset "noise" begin include("instrument/test_noise.jl") end
     end

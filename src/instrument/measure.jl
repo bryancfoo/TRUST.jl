@@ -167,6 +167,25 @@ function _accumulate!(col, p, probe, collection, lambda, effects::Tuple, w, firs
     return col
 end
 
+# Phase 4.F spec D11: PixelIntegration, always the last in-kernel effect (_kernel_rank), folded
+# here directly rather than through samples' lazy axes, which the dual pass would allocate once the
+# fold is four effects deep (14 400 B a bin with every kernel-stage effect bound; Level 2,
+# 2026-09-30). N = 1 is today's fold exactly. The samples, their weight and their order are
+# samples(::PixelIntegration)'s own.
+function _accumulate!(col, p, probe, collection, lambda, effects::Tuple{PixelIntegration}, w,
+                      first_order)
+    N = effects[1].subsamples
+    N == 1 && return _accumulate!(col, p, probe, collection, lambda, (), w, first_order)
+    wq = w * (1.0 / N)
+    @inbounds for i in 1:N
+        c = (i - (N + 1) / 2) / N
+        for l in eachindex(lambda)
+            col[l] += wq * _spectrum_at(p, probe, collection, _subsample_lambda(lambda, l, c), first_order)
+        end
+    end
+    return col
+end
+
 """
     ideal_streak!(P::AbstractMatrix, expt::Experiment; scheduler::Symbol = :auto) -> P
 

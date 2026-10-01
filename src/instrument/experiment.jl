@@ -72,7 +72,7 @@ end
 
 function _stable_sort_effects(effects::Tuple)
     v = collect(effects)
-    sort!(v; by=_chain_order, alg=Base.Sort.MergeSort)
+    sort!(v; by=e -> (_chain_order(e), _kernel_rank(e)), alg=Base.Sort.MergeSort)
     return Tuple(v)
 end
 
