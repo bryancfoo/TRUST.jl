@@ -241,3 +241,13 @@ derivatives is wrong; any electron shape whose electron-plasma-wave resonance be
 wavelength pixel meets the same approximation, and for this one that happens at large m. The synthetic
 data are made by the same model, so the examples cannot see it as a misfit. **Nothing was changed** (the
 user, 2026-09-30: record the diagnosis, no fix).
+
+**Refitted at the count the check asks for** (Step 4.F.3; Phase 4.F spec D19 to D21). Since Phase 4.F
+the model can average the spectrum over `N` points inside each pixel (`pixel_integration`), and
+`fit(deck)` warns when a fitted bin's resonance is narrower than a pixel (`instrument.md` Section 7). On
+Section 7's fit it flags bin 25 alone, 0.198 of a pixel wide, and asks for 16 points a pixel on the EPW
+channel. The same staged fit at that count (`examples/diagnostics/pixel_integration_refit.jl`) puts bin
+25's m at 4.5309 against the truth's 4.6111, no bin's m more than 0.104 from the truth, EPW χ²/n 8.7121
+and IAW χ²/n 3.0352 against 41.2117 and 3.0569 at one point a pixel, and every fitted resonance 1.50
+pixels wide or more, so the warning is silent. **The excursion was the sampling's**, and the shape, its
+table and its derivatives are as they were.

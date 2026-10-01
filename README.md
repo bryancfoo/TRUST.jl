@@ -173,6 +173,19 @@ hide its peak between pixels. A real spectrometer blurs the spectrum before it r
 this is an approximation of the model, not of the instrument; it matters only for a resonance narrower
 than a wavelength pixel. Nothing was changed.
 
+**Phase 4.F (the staged fit as a deck option, and the wavelength sampling) is complete.** A two-camera
+deck can now say `procedure = "staged"`: `fit(deck)` then fits each camera alone, starts the joint fit
+from those fits and polishes it, the procedure that makes a two-camera fit converge, and writes each
+camera's own fit into the result file (`examples/two_channel_staged.toml`). A new instrument key,
+`pixel_integration = { subsamples = N }`, makes the forward model average the spectrum over `N` points
+inside each wavelength pixel before the spectral instrument function; without it, or with `N = 1`, the
+model is exactly what it was. After each fit, `fit(deck)` warns when a fitted electron-plasma-wave
+resonance is narrower than a pixel, naming the count to refit with. Refitted at the count it asks for
+(16), Phase 4.E's outlying `GeneralizedNormal` bin returns to the truth (m 4.5309 against 4.6111) and
+the EPW χ²/n falls from 41.2117 to 8.7121. Phase 4.D's cut-down EPW reproduction, whose exponent sits on
+its upper bound in 17 of 32 bins, is not cured that way: at the count asked for there (64) the same
+number of bins stay on the bound. No default changed.
+
 ## Installing and testing
 
 ```

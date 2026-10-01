@@ -314,3 +314,15 @@ resonance in the channel's window:
   misses it after the spectral IRF by 8 % of the peak at 1.05 pixels and by about 1 % from 1.5 pixels
   on (Phase 4.F spec D14): 19σ and 2 to 3σ at the shapes problem's peak signal-to-noise of 221. The
   threshold is the user's decision, "about one pixel", and is recorded with those numbers beside it.
+
+**Measured by hand** (Step 4.F.3, `examples/diagnostics/pixel_integration_refit.jl`). On the
+two-channel `GeneralizedNormal` fit the check flags one bin and asks for 16; refitted at 16 that bin's m
+is 4.5309 against the truth's 4.6111 and the warning is silent (`generalized_normal.md` Section 8). On
+Phase 4.D's cut-down EPW reproduction (`SuperGaussian`, 128 × 32 pixels and slices, its fit's m on the
+upper bound 5.5 in 17 of 32 bins) the truth's lines are 4.6 pixels wide or more, but the fit's are not:
+the check flags 15 of the 17 bins, 0.038 to 0.270 of a pixel, and asks for 64. Refitted at 64 from the
+deck's start, m is still on its bound in 17 bins (EPW χ²/n 65.9212, against 76.5608 from the same start
+at one point a pixel), and ten of those bins' lines now read 0.016 to 0.024 of a pixel: **the count did
+not cure that fit's saturation**; the fit moved to lines narrower than the new sampling resolves. A
+width at the grid's step, 1/64 of a pixel, is an upper bound on the line's width, and the count asked
+for a lower bound.
