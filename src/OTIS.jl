@@ -72,7 +72,8 @@ export ProbeBeam, Collection, wavevector, polarization_factor, kdirection, detec
 # instrument (2.2, 2.3, 2.3a, 2.3b)
 export AbstractInstrumentEffect, SpectralIRF, TemporalIRF, KSmearing, GradientSmearing,
        WavelengthCalibration, Sensitivity, ConstantBackground, PolynomialBackground,
-       ImageBackground, RationalBackground, GaussianKernel, TabulatedKernel, PixelIntegration
+       ImageBackground, RationalBackground, GaussianKernel, TabulatedKernel, PixelIntegration,
+       TabulatedKSmearing
 export Experiment, measure, ideal_streak, ideal_streak!, islinear, stage, samples, apply!
 export foreach_bin!, pin_blas_threads
 

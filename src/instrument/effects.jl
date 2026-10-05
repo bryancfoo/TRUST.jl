@@ -254,6 +254,102 @@ function samples(e::KSmearing{NQ,FTe}, p::Plasma, probe::ProbeBeam, collection::
 end
 
 """
+    TabulatedKSmearing{NQ,FT<:Real} <: AbstractInstrumentEffect
+
+A weighted average of the ideal spectrum over an explicit list of `NQ` collection angles,
+`θ_q = θ + offsets[q]` with weights `weights[q]`, `θ` the `Collection`'s own angle
+([OQ-56](../../dev/open_questions.md#oq-56), decided 2026-10-03): an aperture given as the rays of
+an optics model rather than as `KSmearing`'s uniform spread on Gauss-Legendre nodes. `offsets` (rad)
+are relative to the `Collection`'s θ and strictly increasing; `weights` are non-negative and sum to
+one. Any `NQ ≥ 1`; nothing is fittable. Each node changes θ, and with it the magnitude `k`
+(`conventions.md` 3.3); the direction **k̂**, and so every species' flow, stays the `Collection`'s
+(`conventions.md` 3.2).
+
+Built with `TabulatedKSmearing(; offsets_deg | offsets_rad, weights)`, each a vector of real numbers,
+of one length. The weights are divided by their sum **unless that sum is already one to within `NQ`
+ulps**, in which case they are kept exactly as given: so a `KSmearing`'s own `offsets` and `weights`
+build an effect whose streak is that `KSmearing`'s, bitwise, although its five weights sum to
+`1 + 2.2e-16`.
+
+Phase 4.G spec D3 to D6, Step 4.G.1.
+"""
+struct TabulatedKSmearing{NQ,FT<:Real} <: AbstractInstrumentEffect
+    offsets::NTuple{NQ,FT}
+    weights::NTuple{NQ,FT}
+    function TabulatedKSmearing{NQ,FT}(offsets::NTuple{NQ,FT}, weights::NTuple{NQ,FT}) where {NQ,FT<:Real}
+        for q in 2:NQ
+            _primal_value(offsets[q]) > _primal_value(offsets[q-1]) || throw(ArgumentError(
+                "TabulatedKSmearing: offsets must be strictly increasing; got $(offsets[q-1]) then " *
+                "$(offsets[q]) rad at nodes $(q - 1) and $q"))
+        end
+        return new{NQ,FT}(offsets, weights)
+    end
+end
+
+function _check_real_list(name::Symbol, x)
+    (x isa Union{AbstractVector,Tuple} && all(v -> v isa Real, x)) || throw(ArgumentError(
+        "TabulatedKSmearing: $name must be a vector of real numbers; got $(repr(x))"))
+    return nothing
+end
+
+function TabulatedKSmearing(; weights, kwargs...)
+    _reject_extra_kwargs(kwargs, (:offsets_deg, :offsets_rad))
+    for (name, x) in pairs(kwargs)
+        _check_real_list(name, x)
+    end
+    _check_real_list(:weights, weights)
+    offsets_si = _si_axis(:offsets, kwargs)
+    nq = length(offsets_si)
+    nq == length(weights) || throw(ArgumentError(
+        "TabulatedKSmearing: offsets and weights must have the same length; got $nq and $(length(weights))"))
+    nq >= 1 || throw(ArgumentError("TabulatedKSmearing: at least one node is needed; got none"))
+    for q in 1:nq
+        isfinite(offsets_si[q]) || throw(ArgumentError(
+            "TabulatedKSmearing: every offset must be finite; got $(offsets_si[q]) rad at node $q"))
+        isfinite(weights[q]) || throw(ArgumentError(
+            "TabulatedKSmearing: every weight must be finite; got $(weights[q]) at node $q"))
+        _primal_value(weights[q]) >= 0 || throw(ArgumentError(
+            "TabulatedKSmearing: weights must be non-negative; got $(weights[q]) at node $q"))
+    end
+    any(w -> !iszero(_primal_value(w)), weights) || throw(ArgumentError(
+        "TabulatedKSmearing: the weights must not all be zero"))
+    FT = float(promote_type(map(typeof, Tuple(offsets_si))..., map(typeof, Tuple(weights))...))
+    offsets = ntuple(q -> FT(offsets_si[q]), nq)
+    given = ntuple(q -> FT(weights[q]), nq)
+    total = sum(given)
+    normalized = abs(_primal_value(total) - 1) <= nq * eps(_basefloat(total)) ? given :
+        map(w -> w / total, given)
+    return TabulatedKSmearing{nq,FT}(offsets, normalized)
+end
+
+stage(::TabulatedKSmearing) = :kernel
+_chain_order(::TabulatedKSmearing) = 1
+islinear(::TabulatedKSmearing) = false
+parameters(::TabulatedKSmearing) = NamedTuple()
+reconstruct(e::TabulatedKSmearing, ::NamedTuple) = e
+
+"""
+    samples(e::TabulatedKSmearing, p::Plasma, probe::ProbeBeam, collection::Collection, lambda::AbstractVector) -> NTuple
+
+`θ -> θ + e.offsets[q]` with weight `e.weights[q]`, `KSmearing`'s own sample, line for line: only
+the `Collection` is rebuilt, through its **inner** constructor `Collection{FT}`, so this is
+allocation-free; the plasma, the probe and the wavelength axis are passed through as the same
+objects.
+
+Phase 4.G spec D3.
+"""
+function samples(e::TabulatedKSmearing{NQ,FTe}, p::Plasma, probe::ProbeBeam, collection::Collection{FTc},
+                  lambda::AbstractVector) where {NQ,FTe,FTc}
+    FTg = promote_type(FTc, FTe)
+    return ntuple(Val(NQ)) do q
+        (e.weights[q], p, probe,
+            Collection{FTg}(FTg(collection.theta) + FTg(e.offsets[q]), collection.k_model,
+                FTg(collection.lambda_center), FTg(collection.dispersion), collection.npixels,
+                FTg(collection.reference_pixel)), lambda)
+    end
+end
+
+"""
     GradientSmearing{NQ,FT<:Real} <: AbstractInstrumentEffect
 
 A weighted average of the ideal spectrum over a normal distribution of one plasma leaf inside
@@ -897,6 +993,9 @@ Base.show(io::IO, e::TemporalIRF{<:TabulatedKernel}) =
     print(io, "TemporalIRF(tabulated, $(length(e.kernel.offsets)) taps)")
 Base.show(io::IO, e::KSmearing) =
     @printf(io, "KSmearing(\xb1%.2f deg, %d nodes)", theta_from_si(e.half_angle, :theta_deg), length(e.offsets))
+Base.show(io::IO, e::TabulatedKSmearing) =
+    @printf(io, "TabulatedKSmearing(%d nodes, %.2f to %.2f deg)", length(e.offsets),
+        theta_from_si(first(e.offsets), :theta_deg), theta_from_si(last(e.offsets), :theta_deg))
 function Base.show(io::IO, e::GradientSmearing)
     if e.logarithmic
         @printf(io, "GradientSmearing(%s, %.3f (log), %d nodes)", string(e.path), e.width, length(e.offsets))

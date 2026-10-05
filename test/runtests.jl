@@ -182,6 +182,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("resonance width")
         @safetestset "resonance width" begin include("config/test_deck_resonance.jl") end
     end
+    if _wanted("tabulated k-smearing")
+        @safetestset "tabulated k-smearing" begin include("instrument/test_tabulated_k_smearing.jl") end
+    end
     if _wanted("noise")
         @safetestset "noise" begin include("instrument/test_noise.jl") end
     end

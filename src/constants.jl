@@ -78,7 +78,10 @@ probe-wavelength-shift effect is removed rather than kept alongside the new one.
 is a Step 4.A.2 addition (2026-09-23, spec D13): `average_regions`' own channel timing offset,
 in the style of `fwhm_lambda`/`fwhm_t` -- its factors duplicate `t`'s, and the row exists only so
 that `_si_value` accepts `t_shift_ns`/`t_shift_s` and `_reject_extra_kwargs` catches a typo in
-one of them.
+one of them. The `offsets` row is a Step 4.G.1 addition (2026-10-03, Phase 4.G spec D4):
+`TabulatedKSmearing`'s list of angles relative to the collection's θ, in the style of `half_angle`
+-- its factors duplicate `theta`'s, and the row exists so that `_si_axis` accepts
+`offsets_deg`/`offsets_rad` for a vector, refusing neither or both.
 """
 const ACCEPTED_UNITS = (
     T      = (T_eV      = EV,               T_keV     = 1000 * EV),
@@ -100,6 +103,7 @@ const ACCEPTED_UNITS = (
     diameter       = (diameter_um = 1e-6,        diameter_m = 1.0),
     dispersion     = (dispersion_nm_px = 1e-9,   dispersion_m_px = 1.0),
     lambda_center  = (lambda_center_nm = 1e-9,   lambda_center_m = 1.0),
+    offsets        = (offsets_deg = π / 180,     offsets_rad = 1.0),
 )
 
 """

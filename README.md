@@ -186,6 +186,15 @@ the EPW χ²/n falls from 41.2117 to 8.7121. Phase 4.D's cut-down EPW reproducti
 its upper bound in 17 of 32 bins, is not cured that way: at the count asked for there (64) the same
 number of bins stay on the bound. No default changed.
 
+**Phase 4.G (the tabulated k-smearing) is complete.** A new instrument key, `tabulated_k_smearing = {
+offsets_deg = [...], weights = [...] }`, averages the spectrum over an explicit list of collection angles
+and their weights, the rays an optics model gives, where `k_smearing` assumes a uniform spread; the angles
+are offsets from the geometry's `theta_deg`, and nothing in it is fitted. Given a `k_smearing`'s own five
+angles and weights it reproduces that effect's spectrum exactly. On the first real shot's ten rays the
+spectrum differs from a uniform spread of the same width by at most 0.09 % of the peak on the two-channel
+example's electron-plasma-wave window, against 3.1 % for the smearing itself, at about twice the cost of
+five angles. No default changed.
+
 ## Installing and testing
 
 ```

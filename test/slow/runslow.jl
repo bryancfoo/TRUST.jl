@@ -20,5 +20,6 @@ using Test
     @safetestset "staged fit (slow)" begin include("test_deck_staged.jl") end
     @safetestset "pixel integration (slow)" begin include("test_pixel_integration.jl") end
     @safetestset "resonance width (slow)" begin include("test_deck_resonance.jl") end
+    @safetestset "tabulated k-smearing (slow)" begin include("test_tabulated_k_smearing.jl") end
     @safetestset "uncertainty (slow)" begin include("test_uncertainty.jl") end
 end

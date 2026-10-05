@@ -89,6 +89,21 @@ Base.@kwdef struct KSmearingOptions
 end
 
 """
+    TabulatedKSmearingOptions
+
+The deck keys for `TabulatedKSmearing` (Phase 4.G spec D7): `offsets_deg`, the nodes' angles
+relative to the channel's `theta_deg`, strictly increasing, and `weights`, one per node,
+non-negative (the effect's constructor divides them by their sum). `Vector{Float64}`, as
+`PolynomialBackgroundOptions.coefficients`, but never a variable reference: the effect has no
+fittable parameter. The empty defaults are refused by the constructor, so a deck that names the key
+gives both lists.
+"""
+Base.@kwdef struct TabulatedKSmearingOptions
+    offsets_deg::Vector{Float64} = Float64[]
+    weights::Vector{Float64} = Float64[]
+end
+
+"""
     GradientSmearingOptions
 
 Deck keys for `GradientSmearing` (spec D10, D11, A17). `leaf` is a boundary key (`""` is not a

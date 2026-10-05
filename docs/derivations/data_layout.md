@@ -383,3 +383,12 @@ inside `[optimizer]` is not a deck-version bump: `otis-deck-2` stays.
 builds `PixelIntegration(subsamples = N)` (`instrument.md` Section 7). Without the key no
 `PixelIntegration` is built, which is today's model; `subsamples = 1` builds one that is the same
 model exactly. Also not a version bump.
+
+**`tabulated_k_smearing`** (Phase 4.G, Step 4.G.1, spec D7): an `[instrument]` or
+`[channel.<name>.instrument]` key, `tabulated_k_smearing = { offsets_deg = [...], weights = [...] }`,
+two lists of one length: each node's angle relative to the geometry's `theta_deg`, strictly
+increasing, and its weight, non-negative, not all zero, divided by their sum unless it is already one
+to round-off. Builds `TabulatedKSmearing` (`instrument.md` Section 8); no entry may be a variable
+reference. The two lists are kept in the effective deck, and so in the result file's `deck`; the
+effect's `channels/<name>/effects/<k>` record holds its `type` alone, since it has no parameters. Also
+not a version bump.

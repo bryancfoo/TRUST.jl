@@ -5,7 +5,8 @@
 > `src/instrument/effects.jl`, `src/instrument/background.jl` and
 > `src/instrument/experiment.jl`. Part 5 (the noise model) is Step 2.5's; Part 6
 > (`RationalBackground`) is Step 2.3b's; Part 7 (`PixelIntegration` and the resonance-width check)
-> is Phase 4.F's Step 4.F.2 (2026-09-30).
+> is Phase 4.F's Step 4.F.2 (2026-09-30); Part 8 (`TabulatedKSmearing`) is Phase 4.G's Step 4.G.1
+> (2026-10-03).
 
 ## 1. The chain
 
@@ -16,7 +17,7 @@ order ([OQ-13](../../dev/open_questions.md#oq-13)):
   than acting on the streak — `KSmearing`, `GradientSmearing`, `WavelengthCalibration`. Any
   number of these may be given; they run in the user's own relative order. `PixelIntegration`
   (Section 7) is one more, at most one per chain, and always runs last of them, whatever the
-  order given.
+  order given. `TabulatedKSmearing` (Section 8) is another of the first kind, any number of them.
 - **Group 2, after the per-bin loop, in this fixed order**: `SpectralIRF`, `TemporalIRF`,
   `Sensitivity`, then any number of backgrounds.
 
@@ -127,7 +128,7 @@ this effect be pushed through as a fixed linear operator?*
 |---|---|---|
 | `SpectralIRF`, `TemporalIRF`, `Sensitivity` | `true` | each is a fixed matrix or scalar multiplication of the streak |
 | `ConstantBackground`, `PolynomialBackground`, `ImageBackground` | `false` | **affine**, not linear: `effect(aP+bQ) - a·effect(P) - b·effect(Q) = (1-a-b)·B`, tested directly (EF15, BG4) |
-| `KSmearing`, `GradientSmearing`, `WavelengthCalibration`, `PixelIntegration` | `false` | these act on the **plasma** or the **evaluation axis**, not the streak — `effect(aP+bQ) = a·effect(P)+b·effect(Q)` is not even a meaningful statement about them, since they change what is evaluated rather than post-processing a value that already exists |
+| `KSmearing`, `TabulatedKSmearing`, `GradientSmearing`, `WavelengthCalibration`, `PixelIntegration` | `false` | these act on the **plasma** or the **evaluation axis**, not the streak — `effect(aP+bQ) = a·effect(P)+b·effect(Q)` is not even a meaningful statement about them, since they change what is evaluated rather than post-processing a value that already exists |
 
 Every effect with `islinear(e) == true` satisfies the linear identity to round-off (EF14); every
 background satisfies the affine identity instead (EF15, BG4); the three kernel effects have
@@ -326,3 +327,58 @@ at one point a pixel), and ten of those bins' lines now read 0.016 to 0.024 of a
 not cure that fit's saturation**; the fit moved to lines narrower than the new sampling resolves. A
 width at the grid's step, 1/64 of a pixel, is an upper bound on the line's width, and the count asked
 for a lower bound.
+
+## 8. `TabulatedKSmearing`: an aperture given as rays
+
+**Decided 2026-10-03** ([OQ-56](../../dev/open_questions.md#oq-56); Phase 4.G spec D3 to D8, Step
+4.G.1). **Why.** `KSmearing` (Section 3) models the collection aperture as a uniform spread of
+angles on Gauss–Legendre nodes. An optics model gives a list of rays with weights instead. Shot
+116349's collection, in the user's model, is ten rays in the scattering plane at 53.64 to 66.12 deg
+from the probe, 1.38684 deg apart, with bell-shaped weights: weighted mean 60.01 deg, standard
+deviation 2.56 deg, and |k| over the rays 0.902 to 1.091 of its weighted mean (3.9 % rms). A uniform
+spread can match the variance (half-angle √3 × 2.56 = 4.44 deg) but not the shape.
+
+**The average.** With `δ_q` the offsets (rad) from the `Collection`'s own `θ`, strictly increasing,
+and `w_q` the weights, non-negative and summing to one,
+
+    P(λ) = Σ_q w_q · spectrum(p, probe, collection(θ + δ_q), λ),
+
+`KSmearing`'s fold exactly, on the user's nodes. Each node changes `θ`, and with it the magnitude
+`k(λ_s)` (`conventions.md` 3.3); the direction **k̂** stays the `Collection`'s for every node
+(`conventions.md` 3.2), so a species' flow is its projection on that one direction and is not
+re-projected on each ray's own. The error is 1 − cos of a ray's angle from the mean **k̂**: for shot
+116349's rays 3.24 deg at worst, 0.16 % of the flow. The offsets are relative so that the
+`Collection` stays the one source of the geometry (the prefactor, `kdirection` and the polarization
+factor read its `θ`), and a single node at offset zero is the unsmeared model exactly.
+
+**The weights** are divided by their sum, **unless that sum is already one to within `N` ulps**
+(`|Σ w − 1| ≤ N·eps`), in which case they are kept exactly as given. `KSmearing`'s own five weights,
+normalized at its construction, sum to `1 + 2.2e-16`, and dividing them again would move them by an
+ulp; kept, an effect built from a `KSmearing`'s `offsets` and `weights` gives that `KSmearing`'s streak
+bitwise (TK3). The user's ten weights sum to `1 − 6.7e-16` and are kept as given too.
+
+**Where it sits.** An in-kernel effect (`stage = :kernel`, `_chain_order = 1`) with no fittable
+parameter (`parameters` empty, `reconstruct` the identity), any number per chain (`_chain_class =
+:none`). Beside a `KSmearing`, or a second `TabulatedKSmearing`, the fold runs over every pair of
+nodes, `θ + δ_k + δ_t`, as two `KSmearing`s compose. Its samples rebuild only the `Collection`,
+through its inner constructor, as `KSmearing`'s do: allocation-free in the value pass and in the dual
+pass, the latter measured with the ten rays in test_jacobian.jl's fully bound KB chain, with and
+without a `PixelIntegration` after them (TK5, TK9). The cost is proportional to the node count.
+
+**Measured** on the two-channel example's probe and windows with the `Collection` at 60.01 deg (four
+bins of its truth, a Maxwellian electron; `SpectralIRF` 0.5 nm on the EPW window, 0.08 nm on the IAW;
+the largest difference over the largest value of the reference streak, TK6):
+
+| window | ten rays against the uniform 4.44 deg on 5 nodes | ten rays against no smearing |
+|---|---|---|
+| EPW, 220 to 260 nm | 9.4e-4 | 3.1e-2 |
+| IAW, 262 to 264.5 nm | 5.9e-5 | 4.3e-3 |
+
+The shape of the spread changes the spectrum by about 3 % of what the spread itself does: the
+equal-variance uniform spread captures most of the smearing, and the rays capture the rest.
+**The cost** is about the node count: on the EPW window cut to 128 pixels, 32 bins, the ten rays' forward
+model and Jacobian take 2.18 and 1.96 times the five-node `KSmearing`'s (warmed medians, 8.06 against
+3.70 ms and 31.8 against 16.2 ms; Phase 4.G spec D10).
+
+**Not modelled.** A flow direction per ray (above); a fittable scale on the offsets; absolute angles;
+a ray list on the `Collection`; reading the rays from a file (the deck quotes them).

@@ -33,6 +33,7 @@ const EFFECT_REGISTRY = Dict{String,Any}(
     "SpectralIRF" => SpectralIRF,
     "TemporalIRF" => TemporalIRF,
     "KSmearing" => KSmearing,
+    "TabulatedKSmearing" => TabulatedKSmearing,
     "GradientSmearing" => GradientSmearing,
     "WavelengthCalibration" => WavelengthCalibration,
     "Sensitivity" => Sensitivity,

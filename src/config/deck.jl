@@ -576,7 +576,8 @@ end
 const _INSTRUMENT_SINGLE_REGISTRY_NAME = Dict{String,String}(
     "spectral_irf" => "SpectralIRF", "temporal_irf" => "TemporalIRF", "k_smearing" => "KSmearing",
     "gradient_smearing" => "GradientSmearing", "wavelength_calibration" => "WavelengthCalibration",
-    "sensitivity" => "Sensitivity", "pixel_integration" => "PixelIntegration")
+    "sensitivity" => "Sensitivity", "pixel_integration" => "PixelIntegration",
+    "tabulated_k_smearing" => "TabulatedKSmearing")
 const _INSTRUMENT_TOP_KEYS = (keys(_INSTRUMENT_SINGLE_REGISTRY_NAME)..., "background")
 
 const _INSTRUMENT_OPTIONS = Dict{String,Any}(
@@ -584,7 +585,8 @@ const _INSTRUMENT_OPTIONS = Dict{String,Any}(
     "KSmearing" => KSmearingOptions, "GradientSmearing" => GradientSmearingOptions,
     "WavelengthCalibration" => WavelengthCalibrationOptions, "Sensitivity" => SensitivityOptions,
     "Constant" => ConstantBackgroundOptions, "Polynomial" => PolynomialBackgroundOptions,
-    "Rational" => RationalBackgroundOptions, "PixelIntegration" => PixelIntegrationOptions)
+    "Rational" => RationalBackgroundOptions, "PixelIntegration" => PixelIntegrationOptions,
+    "TabulatedKSmearing" => TabulatedKSmearingOptions)
 
 """
     _SIGMA_PER_FWHM
@@ -646,6 +648,16 @@ const _GRADIENT_SMEARING_WIDTH_REFS_REASON =
     "reference: its conversion factor is the smeared leaf's own and is not known to the binding " *
     "layer (conventions.md 7.6)."
 
+# TabulatedKSmearing has no fittable parameter (Phase 4.G spec D7), so a string in either of its two
+# lists is refused with this reason rather than the generic one, which would call the key a string.
+const _TABULATED_K_SMEARING_REFS_REASON =
+    "read_deck: section \"instrument.tabulated_k_smearing\" takes numbers only: offsets_deg and " *
+    "weights cannot hold a variable reference, since a TabulatedKSmearing has no fittable parameter"
+
+const _INSTRUMENT_REFS_REASON = Dict{String,String}(
+    "GradientSmearing" => _GRADIENT_SMEARING_WIDTH_REFS_REASON,
+    "TabulatedKSmearing" => _TABULATED_K_SMEARING_REFS_REASON)
+
 const _BACKGROUND_TYPES = ("Constant", "Polynomial", "Rational", "Image")
 
 function _validate_instrument_section(given::AbstractDict, known_names::AbstractSet{String})
@@ -657,7 +669,7 @@ function _validate_instrument_section(given::AbstractDict, known_names::Abstract
         entry isa AbstractDict || throw(ArgumentError("read_deck: \"instrument.$key\" must be a table"))
         OptT = _INSTRUMENT_OPTIONS[regname]
         refs_ok = haskey(_INSTRUMENT_BINDING, regname)
-        refs_reason = regname == "GradientSmearing" ? _GRADIENT_SMEARING_WIDTH_REFS_REASON : ""
+        refs_reason = get(_INSTRUMENT_REFS_REASON, regname, "")
         out[key] = _fill_option_fields(OptT, entry, known_names, "instrument.$key", refs_ok, refs_reason)
     end
     if haskey(given, "background")
@@ -1250,7 +1262,7 @@ const _EFFECT_CTOR = Dict{String,Any}(
     "GradientSmearing" => GradientSmearing, "WavelengthCalibration" => WavelengthCalibration,
     "Sensitivity" => Sensitivity, "Constant" => ConstantBackground,
     "Polynomial" => PolynomialBackground, "Rational" => RationalBackground,
-    "PixelIntegration" => PixelIntegration)
+    "PixelIntegration" => PixelIntegration, "TabulatedKSmearing" => TabulatedKSmearing)
 
 """
     _build_effect_and_pending!(pending, regname, filled, vals, template) -> AbstractInstrumentEffect
@@ -1538,8 +1550,8 @@ function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
         chan = chan_list[c]
         pending = Tuple{String,Any,Symbol,Int,Float64,String}[]
         effects = AbstractInstrumentEffect[]
-        for key in ("k_smearing", "gradient_smearing", "wavelength_calibration", "pixel_integration",
-                    "spectral_irf", "temporal_irf", "sensitivity")
+        for key in ("k_smearing", "tabulated_k_smearing", "gradient_smearing", "wavelength_calibration",
+                    "pixel_integration", "spectral_irf", "temporal_irf", "sensitivity")
             haskey(chan["instrument"], key) || continue
             regname = _INSTRUMENT_SINGLE_REGISTRY_NAME[key]
             push!(effects, _build_effect_and_pending!(pending, regname, chan["instrument"][key], vals, template))
