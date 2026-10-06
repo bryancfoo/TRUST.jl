@@ -662,6 +662,13 @@ const _BACKGROUND_TYPES = ("Constant", "Polynomial", "Rational", "Image")
 
 function _validate_instrument_section(given::AbstractDict, known_names::AbstractSet{String})
     _check_known_keys(given, _INSTRUMENT_TOP_KEYS, "instrument")
+    # Step 4.H.0 (Phase 4.H spec D4): the two aperture keys compose in the kernel's fold, so one table
+    # naming both would smear the spectrum twice (Phase E's A6 item 9). Refused here; in Julia the two
+    # effects still compose (TK7).
+    (haskey(given, "k_smearing") && haskey(given, "tabulated_k_smearing")) && throw(ArgumentError(
+        "read_deck: section \"instrument\" gives both \"k_smearing\" and \"tabulated_k_smearing\"; " *
+        "the two compose and would smear the spectrum twice, so give one: tabulated_k_smearing for " *
+        "an optics model's rays, k_smearing for a uniform spread"))
     out = Dict{String,Any}()
     for (key, regname) in _INSTRUMENT_SINGLE_REGISTRY_NAME
         haskey(given, key) || continue

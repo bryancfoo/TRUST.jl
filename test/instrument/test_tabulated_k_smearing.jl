@@ -191,12 +191,12 @@ end
         @test isempty(r.channels[1].effects[1].parameters)
         @test read_deck(w("back.toml", r.deck)) == deck
 
-        # the channel form, beside a k_smearing: both built, k_smearing first
-        cdeck = read_deck(w("c.toml", _tk_deck_text(dir; form=:channel,
-            line=_TK_DECK_LINE * "\nk_smearing = { half_angle_deg = 1.0, nodes = 3 }")))
-        cproblem = OTIS.build_problem(cdeck)[1]
-        @test [nameof(typeof(x)) for x in OTIS._channel_problem(cproblem, 1).experiment.effects] ==
-              [:KSmearing, :TabulatedKSmearing, :SpectralIRF, :Sensitivity]
+        # the channel form, beside a k_smearing: refused, since the two would smear twice (amended at
+        # Step 4.H.0, 2026-10-05, with the user's approval, Phase 4.H spec D4; until then this row built
+        # both, k_smearing first; in Julia the two still compose, TK7)
+        @test_throws "read_deck: in [channel.epw]: read_deck: section \"instrument\" gives both \"k_smearing\" and \"tabulated_k_smearing\"" read_deck(
+            w("c.toml", _tk_deck_text(dir; form=:channel,
+                line=_TK_DECK_LINE * "\nk_smearing = { half_angle_deg = 1.0, nodes = 3 }")))
 
         # refused at read_deck: a string, a number for a list, an unknown key
         rd(line) = read_deck(w("x.toml", _tk_deck_text(dir; line=line)))

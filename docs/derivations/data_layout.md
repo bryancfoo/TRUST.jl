@@ -391,4 +391,5 @@ increasing, and its weight, non-negative, not all zero, divided by their sum unl
 to round-off. Builds `TabulatedKSmearing` (`instrument.md` Section 8); no entry may be a variable
 reference. The two lists are kept in the effective deck, and so in the result file's `deck`; the
 effect's `channels/<name>/effects/<k>` record holds its `type` alone, since it has no parameters. Also
-not a version bump.
+not a version bump. An instrument table may not give it beside `k_smearing`: the two compose, so the
+spectrum would be smeared twice, and `read_deck` refuses the pair (Phase 4.H, Step 4.H.0).

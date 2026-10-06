@@ -93,10 +93,11 @@ end
 
 The deck keys for `TabulatedKSmearing` (Phase 4.G spec D7): `offsets_deg`, the nodes' angles
 relative to the channel's `theta_deg`, strictly increasing, and `weights`, one per node,
-non-negative (the effect's constructor divides them by their sum). `Vector{Float64}`, as
+non-negative (the effect's constructor divides them by their sum unless that sum is already one to
+within `NQ` ulps, when it keeps them exactly as given: Phase 4.G spec D6). `Vector{Float64}`, as
 `PolynomialBackgroundOptions.coefficients`, but never a variable reference: the effect has no
 fittable parameter. The empty defaults are refused by the constructor, so a deck that names the key
-gives both lists.
+gives both lists. An instrument table may not name it beside `k_smearing` (Phase 4.H spec D4).
 """
 Base.@kwdef struct TabulatedKSmearingOptions
     offsets_deg::Vector{Float64} = Float64[]

@@ -1022,3 +1022,22 @@ end
         @test isnan(r_d.fit.gn_decrease)
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# DK23: k_smearing beside tabulated_k_smearing is refused (Phase 4.H spec D4, Step 4.H.0)
+# ------------------------------------------------------------------------------------------
+
+@testset "DK23: the two aperture keys are not given together" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "data.jld2")
+        _dk_write_streak(datafile)
+        deck_text = replace(_dk_minimal_deck(datafile, joinpath(dir, "out")),
+            "sensitivity = { scale = 1.0e-6 }" => "sensitivity = { scale = 1.0e-6 }\n" *
+            "k_smearing = { half_angle_deg = 1.0 }\n" *
+            "tabulated_k_smearing = { offsets_deg = [-1.0, 1.0], weights = [0.5, 0.5] }")
+        deckpath = joinpath(dir, "deck.toml")
+        write(deckpath, deck_text)
+        @test_throws "read_deck: section \"instrument\" gives both \"k_smearing\" and \"tabulated_k_smearing\"; " *
+                     "the two compose and would smear the spectrum twice" read_deck(deckpath)
+    end
+end
