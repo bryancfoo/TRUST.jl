@@ -433,7 +433,8 @@ function calibration_scan(problem::AbstractFitProblem, theta_star::AbstractVecto
         new_wc = reconstruct(wc, (offset=wc.offset + delta * 1e-9, dispersion_scale=wc.dispersion_scale))
         new_effects = Base.setindex(expt.effects, new_wc, wc_idx)
         new_expt = Experiment(; trace=expt.trace, probe=expt.probe, collection=expt.collection,
-            lambda_m=expt.lambda, t_s=expt.t, effects=new_effects, prefactor=expt.prefactor)
+            lambda_m=expt.lambda, t_s=expt.t, effects=new_effects, prefactor=expt.prefactor,
+            gain=expt.gain)
         new_ch = FitProblem(new_expt, ch.pspec, ch.data; regularizer=ch.regularizer,
             scheduler=ch.scheduler, channel=ch.channel, name=ch.name)
         new_problem = if problem isa JointFitProblem

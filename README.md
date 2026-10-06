@@ -195,6 +195,14 @@ spectrum differs from a uniform spread of the same width by at most 0.09 % of th
 example's electron-plasma-wave window, against 3.1 % for the smearing itself, at about twice the cost of
 five angles. No default changed.
 
+**Phase 4.H (the convective gain in a fit) is complete.** The convective gain of Turnbull et al., which
+`spectrum` has computed since Phase 2, now reaches the fit: a geometry key, `gain = "convective"` (or
+`"weak"`), given beside the probe's `intensity_wcm2` and `diameter_um`, makes the forward model, its
+Jacobian and the resonance-width check all carry it, each collection ray with its own gain; a deck that
+asks for it without the probe's intensity or diameter is refused when it is read. Without the key the
+model is exactly what it was. And an instrument table can no longer give `k_smearing` and
+`tabulated_k_smearing` together, which smeared the spectrum twice.
+
 ## Installing and testing
 
 ```

@@ -393,3 +393,11 @@ reference. The two lists are kept in the effective deck, and so in the result fi
 effect's `channels/<name>/effects/<k>` record holds its `type` alone, since it has no parameters. Also
 not a version bump. An instrument table may not give it beside `k_smearing`: the two compose, so the
 spectrum would be smeared twice, and `read_deck` refuses the pair (Phase 4.H, Step 4.H.0).
+
+**`gain`** (Phase 4.H, Step 4.H.1, spec D7): a `[geometry]` or `[channel.<name>.geometry]` key, `gain
+= "none" | "convective" | "weak"`, the convective gain of `gain.md` (Section 8), converted to the
+`Experiment`'s `gain` symbol. Default `"none"`, which `read_deck` fills in, so the effective deck and the
+result file's `deck` always carry it. A value other than `"none"` needs the probe's
+`intensity_wcm2 | intensity_wm2` and `diameter_um | diameter_m` in the same geometry, and `read_deck`
+refuses it without them, naming the missing key; like `k_model` it is a string and never a variable
+reference. Not a version bump, and the result file gains nothing: the gain is in the `deck` record.

@@ -400,16 +400,40 @@ const _PROBEBEAM_KEYS = ("lambda_probe_nm", "lambda_probe_m", "polarization_deg"
     "intensity_wcm2", "intensity_wm2", "diameter_um", "diameter_m")
 const _COLLECTION_KEYS = ("theta_deg", "theta_rad", "k_model", "lambda_center_nm", "lambda_center_m",
     "dispersion_nm_px", "dispersion_m_px", "npixels", "reference_pixel")
+# Phase 4.H spec D7 (OQ-57): the geometry's one key that belongs to neither constructor, the convective
+# gain, an option of the Experiment's forward model (conventions.md 1.8, Section 7). Its value is a
+# string, as k_model's is, and both are exempt from the no-variable-reference rule below.
+const _GEOMETRY_MODEL_KEYS = ("gain",)
+const _GEOMETRY_STRING_KEYS = ("k_model", "gain")
+const _GAIN_VALUES = ("none", "convective", "weak")
 
 function _validate_geometry_section(given::AbstractDict)
-    _check_known_keys(given, (_PROBEBEAM_KEYS..., _COLLECTION_KEYS...), "geometry")
+    _check_known_keys(given, (_PROBEBEAM_KEYS..., _COLLECTION_KEYS..., _GEOMETRY_MODEL_KEYS...), "geometry")
     for (k, v) in given
-        (k != "k_model" && v isa AbstractString) && throw(ArgumentError(
+        (!(k in _GEOMETRY_STRING_KEYS) && v isa AbstractString) && throw(ArgumentError(
             "read_deck: key \"$k\" in section \"geometry\" cannot be a variable reference; the " *
             "probe and the collection are fixed. Fit the wavelength axis with " *
             "instrument.wavelength_calibration instead."))
     end
-    return Dict{String,Any}(given)
+    out = Dict{String,Any}(given)
+    # The gain (Phase 4.H spec D7): one of three strings, refused here rather than at the first
+    # evaluation; a gain needs the probe's intensity and diameter, so their keys must be present
+    # (_convective_gain still refuses a zero value at evaluation). The default is filled in, so that
+    # effective_deck and the result file's deck record carry it (conventions.md 7.5).
+    gain = get(out, "gain", "none")
+    (gain isa AbstractString && gain in _GAIN_VALUES) || throw(ArgumentError(
+        "read_deck: key \"gain\" in section \"geometry\" must be \"none\", \"convective\" or \"weak\"; " *
+        "got $(repr(gain))"))
+    if gain != "none"
+        any(k -> haskey(out, k), ("intensity_wcm2", "intensity_wm2")) || throw(ArgumentError(
+            "read_deck: key \"gain\" in section \"geometry\" is \"$gain\", which needs the probe's " *
+            "intensity: give intensity_wcm2 or intensity_wm2"))
+        any(k -> haskey(out, k), ("diameter_um", "diameter_m")) || throw(ArgumentError(
+            "read_deck: key \"gain\" in section \"geometry\" is \"$gain\", which needs the probe's beam " *
+            "diameter: give diameter_um or diameter_m"))
+    end
+    out["gain"] = gain
+    return out
 end
 
 function _build_geometry(section::AbstractDict)
@@ -1572,8 +1596,11 @@ function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
     end
 
     trace0 = PlasmaTrace(template; axis_name=:t, t_s=axis, leaves=())
+    # The gain's key enters here, converted to the Symbol at the boundary (Phase 4.H spec D7, rule 7.3);
+    # read_deck has filled its default, so every validated geometry carries it.
     expt0s = [Experiment(; trace=trace0, probe=chan_probe[c], collection=chan_collection[c],
-        lambda_m=chan_data[c].lambda, effects=effects_by_channel[c]) for c in 1:nchannels]
+        lambda_m=chan_data[c].lambda, effects=effects_by_channel[c],
+        gain=Symbol(chan_list[c]["geometry"]["gain"])) for c in 1:nchannels]
 
     bindings_instrument = Pair{String,Any}[]
     for c in 1:nchannels
@@ -1590,8 +1617,8 @@ function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
         bindings=vcat(bindings_plasma, bindings_instrument), axis_unit=axis_unit)
 
     working = [Experiment(; trace=pspec.trace, probe=expt0s[c].probe, collection=expt0s[c].collection,
-        lambda_m=expt0s[c].lambda, effects=expt0s[c].effects, prefactor=expt0s[c].prefactor)
-        for c in 1:nchannels]
+        lambda_m=expt0s[c].lambda, effects=expt0s[c].effects, prefactor=expt0s[c].prefactor,
+        gain=expt0s[c].gain) for c in 1:nchannels]
 
     regularizer = _build_regularizer(s["regularizer"], pspec)
 
@@ -1888,7 +1915,8 @@ end
 One vector per channel of `result.experiments`, one entry per bin of the fitted axis: the
 narrowest EPW resonance's full width at half maximum in that channel's wavelength pixels at the
 bin's fitted plasma (`_epw_resonance_widths`), `Inf` where the window holds no resonance or the
-bin's plasma has a non-finite leaf (a variable outside its interval). Phase 4.F spec D13.
+bin's plasma has a non-finite leaf (a variable outside its interval). Phase 4.F spec D13. The
+spectrum is the fitted experiment's own, its `gain` included (Phase 4.H spec D6).
 """
 function _resonance_widths(result::FitResult)
     out = Vector{Vector{Float64}}()
@@ -1899,7 +1927,7 @@ function _resonance_widths(result::FitResult)
         for j in 1:nbins(tr)
             all(isfinite, view(tr.values, :, j)) || continue
             ws = _epw_resonance_widths(plasma(tr, j), expt.probe, expt.collection, expt.lambda,
-                first_order)
+                first_order, expt.gain)
             isempty(ws) || (w[j] = minimum(ws))
         end
         push!(out, w)

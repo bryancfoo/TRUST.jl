@@ -1017,7 +1017,7 @@ function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector
     end
 
     return Experiment(; trace=work_trace, probe=expt.probe, collection=expt.collection,
-        lambda_m=expt.lambda, effects=new_effects, prefactor=expt.prefactor)
+        lambda_m=expt.lambda, effects=new_effects, prefactor=expt.prefactor, gain=expt.gain)
 end
 
 # --- show (spec D40) ---

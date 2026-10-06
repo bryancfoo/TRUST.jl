@@ -16,13 +16,20 @@ the probe, the collection, the axes and the effects may carry a different (possi
 their own — `_streak_eltype` is where all of that is finally reconciled (spec D16).
 
 Built with `Experiment(; trace, probe, collection, lambda_nm | lambda_m = nothing,
-t_ns | t_s = nothing, effects = (), prefactor::Symbol = :first_order)`. The time axis is the
-trace's: if `t_ns`/`t_s` is omitted, `expt.t` is `trace.axis`; if given, it must agree with
-`trace.axis` to `rtol = 1e-12` (else an error naming the first bin that disagrees), and the
-*stored* axis is still `trace.axis` — two sources of truth for one axis is the trap this closes
-(Pitfall 23). **The wavelength axis works the same way against `collection`'s dispersion**: if
-`lambda_nm`/`lambda_m` is omitted and `collection` carries a dispersion, `expt.lambda` is
-`detector_axis(collection)`; if both are given, they must agree to `rtol = 1e-12` (spec D44).
+t_ns | t_s = nothing, effects = (), prefactor::Symbol = :first_order, gain::Symbol = :none)`.
+The time axis is the trace's: if `t_ns`/`t_s` is omitted, `expt.t` is `trace.axis`; if given, it
+must agree with `trace.axis` to `rtol = 1e-12` (else an error naming the first bin that
+disagrees), and the *stored* axis is still `trace.axis` — two sources of truth for one axis is the
+trap this closes (Pitfall 23). **The wavelength axis works the same way against `collection`'s
+dispersion**: if `lambda_nm`/`lambda_m` is omitted and `collection` carries a dispersion,
+`expt.lambda` is `detector_axis(collection)`; if both are given, they must agree to
+`rtol = 1e-12` (spec D44).
+
+`prefactor` and `gain` are the two `spectrum` options the forward model carries (`conventions.md`
+1.8): `gain` is `:none` (the default, the model before Phase 4.H bitwise), `:convective` or `:weak`,
+Turnbull's convective gain, which needs the probe's intensity and diameter. Every evaluation the
+package makes of this experiment's spectrum, in `measure`, the Jacobian and the resonance-width
+check, takes it ([OQ-57](../../dev/open_questions.md#oq-57), Phase 4.H spec D5, D6).
 
 Spec D15, D40, D44.
 """
@@ -36,6 +43,21 @@ struct Experiment{FT<:Real,T<:PlasmaTrace{FT},PB<:ProbeBeam,CO<:Collection,L<:Ab
     effects::E
     operators::O
     prefactor::Symbol
+    gain::Symbol
+end
+
+"""
+    _check_gain(gain::Symbol) -> Symbol
+
+`Experiment`'s `gain`, validated once in its constructor (Phase 4.H spec D5): `:none`, `:convective`
+or `:weak`, the three values `spectrum`'s own `gain` takes (`conventions.md` 1.8); anything else
+throws, naming the three. Returns `gain` itself: `_convective_gain` dispatches on the `Symbol`, so,
+unlike `_prefactor_flag`, there is nothing to convert it to.
+"""
+function _check_gain(gain::Symbol)
+    gain in (:none, :convective, :weak) || throw(ArgumentError(
+        "Experiment: gain must be :none, :convective or :weak; got :$gain"))
+    return gain
 end
 
 """
@@ -133,13 +155,14 @@ function _resolve_lambda_axis(collection::Collection, kwargs)
 end
 
 function Experiment(; trace::PlasmaTrace, probe::ProbeBeam, collection::Collection, effects=(),
-    prefactor::Symbol=:first_order, kwargs...)
+    prefactor::Symbol=:first_order, gain::Symbol=:none, kwargs...)
     t_row = getfield(ACCEPTED_UNITS, :t)
     t_given = any(k -> haskey(kwargs, k), keys(t_row))
 
     lambda = _resolve_lambda_axis(collection, kwargs)
     _reject_extra_kwargs(kwargs, (:lambda_nm, :lambda_m, :t_ns, :t_s))
     _prefactor_flag(prefactor)
+    _check_gain(gain)
 
     _check_lambda_axis(lambda)
 
@@ -163,7 +186,7 @@ function Experiment(; trace::PlasmaTrace, probe::ProbeBeam, collection::Collecti
     FT = eltype(trace)
     return Experiment{FT,typeof(trace),typeof(probe),typeof(collection),typeof(lambda),typeof(t),
         typeof(sorted_effects),typeof(operators)}(
-        trace, probe, collection, lambda, t, sorted_effects, operators, prefactor)
+        trace, probe, collection, lambda, t, sorted_effects, operators, prefactor, gain)
 end
 
 """
@@ -194,6 +217,7 @@ function Base.show(io::IO, ::MIME"text/plain", expt::Experiment)
     print(io, "  collection: ")
     show(io, expt.collection)
     println(io)
+    expt.gain === :none || println(io, "  gain:       :", expt.gain)
     println(io, "  chain:")
     for e in expt.effects
         print(io, "    ")

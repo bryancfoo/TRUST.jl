@@ -174,7 +174,7 @@ end
 """
     _jacobian_bin!(block, kernel_globals, j, work_trace, vals, col_cache, pspec, nvar, G,
                    kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings,
-                   probe0, collection0, lambda0, prefactor_flag, theta)
+                   probe0, collection0, lambda0, prefactor_flag, theta, gain = :none)
 
 One bin's dual pass (D18): for each sweep, seed the bin's own entries and every kernel global
 into `vals` (through the logit, so the dual arithmetic carries `dx/dy` for free -- D3's
@@ -186,13 +186,17 @@ Written as its own named function (not a closure inside `foreach_bin!`'s do-bloc
 `@allocated` measurement of JT11 is behind a genuine function barrier consuming only what the
 loop needs, per `conventions.md` 5.2 and D43's "the function barrier cuts both ways" box.
 
+`gain` is the experiment's (Phase 4.H spec D6), passed by `jacobian` beside `prefactor_flag` and on
+to `_accumulate!`; it is last, with the default `:none`, so that the harnesses written before Phase
+4.H (JT11, JT16, the joint fit's, PI6's, TK9's) still call this unchanged with today's model.
+
 Spec D18.
 """
 function _jacobian_bin!(block::AbstractMatrix{FT}, kernel_globals::AbstractArray{FT,3}, j::Int,
     work_trace, vals::Vector{DFT}, col_cache, pspec::ParameterSpec, nvar::Int, G::Int,
     kernel_global_idx::Vector{Int}, kernel_global_of_var::Vector{Int}, kernel_effects0::Tuple,
     kernel_bindings::Tuple, probe0, collection0, lambda0, prefactor_flag::Bool,
-    theta::AbstractVector{FT}) where {FT,DFT<:ForwardDiff.Dual}
+    theta::AbstractVector{FT}, gain::Symbol=:none) where {FT,DFT<:ForwardDiff.Dual}
     C = ForwardDiff.npartials(DFT)
     bj = pspec.bin_entries[j]
     bs = pspec.bin_slots[j]
@@ -239,7 +243,8 @@ function _jacobian_bin!(block::AbstractMatrix{FT}, kernel_globals::AbstractArray
         p = plasma(work_trace, j)
         col = col_cache.column
         fill!(col, zero(eltype(col)))
-        _accumulate!(col, p, probe0, collection0, lambda0, dual_kernel_effects, one(eltype(col)), prefactor_flag)
+        _accumulate!(col, p, probe0, collection0, lambda0, dual_kernel_effects, one(eltype(col)), prefactor_flag,
+            gain)
 
         @inbounds for k in 1:p_j
             pos = k
@@ -539,6 +544,7 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
 
     probe0, collection0, lambda0 = expt.probe, expt.collection, expt.lambda
     prefactor_flag = _prefactor_flag(expt.prefactor)
+    gain = expt.gain
 
     cache_factory = () -> (_widen_trace(pspec.trace, DFT), Vector{DFT}(undef, pspec.nslots),
         _make_cache(DFT, nlambda))
@@ -547,7 +553,7 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
         work_trace, vals, col_cache = cache
         _jacobian_bin!(blocks[j], kernel_globals, j, work_trace, vals, col_cache, pspec, nvar, G,
             kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings,
-            probe0, collection0, lambda0, prefactor_flag, theta)
+            probe0, collection0, lambda0, prefactor_flag, theta, gain)
     end
 
     response, curve0, Klambda, Kt = _jacobian_shared(expt, nlambda, FT)

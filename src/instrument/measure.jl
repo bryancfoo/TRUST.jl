@@ -144,25 +144,30 @@ function _bin_kernel!(P::AbstractMatrix, expt::Experiment, j::Integer, cache::Bi
     col = cache.column
     fill!(col, zero(eltype(col)))
     _accumulate!(col, p, expt.probe, expt.collection, expt.lambda, _kernel_effects(expt),
-        one(eltype(col)), _prefactor_flag(expt.prefactor))
+        one(eltype(col)), _prefactor_flag(expt.prefactor), expt.gain)
     @inbounds for l in eachindex(col)
         P[l, j] = col[l]
     end
     return P
 end
 
-function _accumulate!(col, p, probe, collection, lambda, ::Tuple{}, w, first_order)
+# Phase 4.H spec D6 (OQ-57): every method takes the experiment's gain and passes it on, to the next
+# effect's fold and to every _spectrum_at call. Its default, :none, is there only so that a direct call
+# written before Phase 4.H (PI3's) keeps today's model; no call in src/ leaves it out.
+function _accumulate!(col, p, probe, collection, lambda, ::Tuple{}, w, first_order,
+                      gain::Symbol=:none)
     @inbounds for l in eachindex(lambda)
-        col[l] += w * _spectrum_at(p, probe, collection, lambda[l], first_order)
+        col[l] += w * _spectrum_at(p, probe, collection, lambda[l], first_order, gain)
     end
     return col
 end
 
-function _accumulate!(col, p, probe, collection, lambda, effects::Tuple, w, first_order)
+function _accumulate!(col, p, probe, collection, lambda, effects::Tuple, w, first_order,
+                      gain::Symbol=:none)
     e = first(effects)
     rest = Base.tail(effects)
     for (wq, pq, probeq, collectionq, lambdaq) in samples(e, p, probe, collection, lambda)
-        _accumulate!(col, pq, probeq, collectionq, lambdaq, rest, w * wq, first_order)
+        _accumulate!(col, pq, probeq, collectionq, lambdaq, rest, w * wq, first_order, gain)
     end
     return col
 end
@@ -173,14 +178,15 @@ end
 # 2026-09-30). N = 1 is today's fold exactly. The samples, their weight and their order are
 # samples(::PixelIntegration)'s own.
 function _accumulate!(col, p, probe, collection, lambda, effects::Tuple{PixelIntegration}, w,
-                      first_order)
+                      first_order, gain::Symbol=:none)
     N = effects[1].subsamples
-    N == 1 && return _accumulate!(col, p, probe, collection, lambda, (), w, first_order)
+    N == 1 && return _accumulate!(col, p, probe, collection, lambda, (), w, first_order, gain)
     wq = w * (1.0 / N)
     @inbounds for i in 1:N
         c = (i - (N + 1) / 2) / N
         for l in eachindex(lambda)
-            col[l] += wq * _spectrum_at(p, probe, collection, _subsample_lambda(lambda, l, c), first_order)
+            col[l] += wq * _spectrum_at(p, probe, collection, _subsample_lambda(lambda, l, c), first_order,
+                gain)
         end
     end
     return col

@@ -2,7 +2,8 @@
 
 > **Front matter (Step 2.3b, 2026-09-11).** Windows 11, Julia 1.12.7. Written alongside
 > `src/scattering/spectrum.jl`'s `_convective_gain` and `src/instrument/effects.jl`'s
-> `Sensitivity` response curve.
+> `Sensitivity` response curve. Section 8 added at Step 4.H.1 (2026-10-05), when the gain reached
+> the fit.
 
 This document derives what `_convective_gain` implements: Turnbull et al.'s convective SRS/SBS
 gain on the scattered light (D. Turnbull, A. L. Milder, R. K. Follett, J. Katz and D. H. Froula,
@@ -218,3 +219,31 @@ inconsistency; it does not attempt to correct it. **Steady state is also assumed
 under a picosecond and SBS in a few picoseconds, both far shorter than a streak bin (tens of
 picoseconds), and absolute instability (as opposed to the convective gain modelled here) is
 assumed absent.
+
+## 8. The gain in the fit path
+
+Until Step 4.H.1 the gain lived only in `spectrum`: `measure`'s per-bin kernel called
+`_spectrum_at` without it, so every streak, Jacobian and fit had `g ≡ 1`
+([OQ-57](../../dev/open_questions.md#oq-57)). Since then **`Experiment` carries `gain` beside
+`prefactor`** (`:none`, the default and the earlier model exactly; `:convective`; `:weak`), and every
+evaluation of the forward model passes it to `_spectrum_at`: `measure`'s fold, through each of its
+three methods (no in-kernel effect, an effect's samples, the `PixelIntegration` fold); the
+Jacobian's per-bin dual pass; and the resonance-width check `fit(deck)` runs after a fit, which so
+measures the model that was fitted. There is one forward model. A deck asks for it with
+`gain = "convective"` in `[geometry]` or a channel's `geometry`, beside the probe's `intensity_wcm2`
+and `diameter_um`, without which `read_deck` refuses it (`data_layout.md` Section 4); a channel
+carries its own, as it carries its own θ.
+
+**Each ray its own gain.** `KSmearing` and `TabulatedKSmearing` rebuild the `Collection` at each
+node's angle, and `_convective_gain` reads that `Collection`'s θ, so each node has its own length `L
+= D₀/sin θ` and its own polarization factor `1 − sin²ψ sin²θ`: the smeared spectrum is the weighted
+sum of the per-node spectra, each with its own `g`, and not a smeared spectrum times one gain. The
+gain is a function of the plasma, so its derivative reaches the Jacobian through the same dual pass;
+it still has no parameter of its own to fit. Section 7's caveat stands with the gain in a fit: beside
+`GradientSmearing`, the two weightings of the scattering volume are not reconciled.
+
+**Its size on the Phase 4.H fixture** (shot 116349's probe: 263.25 nm, 5.55 × 10¹⁴ W/cm², 100 µm, ψ =
+26°; θ = 60.01°; four bins of the two-channel example's plasma; Level 2, 2026-10-05): the gain moves
+the spectrum by 0.5 to 2.4 % of its peak on the 220 to 260 nm electron window and by 0.7 to 1.3 %
+on the 262 to 264.5 nm ion window, growing with the density; `:weak` differs from `:convective` there
+by at most 1e-4 of the peak.

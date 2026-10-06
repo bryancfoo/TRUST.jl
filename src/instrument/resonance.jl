@@ -33,11 +33,13 @@ const RESONANCE_STEPS_PER_PX = 64
 
 """
     _epw_resonance_widths(p::Plasma, probe::ProbeBeam, collection::Collection,
-                          lambda::AbstractVector, first_order::Bool) -> Vector{Float64}
+                          lambda::AbstractVector, first_order::Bool, gain::Symbol = :none) -> Vector{Float64}
 
 The full width at half maximum, in pixels, of every electron-plasma-wave resonance of `p` inside
 the window `lambda` (m, increasing), one entry per resonance found (empty when there is none).
-Spec D13.
+Spec D13. `gain` is the fitted experiment's (Phase 4.H spec D6; `_resonance_widths` passes it), so
+the width is measured on the model that was fitted; `:none`, the default, keeps the calls written
+before Phase 4.H (RW1, RW2) as they were.
 
 **Where a resonance is.** At each pixel `λ_l`, `(k_l, ω_l) = wavevector(probe, collection, λ_l, p)`
 and `ε_l = dielectric(p, k_l, ω_l).epsilon`; an EPW resonance lies between `λ_l` and `λ_{l+1}`
@@ -53,7 +55,7 @@ between the two crossings over `Δ`. A side that never falls to `S*/2` inside th
 the line is at least as wide as the grid, and not narrow.
 """
 function _epw_resonance_widths(p::Plasma, probe::ProbeBeam, collection::Collection,
-                               lambda::AbstractVector, first_order::Bool)
+                               lambda::AbstractVector, first_order::Bool, gain::Symbol=:none)
     n = length(lambda)
     widths = Float64[]
     n >= 2 || return widths
@@ -73,7 +75,7 @@ function _epw_resonance_widths(p::Plasma, probe::ProbeBeam, collection::Collecti
         hi = min(lambda[n], lambda[l+1] + RESONANCE_HALF_WINDOW_PX * dl)
         npts = round(Int, (hi - lo) / dl * RESONANCE_STEPS_PER_PX) + 1
         grid = range(lo, hi; length=npts)
-        S = [_spectrum_at(p, probe, collection, x, first_order) for x in grid]
+        S = [_spectrum_at(p, probe, collection, x, first_order, gain) for x in grid]
         kmax = argmax(S)
         half = S[kmax] / 2
         a = kmax
