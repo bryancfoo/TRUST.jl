@@ -218,12 +218,20 @@ value `procedure` itself takes except `"staged"`, a name or a list. `polish_tol`
 `polish` runs to after the joint fit. `start_from`, a table `variable = "channel"` naming, for a
 variable fitted in more than one stage, the stage its start is taken from (the first-listed
 channel's otherwise).
+
+`sequence` and `hold` (Phase 4.I spec D22, [OQ-59](../../dev/open_questions.md#oq-59) item 4):
+`sequence`, the order the stages run in, a permutation of `channels`; `hold`, a table `stage =
+[variables]` naming, per later stage, the variables it holds at the series the latest earlier stage
+of the sequence fitted. Both empty by default, which `read_deck` keeps out of the validated table:
+absent, the stages are today's, independent, in `channels` order.
 """
 Base.@kwdef struct StagedProcedureOptions
     stage_procedure::Union{String,Vector{String}} = "noisy_descent_lbfgs"
     joint_procedure::Union{String,Vector{String}} = "levenberg_marquardt"
     polish_tol::Float64 = 1e-6
     start_from::Dict{String,Any} = Dict{String,Any}()
+    sequence::Vector{String} = String[]
+    hold::Dict{String,Any} = Dict{String,Any}()
 end
 
 # --- KERNEL_REGISTRY's two option structs ---

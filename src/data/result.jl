@@ -197,6 +197,10 @@ joint start (`stages/start`). Its length must be `result.pspec.ntheta`, else a l
 `vary = 0` and the held series in `variables/<name>/values`, so that a reader can tell a series
 held from a file or a stage from a scalar frozen at its `init`. Both inside `otis-result-3`, no
 bump; RE1's exact key set is unchanged, since neither is written for its fixture.
+**`stages/sequence` and `stages/channels/<name>/held` (Phase 4.I spec D24), only when present**: the
+order a deck's `sequence` gave the stages, and the variables a stage held (`[fit.hold]`'s, or an
+earlier stage's series), each written only when there is one; the held values are in that stage's own
+`variables/<name>/values`. Inside `otis-result-3`, no bump.
 
 When `problem` is given, `problem.pspec === result.pspec` is required (a loud error otherwise,
 naming what to pass instead): `write_result` has no other way to know the problem it is given is
@@ -416,12 +420,16 @@ function write_result(path::AbstractString, result::FitResult;
             f["stages/polish_decreases"] = Vector{Float64}(stages.decreases)
             f["stages/sources/variable"] = String[first(p) for p in stages.sources]
             f["stages/sources/channel"] = String[last(p) for p in stages.sources]
+            # Phase 4.I spec D24: the order, only when the deck gave one.
+            stages.sequence === nothing || (f["stages/sequence"] = String[s for s in stages.sequence])
             for st in stages.stages
                 r = st.result
                 prefix = "stages/channels/$(st.name)"
                 f["$prefix/axis"] = Vector{Float64}(r.pspec.axis)
                 f["$prefix/theta"] = Vector{Float64}(r.theta)
                 f["$prefix/frozen"] = String[name for name in st.frozen]
+                # Phase 4.I spec D24: the variables this stage held, only when it held any.
+                isempty(st.held) || (f["$prefix/held"] = String[name for name in st.held])
                 f["$prefix/chi2"] = Float64(r.chi2)
                 f["$prefix/objective"] = Float64(r.objective)
                 f["$prefix/npixels"] = Int64(r.npixels)
@@ -494,7 +502,8 @@ variable to its stage's channel, `channels` a `Dict{String,Any}` from each stage
 `(; axis, theta, frozen, chi2, objective, npixels, iterations, converged, status, termination,
 optimizer, elapsed, near_bound_fraction, variables, dependents)`, `variables` and `dependents` keyed by
 name in the same forms as the file's own top-level ones (`variables[v].values`, `.vary`,
-`.near_bound`; `dependents[d].values`).
+`.near_bound`; `dependents[d].values`). Phase 4.I spec D24: `stages.sequence` is the file's
+`stages/sequence` or `nothing`, and each stage's `held` its `held` list or an empty one.
 
 Throws, naming the version found and expected, if `layout_version` does not match
 `RESULT_LAYOUT_VERSION`.
@@ -665,7 +674,8 @@ function read_result(path::AbstractString)
                     sdeps[d] = (values=f["$prefix/dependents/$d/values"],)
                 end
                 records[nm] = (axis=f["$prefix/axis"], theta=f["$prefix/theta"],
-                    frozen=f["$prefix/frozen"], chi2=f["$prefix/chi2"],
+                    frozen=f["$prefix/frozen"],
+                    held=haskey(f, "$prefix/held") ? f["$prefix/held"] : String[], chi2=f["$prefix/chi2"],
                     objective=f["$prefix/objective"], npixels=f["$prefix/npixels"],
                     iterations=f["$prefix/iterations"], converged=f["$prefix/converged"],
                     status=f["$prefix/status"], termination=f["$prefix/termination"],
@@ -676,7 +686,8 @@ function read_result(path::AbstractString)
             stages = (names=f["stages/names"], start=f["stages/start"],
                 polish_decreases=f["stages/polish_decreases"],
                 sources=Dict{String,String}(zip(f["stages/sources/variable"], f["stages/sources/channel"])),
-                channels=records)
+                channels=records,
+                sequence=haskey(f, "stages/sequence") ? f["stages/sequence"] : nothing)
         end
 
         return (; layout_version=version, meta, deck, axis_name, axis, axis_unit,

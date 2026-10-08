@@ -970,6 +970,30 @@ function _validate_optimizer_section(given::AbstractDict)
         st["start_from"] isa AbstractDict || throw(ArgumentError(
             "read_deck: \"optimizer.staged.start_from\" must be a table of variable = \"channel\""))
         st["start_from"] = Dict{String,Any}(String(k) => v for (k, v) in st["start_from"])
+        # Phase 4.I spec D22: sequence and hold, kept in the table only when the deck gives them, so
+        # a deck without them reads, builds and round-trips exactly as before.
+        if haskey(entry, "sequence")
+            seq = st["sequence"]
+            (!isempty(seq) && all(x -> x isa AbstractString, seq)) || throw(ArgumentError(
+                "read_deck: \"optimizer.staged.sequence\" must be a non-empty list of channel names"))
+            st["sequence"] = Any[String(x) for x in seq]
+        else
+            delete!(st, "sequence")
+        end
+        if haskey(entry, "hold")
+            st["hold"] isa AbstractDict || throw(ArgumentError(
+                "read_deck: \"optimizer.staged.hold\" must be a table of stage = [variables]"))
+            hold = Dict{String,Any}()
+            for (stage, names) in st["hold"]
+                (names isa AbstractVector && !isempty(names) && all(x -> x isa AbstractString, names)) ||
+                    throw(ArgumentError(
+                        "read_deck: \"optimizer.staged.hold.$stage\" must be a non-empty list of variable names"))
+                hold[String(stage)] = Any[String(x) for x in names]
+            end
+            st["hold"] = hold
+        else
+            delete!(st, "hold")
+        end
         out["staged"] = st
     elseif haskey(given, "staged")
         throw(ArgumentError(
@@ -1009,6 +1033,35 @@ function _check_staged_deck(sections::AbstractDict, channel_names::Union{Nothing
         (hold !== nothing && name in hold["variables"]) && throw(ArgumentError(
             "read_deck: \"optimizer.staged.start_from\" names \"$name\", which [fit.hold] holds, so " *
             "no stage fits it"))
+    end
+    # Phase 4.I spec D22: the sequence is a permutation of the channels; a stage holds only fitted
+    # variables, and only with a sequence. What needs the bindings (does the variable reach the
+    # stage, did an earlier stage fit it) is _staged_fit's to refuse.
+    staged = sections["optimizer"]["staged"]
+    seq = get(staged, "sequence", nothing)
+    if seq !== nothing
+        (length(seq) == length(channel_names) && Set(seq) == Set(channel_names)) || throw(ArgumentError(
+            "read_deck: \"optimizer.staged.sequence\" must name every channel of \"channels\" once, in the " *
+            "order the stages run; got $(repr(String.(seq))) for channels $channel_names"))
+    end
+    stage_hold = get(staged, "hold", nothing)
+    if stage_hold !== nothing
+        seq === nothing && throw(ArgumentError(
+            "read_deck: \"optimizer.staged.hold\" needs \"sequence\": a stage holds what an earlier stage " *
+            "fitted, so the stages must run in a stated order"))
+        fit_hold = sections["fit_hold"]
+        for (stage, names) in stage_hold
+            stage in seq || throw(ArgumentError(
+                "read_deck: \"optimizer.staged.hold\" names stage \"$stage\", which is not a channel of " *
+                "\"sequence\", $(String.(seq))"))
+            for nm in names
+                entry = get(sections["fit_variables"], nm, nothing)
+                (entry !== nothing && entry["vary"] && !(fit_hold !== nothing && nm in fit_hold["variables"])) ||
+                    throw(ArgumentError(
+                        "read_deck: \"optimizer.staged.hold.$stage\" names \"$nm\", which is not a variable a " *
+                        "stage fits (a fitted variable of [fit.variables], vary = true, not held by [fit.hold])"))
+            end
+        end
     end
     return nothing
 end
@@ -1675,7 +1728,7 @@ Spec D33, D40, D50, D15.
 """
 function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
     chan_data::AbstractVector{StreakData}, chan_probe::AbstractVector, chan_collection::AbstractVector,
-    regions::AbstractVector{AveragingRegion})
+    regions::AbstractVector{AveragingRegion}; held=nothing, start=nothing)
     is_channel_form = haskey(s, "channels")
     nchannels = length(chan_list)
 
@@ -1778,6 +1831,17 @@ function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
                 time_varying=v.time_varying, interval=v.interval, held=series)
         end
     end
+    # Phase 4.I spec D23: a sequential stage's holds, each an earlier stage's FitResult.values row (one
+    # value per bin of the whole axis, or one), taken on the variable's own bins by bin index.
+    if held !== nothing
+        for (i, v) in enumerate(vars)
+            haskey(held, v.name) || continue
+            row = held[v.name]
+            series = v.time_varying ? row[_interval_bins(v, ivals, length(axis))] : [row[1]]
+            vars[i] = FittedVariable(v.name; bounds=(v.lower, v.upper), init=v.init,
+                time_varying=v.time_varying, interval=v.interval, held=series)
+        end
+    end
 
     pspec = ParameterSpec(Tuple(expt0s); variables=vars, dependents=dep_pairs, intervals=ivals,
         bindings=vcat(bindings_plasma, bindings_instrument), axis_unit=axis_unit)
@@ -1799,37 +1863,43 @@ function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
     end
 
     optimizer = _build_optimizer(s["optimizer"])
-    start = _deck_start(s, pspec, ivals, axis, deck_units)
+    start = _deck_start(s, pspec, ivals, axis, deck_units; warm=start)
     return problem, optimizer, start
 end
 
 """
-    _deck_start(s, pspec, ivals, axis, deck_units) -> Vector{Float64}
+    _deck_start(s, pspec, ivals, axis, deck_units; warm = nothing) -> Vector{Float64}
 
 `build_problem`'s start (Phase 4.I spec D9): `flatten(pspec)` when the deck has no `[fit.start]`,
 the code path of every deck before Phase 4.I; else `flatten(pspec, values)` over the named
 variables that this deck fits (`vary`; a stage deck's frozen variable is skipped), each from
 `_series_values` -- a per-bin row on the whole axis (`NaN` outside the variable's interval, which
-`flatten` never reads) or a scalar -- and every other variable at its `init`.
+`flatten` never reads) or a scalar -- and every other variable at its `init`. `warm` (Phase 4.I spec
+D23, a sequential stage's warm start) is `nothing` or a `Dict` of `name => row or scalar` an earlier
+stage fitted; a name it gives takes that value in place of `init` or `[fit.start]`'s.
 """
 function _deck_start(s::AbstractDict, pspec::ParameterSpec, ivals::Vector{FitInterval},
-    axis::AbstractVector, deck_units::AbstractDict)
+    axis::AbstractVector, deck_units::AbstractDict; warm=nothing)
     tbl = get(s, "fit_start", nothing)
-    tbl === nothing && return flatten(pspec)
-    sfile = _read_series_file(tbl["file"], "start")
+    (tbl === nothing && warm === nothing) && return flatten(pspec)
     nt = length(axis)
     values = Pair{String,Any}[]
-    for v in pspec.variables
-        (v.vary && v.name in tbl["variables"]) || continue
-        series = _series_values(sfile, "start", tbl["file"], v, ivals, axis, deck_units)
-        if v.time_varying
-            row = fill(NaN, nt)
-            row[_interval_bins(v, ivals, nt)] .= series
-            push!(values, v.name => row)
-        else
-            push!(values, v.name => series[1])
+    if tbl !== nothing
+        sfile = _read_series_file(tbl["file"], "start")
+        for v in pspec.variables
+            (v.vary && v.name in tbl["variables"]) || continue
+            warm !== nothing && haskey(warm, v.name) && continue
+            series = _series_values(sfile, "start", tbl["file"], v, ivals, axis, deck_units)
+            if v.time_varying
+                row = fill(NaN, nt)
+                row[_interval_bins(v, ivals, nt)] .= series
+                push!(values, v.name => row)
+            else
+                push!(values, v.name => series[1])
+            end
         end
     end
+    warm === nothing || append!(values, (String(k) => x for (k, x) in warm))
     return flatten(pspec, values)
 end
 
@@ -1865,13 +1935,23 @@ files. Not one expression changed; the split is bitwise, checked in scratch agai
 
 Spec D33, D40, D50.
 """
-function build_problem(deck::Deck)
+build_problem(deck::Deck) = _build_problem(deck)
+
+"""
+    _build_problem(deck::Deck; held = nothing, start = nothing)
+
+`build_problem`'s body, with the two keywords a sequential stage passes `_assemble_problem` (Phase
+4.I spec D23): `held`, the names the stage holds and the rows an earlier stage fitted; `start`, the
+names it warm-starts and their values. Both `nothing`, which is `build_problem(deck)`, is the code
+path of every deck before Step 4.I.3.
+"""
+function _build_problem(deck::Deck; held=nothing, start=nothing)
     s = deck.sections
     chan_list = _channel_list(s)
     regions = s["fit_regions"] === nothing ? AveragingRegion[] : _build_averaging_regions(s["fit_regions"])
     raw, probes, collections = _read_channels(s, chan_list, !isempty(regions))
     chan_data = _average_channels(raw, chan_list, regions)
-    return _assemble_problem(s, chan_list, chan_data, probes, collections, regions)
+    return _assemble_problem(s, chan_list, chan_data, probes, collections, regions; held=held, start=start)
 end
 
 # ------------------------------------------------------------------------------------------
@@ -2045,15 +2125,27 @@ procedure is not `"staged"` is fitted the same way when all four are given
 4. `solve(problem, joint_optimizer; start)`, then `polish(problem, result; tol = polish_tol)`.
 
 Returns `(; deck, problem, optimizer = joint_optimizer, start, result, decreases, stages,
-sources)`: `result` and `decreases` `polish`'s; `stages` one `(; name, deck, problem, result,
-frozen)` per channel; `sources` one `name => channel` per fitted variable, in `pspec.variables`
-order. Pins nothing: `fit(deck)` pins BLAS before calling it (`conventions.md` 6.6).
+sources, sequence)`: `result` and `decreases` `polish`'s; `stages` one `(; name, deck, problem,
+result, frozen, held)` per channel, in the order they ran; `sources` one `name => channel` per fitted
+variable, in `pspec.variables` order; `sequence` the deck's, or `nothing`. Pins nothing: `fit(deck)`
+pins BLAS before calling it (`conventions.md` 6.6).
+
+**The sequence** (Phase 4.I spec D22, D23, [OQ-59](../../dev/open_questions.md#oq-59) item 4): with
+`sequence` the stages run in that order; a stage holds the variables `hold` names for it at the
+series the latest earlier stage that fitted them found (`held`, `FitResult.values` by bin index, as
+the joint start takes them); every other variable it fits that an earlier stage fitted starts from
+that stage's series (the warm start); and a variable's joint start comes from the last stage that
+fitted it, unless `start_from` names a stage, which must fit it. Refused before any stage runs: a
+held variable that does not reach its stage's channel, or that no earlier stage fits; a `start_from`
+stage that holds its variable. Without `sequence` every step is the one above, unchanged.
 """
 function _staged_fit(deck::Deck;
     stage_procedure=deck.sections["optimizer"]["staged"]["stage_procedure"],
     joint_optimizer::AbstractOptimizer=_build_optimizer(deck.sections["optimizer"]),
     polish_tol::Real=deck.sections["optimizer"]["staged"]["polish_tol"],
-    start_from::AbstractDict=deck.sections["optimizer"]["staged"]["start_from"])
+    start_from::AbstractDict=deck.sections["optimizer"]["staged"]["start_from"],
+    sequence=_staged_option(deck, "sequence", nothing),
+    hold::AbstractDict=_staged_option(deck, "hold", Dict{String,Any}()))
     chan_list = _channel_list(deck.sections)
     nch = length(chan_list)
     names = String[c["name"] for c in chan_list]
@@ -2063,6 +2155,22 @@ function _staged_fit(deck::Deck;
     problem, _, _ = build_problem(deck)
     pspec = problem.pspec
     reach = _variable_channels(pspec, nch)
+
+    # Phase 4.I spec D23: the order the stages run in, and what each holds.
+    order = sequence === nothing ? collect(1:nch) : Int[findfirst(==(String(c)), names) for c in sequence]
+    held_in = [String[] for _ in 1:nch]
+    for (stage, vs) in hold
+        append!(held_in[findfirst(==(String(stage)), names)], String.(vs))
+    end
+    for (k, c) in enumerate(order), nm in held_in[c]
+        i = findfirst(v -> v.name == nm, pspec.variables)
+        c in reach[i] || throw(ArgumentError(
+            "fit: [optimizer.staged] hold: stage \"$(names[c])\" holds \"$nm\", which does not reach " *
+            "its channel's model"))
+        any(cc -> cc in reach[i] && !(nm in held_in[cc]), order[1:k-1]) || throw(ArgumentError(
+            "fit: [optimizer.staged] hold: stage \"$(names[c])\" holds \"$nm\", which no earlier stage of " *
+            "the sequence fits"))
+    end
 
     sources = Pair{String,String}[]
     source_index = Dict{String,Int}()
@@ -2076,29 +2184,52 @@ function _staged_fit(deck::Deck;
         for c in 1:nch
             c in chans || push!(frozen[c], v.name)
         end
-        src = first(chans)
+        src = sequence === nothing ? first(chans) :
+              last(c for c in order if c in chans && !(v.name in held_in[c]))
         if haskey(start_from, v.name)
             src = findfirst(==(start_from[v.name]), names)
             src in chans || throw(ArgumentError(
                 "fit: [optimizer.staged] start_from takes \"$(v.name)\" from channel " *
                 "\"$(names[src])\", whose stage freezes it: it reaches only $(names[chans])"))
+            v.name in held_in[src] && throw(ArgumentError(
+                "fit: [optimizer.staged] start_from takes \"$(v.name)\" from stage \"$(names[src])\", " *
+                "which holds it"))
         end
         push!(sources, v.name => names[src])
         source_index[v.name] = src
     end
 
     stages = NamedTuple[]
-    for c in 1:nch
+    position = Dict{Int,Int}()        # channel => its place in `stages`
+    fitted_by = Dict{String,Int}()    # name => the place of the latest stage that fitted it
+    for c in order
         sdeck = _stage_deck(deck, c, stage_procedure, frozen[c])
-        p_c, opt_c, start_c = build_problem(sdeck)
+        p_c, opt_c, start_c = if sequence === nothing
+            build_problem(sdeck)
+        else
+            held_c = Dict{String,Vector{Float64}}(nm => stages[fitted_by[nm]].result.values[nm]
+                                                  for nm in held_in[c])
+            warm_c = Dict{String,Any}()
+            for (i, v) in enumerate(pspec.variables)
+                (v.vary && c in reach[i] && !(v.name in held_in[c]) && haskey(fitted_by, v.name)) || continue
+                row = stages[fitted_by[v.name]].result.values[v.name]
+                warm_c[v.name] = v.time_varying ? row : row[1]
+            end
+            _build_problem(sdeck; held=held_c, start=warm_c)
+        end
         r_c = solve(p_c, opt_c; start=start_c)
-        push!(stages, (name=names[c], deck=sdeck, problem=p_c, result=r_c, frozen=frozen[c]))
+        held_names = String[v.name for v in p_c.pspec.variables if v.held !== nothing]
+        push!(stages, (name=names[c], deck=sdeck, problem=p_c, result=r_c, frozen=frozen[c], held=held_names))
+        position[c] = length(stages)
+        for (i, v) in enumerate(pspec.variables)
+            (v.vary && c in reach[i] && !(v.name in held_in[c])) && (fitted_by[v.name] = length(stages))
+        end
     end
 
     values = Pair{String,Any}[]
     for v in pspec.variables
         v.vary || continue
-        row = stages[source_index[v.name]].result.values[v.name]
+        row = stages[position[source_index[v.name]]].result.values[v.name]
         push!(values, v.name => (v.time_varying ? row : row[1]))
     end
     start = flatten(pspec, values)
@@ -2106,7 +2237,14 @@ function _staged_fit(deck::Deck;
     pol = polish(problem, joint; tol=polish_tol)
 
     return (; deck, problem, optimizer=joint_optimizer, start, result=pol.result,
-        decreases=pol.decreases, stages, sources)
+        decreases=pol.decreases, stages, sources, sequence=sequence === nothing ? nothing : String.(sequence))
+end
+
+# A key of the deck's [optimizer.staged] table, or `default` when the deck has no such table (a deck
+# whose procedure is not "staged", fitted the staged way by a caller giving every keyword) or no key.
+function _staged_option(deck::Deck, key::AbstractString, default)
+    st = get(deck.sections["optimizer"], "staged", nothing)
+    return st === nothing ? default : get(st, key, default)
 end
 
 # ------------------------------------------------------------------------------------------
@@ -2291,6 +2429,23 @@ function _warn_near_bound(result::FitResult)
 end
 
 """
+    _warn_iteration_cap(result::FitResult, label::AbstractString) -> Bool
+
+[OQ-59](../../dev/open_questions.md#oq-59) item 5 (Phase 4.I spec D25): one `@warn` when
+`result.status` is `:iterations`, the fit stopped at its optimizer's iteration cap, naming `label`
+(`stage "<channel>"` or `the final fit`), the iteration count it stopped at and the status; silent
+otherwise; returns whether it warned. A report, in the manner of `_warn_near_bound`: the fit, its
+`converged` and `status` and every dataset `write_result` writes are exactly as they would be without
+it. `LBFGS`'s own warning at its cap (`optimizers.jl`) stays, so an `LBFGS` fit at its cap warns twice.
+"""
+function _warn_iteration_cap(result::FitResult, label::AbstractString)
+    result.status === :iterations || return false
+    @warn "fit: $label stopped at its iteration cap after $(result.iterations) iterations (status " *
+          ":iterations); the result is as fitted and may not be a minimum" iterations = result.iterations status = result.status converged = result.converged
+    return true
+end
+
+"""
     fit(path::AbstractString) -> FitResult
     fit(deck::Deck) -> FitResult
 
@@ -2334,6 +2489,11 @@ channel does not yet sample each pixel finely enough, naming the bins and the
 as `fit/start` -- `build_problem`'s start (from `[fit.start]` when the deck has one), or a staged
 deck's joint start, which `stages/start` also holds.
 
+**The iteration cap** (Phase 4.I spec D25, [OQ-59](../../dev/open_questions.md#oq-59) item 5): after
+the resonance-width check, `fit` calls `_warn_iteration_cap` for each stage of a staged deck, in the
+order they ran, and then for the final fit: one warning for each that stopped at its iteration cap.
+It changes nothing.
+
 Spec D33, D40.
 """
 function fit(deck::Deck)
@@ -2353,6 +2513,12 @@ function fit(deck::Deck)
     _warn_fit_minimum(result, decrease, _near_bound_fraction(result))
     _warn_near_bound(result)
     _warn_narrow_resonance(result)
+    if staged !== nothing
+        for st in staged.stages
+            _warn_iteration_cap(st.result, "stage \"$(st.name)\"")
+        end
+    end
+    _warn_iteration_cap(result, "the final fit")
     dir = deck.sections["output"]["dir"]
     mkpath(dir)
     eff = effective_deck(deck, problem, optimizer)

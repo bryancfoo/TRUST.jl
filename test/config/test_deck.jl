@@ -1116,3 +1116,24 @@ end
         @test_throws "gives \"T_D\" in \"T_eV\", but this deck binds it through \"T_keV\"" OTIS.build_problem(read_deck(joinpath(dir, "k.toml")))
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# DK26: fit(deck) warns when the final fit stops at its iteration cap (Phase 4.I spec D25, Step 4.I.3)
+# ------------------------------------------------------------------------------------------
+
+@testset "DK26: the final fit at its iteration cap warns once" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "p1.jld2")
+        _dk_p1_streak(datafile)
+        deckpath = joinpath(dir, "cap.toml")
+        write(deckpath, _dk_p1_deck(datafile, joinpath(dir, "cap");
+            optimizer="procedure = \"levenberg_marquardt\"\nlevenberg_marquardt = { iterations = 1 }"))
+        result, logs = _dk_fit_logged(deckpath)
+        @test result.status === :iterations
+        @test _dk_count(logs, "fit: the final fit stopped at its iteration cap after 1 iterations (status :iterations); " *
+                              "the result is as fitted and may not be a minimum") == 1
+        @test _dk_count(logs, "stopped at its iteration cap") == 1
+        record = only(filter(l -> occursin("iteration cap", string(l.message)), logs))
+        @test record.kwargs[:iterations] == 1 && record.kwargs[:status] === :iterations
+    end
+end

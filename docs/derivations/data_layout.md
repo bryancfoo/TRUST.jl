@@ -305,9 +305,11 @@ stage the same way.
 | `stages/start` | `Float64` | `(ntheta)`, the joint fit's start in `y` | yes |
 | `stages/polish_decreases` | `Float64` | `(n_polish)`, `polish`'s Gauss–Newton decreases | yes |
 | `stages/sources/variable`, `stages/sources/channel` | `String` | `(N_fitted)`, each fitted variable of the joint fit and the stage its start came from | yes |
+| `stages/sequence` | `String` | `(N_channels)`, the order the stages ran in (Phase 4.I spec D24) | only when the deck gives `sequence` |
 | `stages/channels/<name>/axis` | `Float64` | `(N_t)`, s, the stage's own fitted axis | yes, one group per channel |
 | `stages/channels/<name>/theta` | `Float64` | `(ntheta_stage)`, the stage's minimizer in `y` | yes |
 | `stages/channels/<name>/frozen` | `String` | `(k)`, the variables this stage froze at their `init` (may be empty) | yes |
+| `stages/channels/<name>/held` | `String` | `(k)`, the variables this stage held at a series (`[fit.hold]`'s, or an earlier stage's), their values in its `variables/<v>/values` (Phase 4.I spec D24) | only when the stage held any |
 | `stages/channels/<name>/chi2`, `objective`, `elapsed`, `near_bound_fraction` | `Float64` | scalar | yes |
 | `stages/channels/<name>/npixels`, `iterations` | `Int64` | scalar | yes |
 | `stages/channels/<name>/converged` | `UInt8` | scalar | yes |
@@ -387,6 +389,30 @@ under `stages/` (Section 3); the warnings and the result are the final fit's. `s
 whichever stage runs that optimizer. `"staged"` on a shorthand deck or a one-channel deck is
 refused by `read_deck`, as is an `[optimizer.staged]` table under any other procedure. A new key
 inside `[optimizer]` is not a deck-version bump: `otis-deck-2` stays.
+
+**`sequence` and `hold`** (Phase 4.I, Step 4.I.3, spec D22 to D24; [OQ-59](../../dev/open_questions.md#oq-59)
+item 4): two more keys of `[optimizer.staged]`,
+
+```toml
+sequence = ["epw", "iaw"]                   # the order the stages run in, every channel once
+hold = { iaw = ["logn", "T_e", "m_e"] }     # per later stage, the variables it holds
+```
+
+With `sequence` the stages run in that order. A stage holds each variable `hold` names for it at the
+series the latest earlier stage of the sequence fitted (that stage's own values, by bin index, as the
+joint start takes them); every other variable it fits that an earlier stage fitted starts from that
+stage's series; and the joint fit starts each variable from the last stage of the sequence that fitted
+it, unless `start_from` names a stage, which must fit it. Without `sequence` the stages are the
+independent ones above, exactly. Refused by `read_deck`: a `sequence` that is not every channel once;
+`hold` without `sequence`; a `hold` stage not in `sequence`; a held name that is not a variable a
+stage fits (a fitted variable, not one `[fit.hold]` holds). Refused by `fit` before any stage runs: a
+held variable that does not reach its stage's channel or that no earlier stage fits, and a
+`start_from` stage that holds its variable. The result file records `stages/sequence` and each stage's
+`held` list (Section 3). Not a deck-version bump.
+
+**The iteration cap** (Phase 4.I, Step 4.I.3, spec D25): `fit(deck)` warns once for each stage, and once
+for the final fit, that stopped at its optimizer's iteration cap (`status` `:iterations`); a report, the
+fit and the file unchanged.
 
 **`pixel_integration`** (Phase 4.F, Step 4.F.2, spec D12): an `[instrument]` or
 `[channel.<name>.instrument]` key, `pixel_integration = { subsamples = N }`, a positive integer,

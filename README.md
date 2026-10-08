@@ -203,6 +203,22 @@ asks for it without the probe's intensity or diameter is refused when it is read
 model is exactly what it was. And an instrument table can no longer give `k_smearing` and
 `tabulated_k_smearing` together, which smeared the spectrum twice.
 
+**Phase 4.I (a per-bin amplitude, a start from a file, held series and the sequential stage) is
+complete.** A camera's sensitivity may now take one fitted value per time bin: write `sensitivity = {
+scale = "a_epw" }` with `a_epw` declared `time_varying = true`, the one instrument key a time-varying
+variable may be bound to, which normalizes each time slice on its own (and gives up the absolute
+intensity's information about the density); a `temporal_irf` beside it is refused. `[fit.start] = {
+file = "...", variables = [...] }` starts the named variables from a series in a file, and `[fit.hold]`
+of the same form holds them there, unfitted; the file is a result file or one written by
+`write_start(path; axis_ns, values, units)`, its series interpolated linearly onto the fitted bins and
+never extrapolated. A staged deck may give `sequence = ["epw", "iaw"]` and `hold = { iaw = ["logn",
+"T_e", "m_e"] }` in `[optimizer.staged]`: the stages then run in that order, a later stage holding what
+an earlier one fitted and starting the rest from it. `fit(deck)` now warns when a stage or the final fit
+stops at its iteration cap. On a two-camera synthetic problem with the signal ramped six-fold across
+the window, one scale per camera biases the fitted density by 17 % (median) and the per-bin amplitude
+recovers it to 1.7 %, the un-ramped fit's own accuracy. Without the new keys every fit is exactly what
+it was.
+
 ## Installing and testing
 
 ```
