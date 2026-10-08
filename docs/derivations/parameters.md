@@ -155,6 +155,13 @@ different leaves, the same factor — are exactly the shared-flow idiom the shoc
 time-varying variable, or a dependent that transitively reads one (walking the same dependency
 graph the topological sort already built, so the check is free), is refused: the post-kernel
 effects act on the whole streak once, and `Experiment` holds one effect tuple, not one per bin.
+**One exception, from Phase 4.I** (spec D17, [OQ-59](../../dev/open_questions.md#oq-59) item 1):
+`Sensitivity.scale`, which holds one value per bin when a time-varying variable is bound to it
+(`instrument.md` Section 1). The variable must be directly fitted (a time-varying dependent is still
+refused) and on the whole axis (an interval variable is refused, since the amplitude needs a value
+at every bin), and the channel may not have a `TemporalIRF`. `unflatten` gathers the variable's
+per-bin values as its bin loop runs and rebuilds the `Sensitivity` with that vector. Every other
+instrument parameter keeps the rule, and the refusal names the exception.
 
 **The probe and the collection are fixed.** A binding whose target key begins `probe.` or
 `collection.` is refused, naming `WavelengthCalibration` — since Step 4.A.1a (2026-09-21,

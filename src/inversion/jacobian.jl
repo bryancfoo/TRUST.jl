@@ -46,8 +46,16 @@ matrix outside a test.
   `kernel_globals`/`chain_globals` belongs to -- not in D17's own struct sketch (which, like
   D15's `FitProblem` box before it, omitted a field `jvp!`/`jtvp!` need); added here for the same
   reason D15's `pixel_index` was, and flagged in the chunk 6 report.
+- `chain_blocks[j]` is `N_lambda x q_j` (Phase 4.I spec D19): `dM[:, j] / d(bin-j entries of a
+  per-bin chain variable)`, a fitted time-varying variable bound to `Sensitivity`'s scale, already
+  in theta-space; `chain_block_idx[j]` its theta indices. A per-bin amplitude `a_j` moves column `j`
+  alone, so its block is `curve0 .* Q[:, j] .* dx/dy .* factor`, zero elsewhere. **Both are empty
+  vectors (length 0) when no such variable is bound in this channel**, every Jacobian before Phase
+  4.I, so the products' loops over them do nothing.
 - `response` is `g = scale .* response_curve` (or `scale` alone with no curve; `1` with no
-  `Sensitivity` at all), length `N_lambda`.
+  `Sensitivity` at all), length `N_lambda`; with a per-bin `Sensitivity.scale` (Phase 4.I spec D19)
+  it is the `N_lambda x N_t` matrix `response_curve .* transpose(scale)`, one column per bin, and
+  every product applies it by the same broadcast.
 - `Klambda`/`Kt` are the value-only convolution matrices `K_lambda`/`K_t` (`nothing` when that
   IRF is absent, checked once per product rather than once per element, D17).
 
@@ -71,7 +79,9 @@ struct FitJacobian{FT<:Real}
     chain_globals::Vector{Matrix{FT}}
     kernel_global_idx::Vector{Int}
     chain_global_idx::Vector{Int}
-    response::Vector{FT}
+    chain_blocks::Vector{Matrix{FT}}
+    chain_block_idx::Vector{Vector{Int}}
+    response::Union{Vector{FT},Matrix{FT}}
     Klambda::Union{Nothing,Matrix{FT}}
     Kt::Union{Nothing,Matrix{FT}}
     reg_rows::Vector{Int}
@@ -348,7 +358,7 @@ dsigma` from `ForwardDiff.partials.(_convolution_matrix(GaussianKernel(Dual(sigm
 1)` -- never hand-derived (`_convolution_matrix` is generic in its element type, XP12).
 """
 function _chain_global_spectral_sigma(e::SpectralIRF{<:GaussianKernel}, lambda::AbstractVector,
-    P::AbstractMatrix, Kt::Union{Nothing,AbstractMatrix}, response::AbstractVector)
+    P::AbstractMatrix, Kt::Union{Nothing,AbstractMatrix}, response::AbstractVecOrMat)
     sigma0 = e.kernel.sigma
     dsig = ForwardDiff.Dual(sigma0, one(sigma0))
     Kd = _convolution_matrix(GaussianKernel(dsig), lambda)
@@ -365,7 +375,7 @@ end
 counterpart of `_chain_global_spectral_sigma`.
 """
 function _chain_global_temporal_sigma(e::TemporalIRF{<:GaussianKernel}, t::AbstractVector,
-    P::AbstractMatrix, Klambda::Union{Nothing,AbstractMatrix}, response::AbstractVector)
+    P::AbstractMatrix, Klambda::Union{Nothing,AbstractMatrix}, response::AbstractVecOrMat)
     sigma0 = e.kernel.sigma
     dsig = ForwardDiff.Dual(sigma0, one(sigma0))
     Kd = _convolution_matrix(GaussianKernel(dsig), t)
@@ -397,14 +407,21 @@ function _jacobian_shared(expt::Experiment, nlambda::Int, ::Type{FT}) where {FT<
         elseif co == 3
             Kt = expt.operators[i]
         elseif co == 4
-            scale = FT(e.scale)
+            scale = _shared_scale(e.scale, FT)
             op = expt.operators[i]
             op === nothing || (curve0 = FT.(op))
         end
     end
-    response = scale .* curve0
+    response = _response(scale, curve0)
     return response, curve0, Klambda, Kt
 end
+
+# Phase 4.I spec D19: a scalar scale gives today's response vector, bitwise; a per-bin scale the
+# N_lambda x N_t matrix whose column j is scale[j] .* curve0, the product apply! forms per element.
+_shared_scale(s::Real, ::Type{FT}) where {FT} = FT(s)
+_shared_scale(s::AbstractVector, ::Type{FT}) where {FT} = FT.(s)
+_response(scale::Real, curve0::AbstractVector) = scale .* curve0
+_response(scale::AbstractVector, curve0::AbstractVector) = transpose(scale) .* curve0
 
 """
     _build_chain_globals(problem, expt, theta, P, Q, response, curve0, ::Type{FT}) -> (chain_globals, chain_global_idx)
@@ -422,7 +439,7 @@ chain-stage parameter made this function read `theta[0]` and throw a `BoundsErro
 as `jacobian` skips it among the kernel globals. A held variable is a frozen one.
 """
 function _build_chain_globals(problem::FitProblem, expt::Experiment, theta::AbstractVector{FT},
-    P::AbstractMatrix, Q::AbstractMatrix, response::AbstractVector, curve0::AbstractVector,
+    P::AbstractMatrix, Q::AbstractMatrix, response::AbstractVecOrMat, curve0::AbstractVector,
     Klambda, Kt) where {FT<:Real}
     pspec = problem.pspec
     nvar = length(pspec.variables)
@@ -446,6 +463,7 @@ function _build_chain_globals(problem::FitProblem, expt::Experiment, theta::Abst
 
         v = pspec.variables[b.slot]
         v.vary || continue
+        v.time_varying && continue      # a per-bin Sensitivity scale: _build_chain_blocks' (Phase 4.I spec D19)
         x = _from_unconstrained(theta[pspec.offsets[b.slot]], v.lower, v.upper)
         chainfactor = _dx_dy(x, v.lower, v.upper)
 
@@ -461,6 +479,57 @@ function _build_chain_globals(problem::FitProblem, expt::Experiment, theta::Abst
     end
 
     return chain_globals, chain_global_idx
+end
+
+"""
+    _build_chain_blocks(problem, expt, theta, Q, curve0) -> (chain_blocks, chain_block_idx)
+
+The per-bin chain blocks (Phase 4.I spec D19, [OQ-59](../../dev/open_questions.md#oq-59) item 1):
+for every fitted time-varying variable bound in this channel to a per-bin target
+(`_per_bin_target`, `Sensitivity`'s scale alone), its entry at bin `j` moves column `j` of the
+model alone, by
+
+    dM[:, j]/dy_j = curve0 .* Q[:, j] .* dx/dy(a_j) .* factor,
+
+`Q = K_λ P K_tᵀ` the streak before the sensitivity (the same `Q` the scalar scale's chain global is
+built from), `curve0` the response curve without the scale. One `N_lambda x q` matrix per bin,
+`q` the number of such bindings, with their theta indices (the variable is on the whole axis, so its
+entry at bin `j` is `offsets + j - 1`); two empty vectors when there is none, which is every problem
+before Phase 4.I. A held (`vary = false`) per-bin scale has no theta entry and no block.
+"""
+function _build_chain_blocks(problem::FitProblem, expt::Experiment, theta::AbstractVector{FT},
+    Q::AbstractMatrix, curve0::AbstractVector) where {FT<:Real}
+    pspec = problem.pspec
+    nvar = length(pspec.variables)
+    bs = Binding[]
+    for b in pspec.bindings
+        (b.kind === :effect && b.channel == problem.channel && b.slot <= nvar) || continue
+        v = pspec.variables[b.slot]
+        (v.vary && v.time_varying && _per_bin_target(expt.effects[b.effect], b.field)) || continue
+        push!(bs, b)
+    end
+    isempty(bs) && return Matrix{FT}[], Vector{Int}[]
+
+    nlambda, nt = size(Q)
+    chain_blocks = Vector{Matrix{FT}}(undef, nt)
+    chain_block_idx = Vector{Vector{Int}}(undef, nt)
+    for j in 1:nt
+        block = Matrix{FT}(undef, nlambda, length(bs))
+        idx = Vector{Int}(undef, length(bs))
+        for (q, b) in enumerate(bs)
+            v = pspec.variables[b.slot]
+            k = pspec.offsets[b.slot] + (j - 1)
+            x = _from_unconstrained(theta[k], v.lower, v.upper)
+            chainfactor = _dx_dy(x, v.lower, v.upper)
+            for l in 1:nlambda
+                block[l, q] = FT((curve0[l] * Q[l, j]) * (chainfactor * b.factor))
+            end
+            idx[q] = k
+        end
+        chain_blocks[j] = block
+        chain_block_idx[j] = idx
+    end
+    return chain_blocks, chain_block_idx
 end
 
 """
@@ -567,6 +636,7 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
     Q = _apply_irfs_value(P, expt)
     chain_globals, chain_global_idx = _build_chain_globals(problem, expt, theta, P, Q, response,
         curve0, Klambda, Kt)
+    chain_blocks, chain_block_idx = _build_chain_blocks(problem, expt, theta, Q, curve0)
 
     if problem.regularizer === nothing
         reg_rows, reg_cols, reg_coeffs = Int[], Int[], FT[]
@@ -576,7 +646,8 @@ function jacobian(problem::FitProblem, theta::AbstractVector{FT};
     end
 
     return FitJacobian{FT}(blocks, kernel_globals, chain_globals, kernel_global_idx,
-        chain_global_idx, response, Klambda, Kt, reg_rows, reg_cols, reg_coeffs)
+        chain_global_idx, chain_blocks, chain_block_idx, response, Klambda, Kt, reg_rows, reg_cols,
+        reg_coeffs)
 end
 
 # ------------------------------------------------------------------------------------------
@@ -763,6 +834,10 @@ function jvp!(out::AbstractVector, problem::FitProblem, Jac::FitJacobian{FT}, v:
         iszero(vc) && continue
         W .+= vc .* Jac.chain_globals[c]
     end
+    # Phase 4.I spec D19: the per-bin chain blocks, after the response, each into its own column.
+    for (j, bidx) in enumerate(Jac.chain_block_idx)
+        @views mul!(W[:, j], Jac.chain_blocks[j], v[bidx], true, true)
+    end
     idx = problem.pixel_index
     sig = problem.sigma
     @inbounds for k in eachindex(idx)
@@ -809,6 +884,10 @@ function jtvp!(out::AbstractVector, problem::FitProblem, Jac::FitJacobian{FT}, w
     fill!(out, zero(FT))
     for (c, tidx) in enumerate(Jac.chain_global_idx)
         out[tidx] += dot(Jac.chain_globals[c], Z)
+    end
+    # Phase 4.I spec D19: the per-bin chain blocks' transposes, each against its own column of Z.
+    for (j, bidx) in enumerate(Jac.chain_block_idx)
+        @views out[bidx] .+= transpose(Jac.chain_blocks[j]) * Z[:, j]
     end
 
     Y = Z .* Jac.response
@@ -958,6 +1037,14 @@ function _gauss_newton_diagonal(problem::FitProblem, Jac::FitJacobian)
     # --- chain globals ---
     for (c, theta_idx) in enumerate(Jac.chain_global_idx)
         d[theta_idx] += sum(invsig2 .* abs2.(Jac.chain_globals[c]))
+    end
+
+    # --- per-bin chain blocks (Phase 4.I spec D19): column j alone, already dM/dy ---
+    for (j, bidx) in enumerate(Jac.chain_block_idx)
+        wcol = view(invsig2, :, j)
+        for (q, theta_idx) in enumerate(bidx)
+            d[theta_idx] += _weighted_sumabs2(wcol, view(Jac.chain_blocks[j], :, q))
+        end
     end
 
     # --- regularizer rows ---

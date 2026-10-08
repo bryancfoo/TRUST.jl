@@ -803,9 +803,9 @@ _prepare(e::SpectralIRF, lambda, t) = _convolution_matrix(e.kernel, lambda)
 _prepare(e::TemporalIRF, lambda, t) = _convolution_matrix(e.kernel, t)
 
 """
-    Sensitivity{FT<:Real,L,R} <: AbstractInstrumentEffect
+    Sensitivity{FT<:Real,L,R,S} <: AbstractInstrumentEffect
 
-A fitted scalar `scale` turning `spectrum`'s m⁻¹ into detector counts, and, optionally, a fixed
+A fitted `scale` turning `spectrum`'s m⁻¹ into detector counts, and, optionally, a fixed
 measured wavelength response curve `lambda`/`response`, normalized to unit maximum at
 construction (`response_norm` the divisor kept, so the supplied curve is recoverable) so that
 `scale` reads as counts per m⁻¹ at the most sensitive wavelength. **The curve is fixed data and
@@ -813,35 +813,53 @@ the scalar is the fitted leaf** — the same division `ImageBackground` already 
 effect still exposes exactly one leaf, `scale`. `Gain` until 2026-09-10 (`conventions.md` 1.8);
 `Sensitivity(; scale)` with no curve is bitwise `Gain(gain = scale)` (SN1).
 
+**`scale` is a scalar, or one value per time bin** (Phase 4.I spec D14, [OQ-59](../../dev/open_questions.md#oq-59)
+item 1): `S` is `FT` (a scalar, the default and the model before Phase 4.I, bitwise) or
+`Vector{FT}`, one amplitude `a_j` per bin of the trace's axis, applied where the scalar is, after
+the temporal IRF: `M[:, j] = a_j · ε(λ) · (K_λ P K_tᵀ)[:, j]`. `Experiment` checks the vector's
+length against its trace and refuses it beside a `TemporalIRF`; `parameters` returns whichever form
+the effect holds and `reconstruct` takes either. `S` is checked by the inner constructor rather
+than bounded in the type, so that every method written against `Sensitivity{FT,Nothing,Nothing}`
+before Phase 4.I keeps its meaning.
+
 Built with `Sensitivity(; scale = 1.0)` (no curve, `lambda`/`response` both `nothing`) or
 `Sensitivity(; scale = 1.0, lambda_nm | lambda_m, response)` (a measured curve, added Step
-2.3b). `_prepare` interpolates the curve onto `expt.lambda` **once**, linearly; a detector
-window not spanned by the calibration curve is a loud error (spec D28), never clamped or
-extrapolated, since silently extrapolating a sensitivity biases exactly the feature wings being
-fitted.
+2.3b); `scale` may be a vector in either. `_prepare` interpolates the curve onto `expt.lambda`
+**once**, linearly; a detector window not spanned by the calibration curve is a loud error (spec
+D28), never clamped or extrapolated, since silently extrapolating a sensitivity biases exactly the
+feature wings being fitted.
 
-Spec D40, D42.
+Spec D40, D42; Phase 4.I spec D14.
 """
-struct Sensitivity{FT<:Real,L,R} <: AbstractInstrumentEffect
-    scale::FT
+struct Sensitivity{FT<:Real,L,R,S} <: AbstractInstrumentEffect
+    scale::S
     lambda::L
     response::R
     response_norm::FT
-    function Sensitivity{FT,L,R}(scale::FT, lambda::L, response::R, response_norm::FT) where {FT,L,R}
-        isfinite(scale) || throw(ArgumentError("Sensitivity: scale must be finite; got $scale"))
-        return new{FT,L,R}(scale, lambda, response, response_norm)
+    function Sensitivity{FT,L,R,S}(scale::S, lambda::L, response::R, response_norm::FT) where {FT,L,R,S}
+        (S === FT || S === Vector{FT}) || throw(ArgumentError(
+            "Sensitivity: scale must be a $FT or a Vector{$FT}; got a $S"))
+        all(isfinite, scale) || throw(ArgumentError("Sensitivity: scale must be finite; got $scale"))
+        S <: AbstractVector && isempty(scale) && throw(ArgumentError(
+            "Sensitivity: a per-bin scale must have at least one value"))
+        return new{FT,L,R,S}(scale, lambda, response, response_norm)
     end
 end
 
 function Sensitivity(scale::Real)
     FT = typeof(float(scale))
-    return Sensitivity{FT,Nothing,Nothing}(FT(scale), nothing, nothing, one(FT))
+    return Sensitivity{FT,Nothing,Nothing,FT}(FT(scale), nothing, nothing, one(FT))
 end
 
-function Sensitivity(; scale::Real=1.0, response=nothing, kwargs...)
+function Sensitivity(scale::AbstractVector{<:Real})
+    FT = float(eltype(scale))
+    return Sensitivity{FT,Nothing,Nothing,Vector{FT}}(Vector{FT}(scale), nothing, nothing, one(FT))
+end
+
+function Sensitivity(; scale::Union{Real,AbstractVector{<:Real}}=1.0, response=nothing, kwargs...)
     if response === nothing
         _reject_extra_kwargs(kwargs, ())
-        return Sensitivity(float(scale))
+        return scale isa Real ? Sensitivity(float(scale)) : Sensitivity(scale)
     end
     lambda_raw = _si_axis(:lambda, kwargs)
     _reject_extra_kwargs(kwargs, (:lambda_nm, :lambda_m))
@@ -853,10 +871,16 @@ function Sensitivity(; scale::Real=1.0, response=nothing, kwargs...)
             "Sensitivity: the calibration wavelengths must be strictly increasing"))
     end
     norm = maximum(response)
-    FT = float(promote_type(typeof(scale), eltype(lambda_raw), eltype(response)))
+    if scale isa Real
+        FT = float(promote_type(typeof(scale), eltype(lambda_raw), eltype(response)))
+        lam = FT.(lambda_raw)
+        resp = FT.(response) ./ FT(norm)
+        return Sensitivity{FT,typeof(lam),typeof(resp),FT}(FT(scale), lam, resp, FT(norm))
+    end
+    FT = float(promote_type(eltype(scale), eltype(lambda_raw), eltype(response)))
     lam = FT.(lambda_raw)
     resp = FT.(response) ./ FT(norm)
-    return Sensitivity{FT,typeof(lam),typeof(resp)}(FT(scale), lam, resp, FT(norm))
+    return Sensitivity{FT,typeof(lam),typeof(resp),Vector{FT}}(Vector{FT}(scale), lam, resp, FT(norm))
 end
 
 stage(::Sensitivity) = :detector
@@ -865,9 +889,39 @@ islinear(::Sensitivity) = true
 _chain_class(::Sensitivity) = :Sensitivity
 parameters(e::Sensitivity) = (scale=e.scale,)
 
+"""
+    _scale_bins(e::AbstractInstrumentEffect) -> Int
+
+The number of per-bin values of `e`'s scale (Phase 4.I spec D15): `length(scale)` for a
+`Sensitivity` whose scale is a vector, `0` for every other effect, a scalar `Sensitivity` among
+them. `Experiment` checks it against the trace and the Jacobian reads it; dispatch, never `isa` on
+an effect type (`conventions.md` Section 4).
+"""
+_scale_bins(::AbstractInstrumentEffect) = 0
+_scale_bins(e::Sensitivity{FT,L,R,Vector{FT}}) where {FT<:Real,L,R} = length(e.scale)
+
+"""
+    _per_bin_target(e::AbstractInstrumentEffect, field::Symbol) -> Bool
+
+Whether a time-varying variable may be bound to `e`'s parameter `field` (Phase 4.I spec D17,
+[OQ-59](../../dev/open_questions.md#oq-59) item 1): `true` for `Sensitivity`'s `scale` alone, the
+one per-bin instrument parameter, and `false` for every other effect and field (OQ-17's scalar rule).
+"""
+_per_bin_target(::AbstractInstrumentEffect, ::Symbol) = false
+_per_bin_target(::Sensitivity, field::Symbol) = field === :scale
+
 function reconstruct(e::Sensitivity{FT,L,R}, values::NamedTuple) where {FT,L,R}
-    FT2 = typeof(float(values.scale))
-    return Sensitivity{FT2,L,R}(FT2(values.scale), e.lambda, e.response, FT2(e.response_norm))
+    return _with_scale(e, values.scale)
+end
+
+function _with_scale(e::Sensitivity{FT,L,R}, scale::Real) where {FT,L,R}
+    FT2 = typeof(float(scale))
+    return Sensitivity{FT2,L,R,FT2}(FT2(scale), e.lambda, e.response, FT2(e.response_norm))
+end
+
+function _with_scale(e::Sensitivity{FT,L,R}, scale::AbstractVector{<:Real}) where {FT,L,R}
+    FT2 = float(eltype(scale))
+    return Sensitivity{FT2,L,R,Vector{FT2}}(Vector{FT2}(scale), e.lambda, e.response, FT2(e.response_norm))
 end
 
 """
@@ -1010,3 +1064,9 @@ Base.show(io::IO, e::WavelengthCalibration) =
 Base.show(io::IO, e::PixelIntegration) = print(io, "PixelIntegration($(e.subsamples) subsamples)")
 Base.show(io::IO, e::Sensitivity{FT,Nothing,Nothing}) where {FT} = @printf(io, "Sensitivity(%.1e)", e.scale)
 Base.show(io::IO, e::Sensitivity) = @printf(io, "Sensitivity(%.1e, response curve)", e.scale)
+# Phase 4.I spec D14: a per-bin scale prints its bin count and its range.
+Base.show(io::IO, e::Sensitivity{FT,Nothing,Nothing,Vector{FT}}) where {FT<:Real} =
+    @printf(io, "Sensitivity(%d bins, %.1e to %.1e)", length(e.scale), minimum(e.scale), maximum(e.scale))
+Base.show(io::IO, e::Sensitivity{FT,L,R,Vector{FT}}) where {FT<:Real,L,R} =
+    @printf(io, "Sensitivity(%d bins, %.1e to %.1e, response curve)", length(e.scale), minimum(e.scale),
+        maximum(e.scale))

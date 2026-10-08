@@ -122,6 +122,27 @@ function _check_unique_chain_classes(effects::Tuple)
 end
 
 """
+    _check_per_bin_scale(effects::Tuple, nt::Int)
+
+A per-bin `Sensitivity` scale (Phase 4.I spec D15, [OQ-59](../../dev/open_questions.md#oq-59)
+item 1): its length must be the trace's bin count, and it may not stand beside a `TemporalIRF`,
+since the amplitude is applied after the temporal IRF, one column each, while a probe-power factor
+acting before the smearing is a different model, not built. Nothing is checked for a chain whose
+every `_scale_bins` is zero (every chain before Phase 4.I).
+"""
+function _check_per_bin_scale(effects::Tuple, nt::Int)
+    n = maximum(_scale_bins, effects; init=0)
+    n == 0 && return nothing
+    n == nt || throw(ArgumentError(
+        "Experiment: Sensitivity's per-bin scale has $n values, but the trace has $nt bins"))
+    any(e -> _chain_class(e) === :TemporalIRF, effects) && throw(ArgumentError(
+        "Experiment: a per-bin Sensitivity scale cannot stand beside a TemporalIRF: the per-bin " *
+        "amplitude is defined after the temporal IRF, one column each, and a probe-power factor " *
+        "before the smearing is a different model, which is not built"))
+    return nothing
+end
+
+"""
     _resolve_lambda_axis(collection::Collection, kwargs) -> AbstractVector
 
 The wavelength axis: the given `lambda_nm`/`lambda_m` when present, `detector_axis(collection)`
@@ -180,6 +201,7 @@ function Experiment(; trace::PlasmaTrace, probe::ProbeBeam, collection::Collecti
     effects_tuple = Tuple(effects)
     sorted_effects = _stable_sort_effects(effects_tuple)
     _check_unique_chain_classes(sorted_effects)
+    _check_per_bin_scale(sorted_effects, length(trace.axis))
 
     operators = map(e -> _prepare(e, lambda, t), sorted_effects)
 

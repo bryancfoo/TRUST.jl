@@ -418,6 +418,36 @@ function _check_unit_factor!(name_factor::Dict{String,Tuple{Float64,String}}, na
 end
 
 """
+    _check_time_varying_effect(name, slot, nvar, variables, dep_tv, e, field, effects)
+
+The scalar-instrument rule (D9, OQ-17 item 3) with its one exception (Phase 4.I spec D17,
+[OQ-59](../../dev/open_questions.md#oq-59) item 1): a time-varying name bound to an effect
+parameter is refused unless the parameter is `Sensitivity`'s `scale` (`_per_bin_target`), the one
+per-bin instrument parameter; there it must be a directly fitted variable (not a dependent), on the
+whole axis (`interval` 0, since the amplitude needs a value at every bin), in a chain with no
+`TemporalIRF` (the per-bin amplitude is defined after it). A name that is not time-varying passes.
+"""
+function _check_time_varying_effect(name::AbstractString, slot::Int, nvar::Int,
+    variables::Vector{FittedVariable}, dep_tv::AbstractVector{Bool}, e, field::Symbol, effects::Tuple)
+    is_tv = slot <= nvar ? variables[slot].time_varying : dep_tv[slot-nvar]
+    is_tv || return nothing
+    _per_bin_target(e, field) || throw(ArgumentError(
+        "\"$name\" is time-varying and cannot be bound to an instrument parameter other than " *
+        "Sensitivity's scale, the one instrument parameter that may take a value per bin"))
+    slot <= nvar || throw(ArgumentError(
+        "\"$name\" is a time-varying dependent; a per-bin Sensitivity scale is bound to a directly " *
+        "fitted variable"))
+    variables[slot].interval == 0 || throw(ArgumentError(
+        "\"$name\" lives on an interval, but a per-bin Sensitivity scale needs a value at every bin, " *
+        "so its variable must be on the whole axis"))
+    any(x -> _chain_class(x) === :TemporalIRF, effects) && throw(ArgumentError(
+        "\"$name\" is a per-bin Sensitivity scale, which cannot stand beside a TemporalIRF: the " *
+        "per-bin amplitude is defined after the temporal IRF, one column each, and a probe-power " *
+        "factor before the smearing is a different model, which is not built"))
+    return nothing
+end
+
+"""
     _resolve_bindings(bindings_input, variables, names, nvar, dep_tv, template, trace,
                       effects_by_channel) -> Vector{Binding}
 
@@ -498,9 +528,7 @@ function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
                 "\"$name\" cannot be bound to $(typeof(e).name.name): it has no fittable parameters"))
             haskey(pnt, field) || throw(ArgumentError(
                 "\"$name\": $(typeof(e).name.name) has no parameter \"$field\"; valid names are $(keys(pnt))"))
-            is_tv = slot <= nvar ? variables[slot].time_varying : dep_tv[slot-nvar]
-            is_tv && throw(ArgumentError(
-                "\"$name\" is time-varying and cannot be bound to an instrument parameter"))
+            _check_time_varying_effect(name, slot, nvar, variables, dep_tv, e, field, effects)
             _check_unit_factor!(name_factor, name, factor, unit_key)
             bindings[i] = Binding(name, slot, :effect, _DUMMY_LEAF_PATH, 0, effect_idx, field, element, factor, unit_key, channel)
         else
@@ -518,9 +546,7 @@ function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
                 "\"$name\" cannot be bound to $(typeof(e).name.name): it has no fittable parameters"))
             haskey(pnt, field) || throw(ArgumentError(
                 "\"$name\": $(typeof(e).name.name) has no parameter \"$field\"; valid names are $(keys(pnt))"))
-            is_tv = slot <= nvar ? variables[slot].time_varying : dep_tv[slot-nvar]
-            is_tv && throw(ArgumentError(
-                "\"$name\" is time-varying and cannot be bound to an instrument parameter"))
+            _check_time_varying_effect(name, slot, nvar, variables, dep_tv, e, field, effects)
             _check_unit_factor!(name_factor, name, factor, unit_key)
             bindings[i] = Binding(name, slot, :effect, _DUMMY_LEAF_PATH, 0, effect_idx, field, element, factor, unit_key, 1)
         end
@@ -962,7 +988,11 @@ function _eval_dependents!(vals::AbstractVector, deps::Tuple, t, slot::Int)
     return _eval_dependents!(vals, Base.tail(deps), t, slot + 1)
 end
 
-function _rebuild_effect(e::AbstractInstrumentEffect, bs::Vector{Binding}, vals::AbstractVector)
+# `per_bin` (Phase 4.I spec D18): `nothing`, or a Dict from a time-varying binding's
+# `(effect, field)` to the bound value at every bin, gathered by `unflatten`'s bin loop; such a field
+# is rebuilt with that vector (a per-bin `Sensitivity.scale`), every other field as before.
+function _rebuild_effect(e::AbstractInstrumentEffect, bs::Vector{Binding}, vals::AbstractVector,
+    per_bin=nothing)
     old = parameters(e)
     ks = keys(old)
     newvals = map(ks) do fname
@@ -977,7 +1007,8 @@ function _rebuild_effect(e::AbstractInstrumentEffect, bs::Vector{Binding}, vals:
             end
         else
             b = only(matching)
-            vals[b.slot] * b.factor
+            series = per_bin === nothing ? nothing : get(per_bin, (b.effect, fname), nothing)
+            series === nothing ? vals[b.slot] * b.factor : series
         end
     end
     return reconstruct(e, NamedTuple{ks}(newvals))
@@ -1030,6 +1061,13 @@ function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector
                       convert(T, v.init)
     end
 
+    # Phase 4.I spec D18: this channel's time-varying effect bindings (a per-bin Sensitivity.scale,
+    # the one kind _resolve_bindings admits), their values gathered bin by bin below.
+    per_bin_bs = Binding[b for b in pspec.bindings if b.kind === :effect && b.channel == channel &&
+                                                       b.slot <= nvar && pspec.variables[b.slot].time_varying]
+    per_bin = isempty(per_bin_bs) ? nothing :
+              Dict{Tuple{Int,Symbol},Vector{T}}((b.effect, b.field) => Vector{T}(undef, nt) for b in per_bin_bs)
+
     for j in 1:nt
         for i in 1:nvar
             v = pspec.variables[i]
@@ -1052,6 +1090,11 @@ function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector
             _slot_defined_at(b.slot, j, pspec.variables, nvar, pspec.intervals) || continue
             work_trace.values[b.row, j] = vals[b.slot] * b.factor
         end
+        if per_bin !== nothing
+            for b in per_bin_bs
+                per_bin[(b.effect, b.field)][j] = vals[b.slot] * b.factor
+            end
+        end
     end
 
     has_effect_binding = any(b -> b.kind === :effect && b.channel == channel, pspec.bindings)
@@ -1064,7 +1107,7 @@ function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector
     new_effects = ntuple(length(expt.effects)) do ei
         e = expt.effects[ei]
         bs = Binding[b for b in pspec.bindings if b.kind === :effect && b.effect == ei && b.channel == channel]
-        isempty(bs) ? e : _rebuild_effect(e, bs, vals)
+        isempty(bs) ? e : _rebuild_effect(e, bs, vals, per_bin)
     end
 
     return Experiment(; trace=work_trace, probe=expt.probe, collection=expt.collection,

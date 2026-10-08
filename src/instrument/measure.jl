@@ -12,7 +12,8 @@ using OhMyThreads: @tasks, DynamicScheduler
 `promote_type` over `values(parameters(e))`, or `Bool` (the promotion identity) for an effect
 with no parameters. A value that is itself a `Tuple` (`PolynomialBackground`'s `coefficients`)
 is flattened one level first, so every entry is promoted individually rather than the tuple's
-own (non-numeric) type being fed to `promote_type`.
+own (non-numeric) type being fed to `promote_type`; a `Vector` (a per-bin `Sensitivity.scale`,
+Phase 4.I spec D16) contributes its element type.
 """
 function _effect_eltype(e::AbstractInstrumentEffect)
     p = values(parameters(e))
@@ -23,6 +24,8 @@ function _effect_eltype(e::AbstractInstrumentEffect)
             for vi in v
                 push!(types, typeof(vi))
             end
+        elseif v isa AbstractVector
+            push!(types, eltype(v))
         else
             push!(types, typeof(v))
         end
@@ -239,6 +242,18 @@ end
 function apply!(dest, src, e::Sensitivity, op)
     dest === src || copyto!(dest, src)
     dest .*= e.scale .* op
+    return dest
+end
+# Phase 4.I spec D16: a per-bin scale multiplies column j by scale[j] (and by the response curve),
+# each element the scalar method's product with scale[j] in place of the scalar.
+function apply!(dest, src, e::Sensitivity{FT,Nothing,Nothing,Vector{FT}}, op) where {FT<:Real}
+    dest === src || copyto!(dest, src)
+    dest .*= transpose(e.scale)
+    return dest
+end
+function apply!(dest, src, e::Sensitivity{FT,L,R,Vector{FT}}, op) where {FT<:Real,L,R}
+    dest === src || copyto!(dest, src)
+    dest .*= transpose(e.scale) .* op
     return dest
 end
 function apply!(dest, src, e::ConstantBackground, op)

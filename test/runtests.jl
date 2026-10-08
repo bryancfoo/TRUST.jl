@@ -194,6 +194,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("held series")
         @safetestset "held series" begin include("inversion/test_held_series.jl") end
     end
+    if _wanted("per-bin amplitude")
+        @safetestset "per-bin amplitude" begin include("instrument/test_per_bin_amplitude.jl") end
+    end
     if _wanted("noise")
         @safetestset "noise" begin include("instrument/test_noise.jl") end
     end

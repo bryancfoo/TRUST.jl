@@ -159,6 +159,48 @@ than one scalar `dc/dθ`; this is refused with a loud error rather than silently
 **A frozen variable has no column** (Phase 4.I spec D11): it has no θ entry, and through `c43e7d4`
 one bound to a chain-stage parameter made `_build_chain_globals` read `theta[0]`; it is skipped.
 
+## 4a. The per-bin chain block (Phase 4.I, Step 4.I.2, spec D19)
+
+**The model.** A time-varying variable bound to `Sensitivity.scale` gives the channel one amplitude
+`a_j` per bin ([OQ-59](../../dev/open_questions.md#oq-59) item 1), applied where the scalar is, after
+the temporal IRF:
+
+```
+M[:, j] = a_j · curve .* Q[:, j] + B,        Q = K_λ P K_tᵀ    (no TemporalIRF: K_t = I, refused otherwise)
+```
+
+so `g` becomes a matrix, `G[:, j] = a_j · curve` (`response` in the code is that `N_λ × N_t` matrix,
+`curve .* transpose(a)`), and `a_j` moves column `j` alone:
+
+```
+∂M[:, j]/∂a_j = curve .* Q[:, j],      ∂M[:, n]/∂a_j = 0  for n ≠ j.
+```
+
+**The storage.** That is one column per bin, so it is stored as the per-bin entries are, not as a
+global: `chain_blocks[j]` is `N_λ × q` (`q` the number of such bindings in the channel, in practice
+one), each column `curve .* Q[:, j] .* dx/dy(a_j) .* factor` already in θ-space, beside
+`chain_block_idx[j]`, the θ indices of `a`'s entry at bin `j` (`offsets + j − 1`: the variable is on
+the whole axis, `_resolve_bindings` refuses an interval). **Both are empty vectors when no per-bin
+chain variable is bound in the channel**, every Jacobian before Phase 4.I. `Q` is the quantity the
+scalar scale's chain global is built from (`_apply_irfs_value`), so the two can never disagree about
+what the sensitivity multiplies.
+
+**The products.** In `jvp!` the block is added after the response, into its own column:
+`W[:, j] += chain_blocks[j] · v[chain_block_idx[j]]`, beside the chain globals' `W += v_c ·
+chain_globals[c]`. Its adjoint in `jtvp!` is the transpose matrix-vector product against the same
+column of `Z` (before the response, as the chain globals' `dot(chain_globals[c], Z)` is):
+`out[chain_block_idx[j]] += chain_blocks[j]ᵀ · Z[:, j]`. The Gauss–Newton diagonal adds
+`Σ_l chain_blocks[j][l, q]² / σ[l, j]²` over the mask-true pixels of column `j`. With `G` a matrix,
+the existing `W .*= G`, `Y = Z .* G` and `respsig2 = G.² ./ σ²` are elementwise and unchanged in
+form. `normal_matrices`, `gn_decrease`, `polish`, `laplace`, `calibration_scan` and `slice_scatter`
+consume the Jacobian only through these three products, and the joint products concatenate and sum
+the per-channel ones (Section 7), so nothing else changes.
+
+**What stays.** The per-bin dual pass (`_jacobian_bin!`) is not touched: the amplitude is not a
+kernel parameter, so its entry at bin `j`, seeded beside the plasma's, gives a zero column of
+`blocks[j]` and the whole derivative comes from the chain block (verified against brute-force
+ForwardDiff, PA6). A held amplitude (`vary = false`) has no θ entry and no block.
+
 ## 5. `jvp!` and `jtvp!`: the transposes, derived
 
 `jvp!` computes `out = J v` directly from the chain of Section 1-2: build the ideal streak's

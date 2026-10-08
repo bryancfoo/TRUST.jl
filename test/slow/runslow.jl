@@ -23,5 +23,6 @@ using Test
     @safetestset "tabulated k-smearing (slow)" begin include("test_tabulated_k_smearing.jl") end
     @safetestset "gain in fit (slow)" begin include("test_gain_in_fit.jl") end
     @safetestset "held series (slow)" begin include("test_held_series.jl") end
+    @safetestset "per-bin amplitude (slow)" begin include("test_per_bin_amplitude.jl") end
     @safetestset "uncertainty (slow)" begin include("test_uncertainty.jl") end
 end

@@ -36,6 +36,27 @@ add a term independent of `P_kernel`, `ImageBackground` adds `scale · image`,
 constructor **stably sorts** the user's effects into this order (`_chain_order`), so the same
 set of effects given in any order produces a bitwise identical streak (XP6).
 
+**A per-bin sensitivity** (Phase 4.I, Step 4.I.2, spec D14 to D16; [OQ-59](../../dev/open_questions.md#oq-59)
+item 1, the user's "normalize each time slice individually"). `Sensitivity.scale` may be one value
+per bin, `Sensitivity(; scale = [a_1, …, a_N])`, and then
+
+```
+M[:, j] = B + a_j · curve · (K_λ · P_kernel · K_tᵀ)[:, j],
+```
+
+each column scaled by its own amplitude, after the temporal IRF, the place the scalar sits. A fit
+gives it by binding a time-varying variable to the key (`sensitivity = { scale = "a_epw" }` with
+`a_epw` declared `time_varying = true`), the one instrument parameter that may vary per bin. The
+scalar form is the default and the model before Phase 4.I, bitwise; column `j` of a per-bin model is
+bitwise the scalar model's at `scale = a_j`, since `apply!` forms the same product per element
+(PA2). **A `TemporalIRF` beside a per-bin scale is refused** (at `Experiment` construction and at
+`build_problem`): physically a probe-power factor acts before the temporal smearing, where it would
+spread over neighbouring columns through `K_t`; that model is not built, and the amplitude here is
+defined after it. Phase E's decks average bins and carry no temporal IRF, so the two placements
+coincide there. **What it gives up**: a fit with a free amplitude per bin gets nothing from the
+absolute intensity, so n_e is set by the spectral shape alone (the EPW's resonance position); with
+the amplitude unregularized this is exactly a per-slice normalization.
+
 ## 2. The convolution operators
 
 Both IRFs share one builder, `_convolution_matrix(kernel, axis)` (spec D13):

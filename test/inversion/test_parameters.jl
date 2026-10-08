@@ -305,7 +305,10 @@ end
 @testset "PM16: a trace variable on an instrument key" begin
     expt = _pm_p1()
     v = FittedVariable("scale_t"; bounds=(1e-7, 1e-5), init=1e-6, time_varying=true)
-    @test_throws r"time-varying" ParameterSpec(expt; variables=[v], bindings=["scale_t" => (1, :scale)])
+    # Amended 2026-10-07 (Phase 4.I spec D17, the user's decision U1): Sensitivity's scale is the one
+    # instrument parameter a time-varying variable may be bound to, so this binding now builds; the
+    # refusal for every other instrument parameter is PA4's.
+    @test ParameterSpec(expt; variables=[v], bindings=["scale_t" => (1, :scale)]).ntheta == 1
 
     v2 = FittedVariable("T_e"; bounds=(50.0, 1500.0), init=400.0, time_varying=true)
     @test_throws r"time-varying" ParameterSpec(expt; variables=[v2],
