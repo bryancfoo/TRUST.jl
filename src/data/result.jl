@@ -140,7 +140,8 @@ end
                  calibration_scan::Union{Nothing,CalibrationScanResult} = nothing,
                  scatter::Union{Nothing,ScatterResult} = nothing,
                  gn_decrease::Union{Nothing,Real} = nothing,
-                 stages::Union{Nothing,NamedTuple} = nothing) -> path
+                 stages::Union{Nothing,NamedTuple} = nothing,
+                 start::Union{Nothing,AbstractVector} = nothing) -> path
 
 Writes `result` (and, if given, `scan`, `laplace` and `calibration_scan`) to `path` as a JLD2 file
 of plain numeric arrays and strings (`docs/derivations/data_layout.md` Section 3, spec D34, D40,
@@ -189,6 +190,14 @@ deck with `procedure = "staged"`): `stages/names`, `stages/start` (the joint fit
 `elapsed`, `near_bound_fraction`, `variables/<v>/values`, `vary`, `near_bound`, and
 `dependents/<d>/values`. Inside `otis-result-3`, no bump; RE1's exact key set is unchanged.
 
+**`fit/start` (Phase 4.I spec D9), only when given** (`fit(deck)` always passes it): the θ the
+final fit started from, in `y`, `(ntheta)` -- `build_problem`'s start, or for a staged deck the
+joint start (`stages/start`). Its length must be `result.pspec.ntheta`, else a loud error.
+**`variables/<name>/held` (Phase 4.I spec D10), only for a held variable**: `UInt8` `1`, beside
+`vary = 0` and the held series in `variables/<name>/values`, so that a reader can tell a series
+held from a file or a stage from a scalar frozen at its `init`. Both inside `otis-result-3`, no
+bump; RE1's exact key set is unchanged, since neither is written for its fixture.
+
 When `problem` is given, `problem.pspec === result.pspec` is required (a loud error otherwise,
 naming what to pass instead): `write_result` has no other way to know the problem it is given is
 the one `result` was actually fitted from, and the residual needs the problem's own `pixel_index`,
@@ -205,10 +214,16 @@ function write_result(path::AbstractString, result::FitResult;
     calibration_scan::Union{Nothing,CalibrationScanResult}=nothing,
     scatter::Union{Nothing,ScatterResult}=nothing,
     gn_decrease::Union{Nothing,Real}=nothing,
-    stages::Union{Nothing,NamedTuple}=nothing)
+    stages::Union{Nothing,NamedTuple}=nothing,
+    start::Union{Nothing,AbstractVector}=nothing)
     pspec = result.pspec
     nt = nbins(pspec.trace)
     unit_keys = _variable_unit_keys(pspec.bindings)
+
+    if start !== nothing
+        length(start) == pspec.ntheta || throw(ArgumentError(
+            "write_result: start has length $(length(start)), but result.pspec has ntheta = $(pspec.ntheta)"))
+    end
 
     if problem !== nothing
         problem.pspec === result.pspec || throw(ArgumentError(
@@ -249,6 +264,7 @@ function write_result(path::AbstractString, result::FitResult;
             f["$prefix/time_varying"] = UInt8(v.time_varying)
             f["$prefix/vary"] = UInt8(v.vary)
             f["$prefix/near_bound"] = UInt8.(result.near_bound[v.name])
+            v.held === nothing || (f["$prefix/held"] = UInt8(1))
         end
 
         for dep in pspec.dependents
@@ -284,6 +300,7 @@ function write_result(path::AbstractString, result::FitResult;
             f["fit/near_bound_entries/bound"] = String[string(e.bound) for e in entries]
         end
         gn_decrease === nothing || (f["fit/gn_decrease"] = Float64(gn_decrease))
+        start === nothing || (f["fit/start"] = Vector{Float64}(start))
         f["fit/optimizer"] = result.optimizer
         f["fit/elapsed"] = Float64(result.elapsed)
 
@@ -450,7 +467,9 @@ a `Vector` of `(; type::String, parameters::Dict{String,Any})` in index order, a
 `nothing` when the file carries no `scan/*` group, else a `NamedTuple` (`rss`/`rss_normalized`
 themselves `Dict{String,Vector{Float64}}` and `rss_unreg` `Dict{String,Float64}`, empty when the
 file carries no ground truth). `fit.gn_decrease` is `nothing` when the file carries none (Phase
-4.B spec D5).
+4.B spec D5), and so is `fit.start` (Phase 4.I spec D9). Each variable's `held` is the file's
+`UInt8` `1` for a held variable and `UInt8(0)` when the file has no `variables/<name>/held` (Phase
+4.I spec D10).
 
 **`fit.near_bound_entries`** (Phase 4.D spec D7): `nothing` when the file carries no
 `fit/near_bound_entries/*` group, else `(; variable, bin, bound)`, a `Vector{String}`, a
@@ -506,6 +525,7 @@ function read_result(path::AbstractString)
                 time_varying=f["$prefix/time_varying"],
                 vary=f["$prefix/vary"],
                 near_bound=f["$prefix/near_bound"],
+                held=haskey(f, "$prefix/held") ? f["$prefix/held"] : UInt8(0),
             )
         end
 
@@ -528,6 +548,7 @@ function read_result(path::AbstractString)
             near_bound_fraction=f["fit/near_bound_fraction"], optimizer=f["fit/optimizer"],
             elapsed=f["fit/elapsed"],
             gn_decrease=haskey(f, "fit/gn_decrease") ? f["fit/gn_decrease"] : nothing,
+            start=haskey(f, "fit/start") ? f["fit/start"] : nothing,
             near_bound_entries=haskey(f, "fit/near_bound_entries") ?
                 (variable=f["fit/near_bound_entries/variable"], bin=f["fit/near_bound_entries/bin"],
                  bound=f["fit/near_bound_entries/bound"]) : nothing,

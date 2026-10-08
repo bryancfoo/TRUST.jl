@@ -188,6 +188,12 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("gain in fit")
         @safetestset "gain in fit" begin include("instrument/test_gain_in_fit.jl") end
     end
+    if _wanted("start file")
+        @safetestset "start file" begin include("data/test_start.jl") end
+    end
+    if _wanted("held series")
+        @safetestset "held series" begin include("inversion/test_held_series.jl") end
+    end
     if _wanted("noise")
         @safetestset "noise" begin include("instrument/test_noise.jl") end
     end

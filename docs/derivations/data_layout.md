@@ -181,6 +181,7 @@ shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
 | `variables/<name>/time_varying` | `UInt8` | | yes |
 | `variables/<name>/vary` | `UInt8` | | yes |
 | `variables/<name>/near_bound` | `UInt8` | `(N_t)` or `(1)` | yes |
+| `variables/<name>/held` | `UInt8` | scalar, `1` | only for a held variable (Phase 4.I spec D10), whose `values` is the held series and `vary` is `0` |
 | `dependents/<name>/values` | `Float64` | `(N_t)` | yes, one group per dependent |
 | `dependents/<name>/expression` | `String` | the deck text, verbatim | yes |
 | `leaves/<si_path>/values` | `Float64` | `(N_t)`, SI | yes, one group per row of the fitted trace |
@@ -193,6 +194,7 @@ shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
 | `fit/termination` | `String` | scalar, Optim's finer code (`:none` for the non-Optim optimizers) | yes |
 | `fit/near_bound_fraction` | `Float64` | scalar, `_near_bound_fraction(result)` | yes |
 | `fit/gn_decrease` | `Float64` | scalar, the Gauss–Newton predicted decrease at `fit/theta` over the free entries; `NaN` when `JᵀJ` there is not positive definite (Phase 4.B spec D5) | only when `write_result` is given it, which `fit(deck)` always does |
+| `fit/start` | `Float64` | `(ntheta)`, the θ the final fit started from, in `y` (Phase 4.I spec D9) | only when `write_result` is given it, which `fit(deck)` always does |
 | `fit/near_bound_entries/variable` | `String` | `(N_nb)`: the variable of each fitted entry within `BOUND_PROXIMITY_TOL` of a bound, in `pspec.variables` order, then ascending bin | only when there is at least one such entry (Phase 4.D spec D7) |
 | `fit/near_bound_entries/bin` | `Int64` | `(N_nb)`: the entry's bin on the fitted axis; `0` for a scalar variable | with `variable` |
 | `fit/near_bound_entries/bound` | `String` | `(N_nb)`: `"lower"` or `"upper"`, the bound the value is nearer | with `variable` |
@@ -227,6 +229,14 @@ every caller of `write_result`, only when some fitted (`vary`) variable has an e
 warning names; a file without it reads back `fit.near_bound_entries === nothing`. It is the list
 form of the `variables/<name>/near_bound` flags over the fitted variables (a frozen variable's
 flags are written there and never listed here), so the two always agree (NB4).
+
+**`fit/start` and `variables/<name>/held` are optional inside `otis-result-3`** (Phase 4.I, Step
+4.I.1, spec D9, D10), no bump. `fit/start` is the θ the final fit started from: `build_problem`'s
+start (from the deck's `[fit.start]` when it has one, Section 4), or, for a staged deck, the joint
+start that `stages/start` also holds. `variables/<name>/held` is written only for a variable held
+at a series (`[fit.hold]`, or a later stage holding an earlier one's fit), so that a reader can tell
+a held series in `values` from a scalar frozen at its `init`; both have `vary = 0`. A file without
+them reads back `fit.start === nothing` and each variable's `held == 0`.
 
 **`fit/chi2` and `fit/npixels` are the weighted total and the channel sum** (Step 4.A.3b, D40):
 `fit/chi2 = Sigma_c w_c chi2_c` (what the optimizer minimized) and `fit/npixels = Sigma_c n_c`,
@@ -401,3 +411,76 @@ result file's `deck` always carry it. A value other than `"none"` needs the prob
 `intensity_wcm2 | intensity_wm2` and `diameter_um | diameter_m` in the same geometry, and `read_deck`
 refuses it without them, naming the missing key; like `k_model` it is a string and never a variable
 reference. Not a version bump, and the result file gains nothing: the gain is in the `deck` record.
+
+**`[fit.start]` and `[fit.hold]`** (Phase 4.I, Step 4.I.1, spec D8; [OQ-59](../../dev/open_questions.md#oq-59)
+items 2 and 3): two tables of one form under `[fit]`,
+
+```toml
+[fit.start]
+file = "runs/start/epw_old.jld2"          # an otis-result-3 result, or an otis-start-1 file (Section 5)
+variables = ["logn", "T_e", "m_e"]
+
+[fit.hold]
+file = "runs/start/epw_old.jld2"
+variables = ["logn", "T_e", "m_e"]
+```
+
+`[fit.start]` starts the named fitted variables from the file's series, the rest from their `init`;
+`[fit.hold]` holds the named variables at the file's series, so they are not fitted
+(`FittedVariable.held`, `parameters.md` Section 6). `file` is opened as `data.file` is, relative to
+the working directory, and told apart by its `layout_version`. A time-varying variable takes the
+file's series interpolated linearly in time onto its own bins of the fitted axis (exactly the file's
+value at a bin whose time is one of the file's), a one-value entry at every bin; a scalar variable
+takes a one-value entry. **Refused** by `read_deck`: a table that is not `{ file, variables }`, a
+name that is not a fitted variable (declared, `vary = true`) or that is named twice, a name in both
+tables, and, on a staged deck, a held name in `start_from`. **Refused** by `build_problem`: a file of
+another layout, a name the file does not hold, a unit (`variables/<name>/unit`) other than the
+deck's binding keyword when both are given, a series for a scalar variable, a bin outside the file's
+time range (a series is never extrapolated), and a value on or outside the variable's bounds (never
+clamped). Both tables are kept in the effective deck; the stage decks of a staged fit inherit them;
+`slice_scatter` ignores `[fit.start]` and refuses `[fit.hold]`. New keys in `[fit]`, so not a
+deck-version bump.
+
+## 5. The start layout, `otis-start-1` (Phase 4.I, Step 4.I.1, spec D5)
+
+A time axis and one series per variable name, the file a deck's `[fit.start]` or `[fit.hold]` may
+name beside an `otis-result-3` result (Section 4). Written by `write_start(path; axis_s | axis_ns,
+values, units = Dict{String,String}(), source = "")` and read by `read_start(path)`, so that a fit
+made elsewhere reaches a deck through a script that calls the package, and the package reads no
+foreign format.
+
+| Dataset | Type | Shape | Required |
+|---|---|---|---|
+| `layout_version` | `String` | scalar, `"otis-start-1"` | yes |
+| `meta/source` | `String` | free text | yes (`write_start` writes `""` when not given; `read_start` reads a missing one as `""`) |
+| `axis` | `Float64` | `(N)`, **s**, strictly increasing | yes |
+| `variables/<name>/values` | `Float64` | `(N)`, or `(1)` for a value that holds at every time | yes, one group per variable, at least one |
+| `variables/<name>/unit` | `String` | scalar, the boundary keyword the values are in, e.g. `"T_eV"` | no |
+
+**The values are in the deck variable's own unit**: a variable carries no unit and takes its
+binding's (`conventions.md` 7.6), so `logn`, bound through `ne_cm3 = "10^logn"`, is log₁₀ of n_e in
+cm⁻³ and `T_e`, bound through `T_eV`, is in eV. A `unit` is optional and checked: a deck binding the
+variable through another keyword (`T_keV`) refuses the file. **The axis is in s**, as the result
+layout's is, whichever of `axis_s` and `axis_ns` `write_start` was given; `read_start` returns `(;
+layout_version, source, axis, values, units)`, `values` a `Dict{String,Vector{Float64}}` and `units`
+holding only the names the file gives one. `write_start` refuses an axis that is empty, not finite or
+not strictly increasing, a name that is not a valid variable name or given twice, a series of the
+wrong length or with a non-finite value, and a unit for a name `values` does not give; `read_start`
+refuses another `layout_version`, a missing `axis` or `variables`, and a series of the wrong length.
+The round trip is bitwise.
+
+### An untested h5py snippet
+
+No Python is available on this machine to run this; it documents the intended read of a file
+`write_start` wrote, marked untested, as Section 1's does. A file is written with `write_start`
+from Julia: whether `read_start` reads a file h5py wrote is not established, so a conversion from
+another code is a Julia script that reads the other format and calls `write_start`.
+
+```python
+import h5py
+with h5py.File("start.jld2", "r") as f:
+    assert f["layout_version"][()].decode() == "otis-start-1"
+    axis_s = f["axis"][:]                          # shape (N,), s
+    Te = f["variables/T_e/values"][:]              # shape (N,) or (1,)
+    unit = f["variables/T_e/unit"][()].decode() if "unit" in f["variables/T_e"] else ""
+```

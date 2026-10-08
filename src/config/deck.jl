@@ -455,7 +455,8 @@ const _FIT_INTERVAL_KEYS = ("t_range_ns", "t_range_s")
 const _FIT_VARIABLE_KEYS = ("bounds", "init", "time_varying", "vary", "interval", "bindings")
 
 function _validate_fit_scalars(given::AbstractDict)
-    _check_known_keys(given, (_FIT_SCALAR_KEYS..., "intervals", "variables", "dependent", "regions"), "fit")
+    _check_known_keys(given, (_FIT_SCALAR_KEYS..., "intervals", "variables", "dependent", "regions",
+        "start", "hold"), "fit")
     sigma = get(given, "sigma", "supplied")
     sigma == "supplied" || throw(ArgumentError(
         "read_deck: \"fit.sigma\" must be \"supplied\"; sigma is frozen and supplied with the " *
@@ -516,6 +517,144 @@ function _validate_dependent_section(given::AbstractDict)
         text isa AbstractString || throw(ArgumentError(
             "read_deck: \"fit.dependent.$nm\" must be a string"))
         out[nm] = String(text)
+    end
+    return out
+end
+
+# ------------------------------------------------------------------------------------------
+# [fit.start] and [fit.hold] (Phase 4.I, Step 4.I.1; OQ-59 items 2 and 3)
+# ------------------------------------------------------------------------------------------
+
+const _FIT_SERIES_KEYS = ("file", "variables")
+
+"""
+    _validate_series_table(given, key, variables_section) -> Union{Nothing,Dict{String,Any}}
+
+`[fit.start]` or `[fit.hold]`, `key` `"start"` or `"hold"` (Phase 4.I spec D8): `nothing` when the
+deck has no such table, else `{"file" => String, "variables" => Any[String...]}`. `file` is kept as
+written and opened by `build_problem` as `data.file` is, relative to the working directory; each
+name must be a fitted variable of `[fit.variables]` (declared, `vary = true`) and named once. The
+file itself is read by `build_problem` (`_read_series_file`), as the data file is.
+"""
+function _validate_series_table(given, key::AbstractString, variables_section::AbstractDict)
+    given === nothing && return nothing
+    where = "fit.$key"
+    given isa AbstractDict || throw(ArgumentError(
+        "read_deck: \"$where\" must be a table { file = \"...\", variables = [...] }"))
+    _check_known_keys(given, _FIT_SERIES_KEYS, where)
+    file = get(given, "file", nothing)
+    file isa AbstractString || throw(ArgumentError(
+        "read_deck: \"$where\" needs \"file\", the path of an otis-result-3 or otis-start-1 file"))
+    names = get(given, "variables", nothing)
+    (names isa AbstractVector && !isempty(names) && all(x -> x isa AbstractString, names)) ||
+        throw(ArgumentError("read_deck: \"$where.variables\" must be a non-empty list of variable names"))
+    out = String[]
+    for nm in names
+        nm in out && throw(ArgumentError("read_deck: \"$where.variables\" names \"$nm\" twice"))
+        entry = get(variables_section, nm, nothing)
+        (entry !== nothing && entry["vary"]) || throw(ArgumentError(
+            "read_deck: \"$where.variables\" names \"$nm\", which is not a fitted variable of " *
+            "[fit.variables] (declared, with vary = true)"))
+        push!(out, String(nm))
+    end
+    return Dict{String,Any}("file" => String(file), "variables" => Any[out...])
+end
+
+"""
+    _read_series_file(path, key) -> (; axis, values, units)
+
+The file a `[fit.start]` or `[fit.hold]` table names (Phase 4.I spec D8), told apart by its
+`layout_version`: an `otis-result-3` result through `read_result` (`axis` in s, each variable's
+`values` in its own unit and its recorded `unit`), an `otis-start-1` series file through
+`read_start`; anything else refused, naming both accepted layouts. `axis` in s, `values` a
+`Dict{String,Vector{Float64}}`, `units` a `Dict{String,String}`.
+"""
+function _read_series_file(path::AbstractString, key::AbstractString)
+    version = jldopen(path, "r") do f
+        haskey(f, "layout_version") ? f["layout_version"] : nothing
+    end
+    if version == RESULT_LAYOUT_VERSION
+        r = read_result(path)
+        values = Dict{String,Vector{Float64}}(nm => Vector{Float64}(v.values) for (nm, v) in r.variables)
+        units = Dict{String,String}(nm => String(v.unit) for (nm, v) in r.variables)
+        return (; axis=Vector{Float64}(r.axis), values, units)
+    elseif version == START_LAYOUT_VERSION
+        st = read_start(path)
+        return (; axis=st.axis, values=st.values, units=st.units)
+    end
+    throw(ArgumentError(
+        "build_problem: [fit.$key] file \"$path\" has " *
+        (version === nothing ? "no layout_version" : "layout_version $(repr(version))") *
+        "; expected \"$RESULT_LAYOUT_VERSION\" (a result file) or \"$START_LAYOUT_VERSION\" " *
+        "(a series file written by write_start)"))
+end
+
+"""
+    _deck_unit_keys(bindings_plasma) -> Dict{String,String}
+
+Each name's binding keyword (`"T_eV"`; `""` for a key whose factor is one), from the first leaf
+binding `_build_template` found for it -- the keyword `_resolve_bindings` and `write_result`'s
+`variables/<name>/unit` give the same name (Phase 4.I spec D8). A name bound to no leaf is absent.
+"""
+function _deck_unit_keys(bindings_plasma::AbstractVector)
+    units = Dict{String,String}()
+    for (nm, key) in bindings_plasma
+        haskey(units, nm) && continue
+        _, factor = _leaf_si_path(key)
+        units[nm] = factor == 1.0 ? "" : String(split(key, '.')[end])
+    end
+    return units
+end
+
+_ns_text(t::Real) = @sprintf("%.6g", t * 1e9)
+
+"""
+    _series_values(file, key, path, v, ivals, axis, deck_units) -> Vector{Float64}
+
+The value `[fit.<key>]` gives the variable `v`, checked in this order (Phase 4.I spec D8): the file
+holds the name; its unit, when both it and `deck_units` give one, is the deck's; a scalar variable
+takes a one-value entry; each bin of a time-varying variable's interval lies inside the file's time
+range (no extrapolation) and takes `_interpolate_series` there, a one-value entry every bin; every
+value lies strictly inside `v`'s bounds. One value per bin of the interval, or one for a scalar.
+"""
+function _series_values(file, key::AbstractString, path::AbstractString, v::FittedVariable,
+    ivals::Vector{FitInterval}, axis::AbstractVector, deck_units::AbstractDict)
+    nm = v.name
+    haskey(file.values, nm) || throw(ArgumentError(
+        "build_problem: [fit.$key] names \"$nm\", which file \"$path\" does not hold; it holds " *
+        "$(sort(collect(keys(file.values))))"))
+    funit = get(file.units, nm, "")
+    dunit = get(deck_units, nm, "")
+    (isempty(funit) || isempty(dunit) || funit == dunit) || throw(ArgumentError(
+        "build_problem: [fit.$key]: file \"$path\" gives \"$nm\" in \"$funit\", but this deck binds " *
+        "it through \"$dunit\""))
+    series = file.values[nm]
+    if !v.time_varying
+        length(series) == 1 || throw(ArgumentError(
+            "build_problem: [fit.$key]: \"$nm\" is a scalar variable, but file \"$path\" holds a " *
+            "series of $(length(series)) values for it; a scalar takes a one-value entry"))
+        x = series[1]
+        (v.lower < x < v.upper) || throw(ArgumentError(
+            "build_problem: [fit.$key]: \"$nm\" is $x in file \"$path\", not strictly inside its " *
+            "bounds ($(v.lower), $(v.upper))"))
+        return [x]
+    end
+    bins = _interval_bins(v, ivals, length(axis))
+    out = Vector{Float64}(undef, length(bins))
+    for (k, j) in enumerate(bins)
+        t = axis[j]
+        if length(series) == 1
+            out[k] = series[1]
+        else
+            (first(file.axis) <= t <= last(file.axis)) || throw(ArgumentError(
+                "build_problem: [fit.$key]: \"$nm\" needs a value at bin $j (t = $(_ns_text(t)) ns), " *
+                "outside file \"$path\"'s time range [$(_ns_text(first(file.axis))), " *
+                "$(_ns_text(last(file.axis)))] ns; a series is never extrapolated"))
+            out[k] = _interpolate_series(file.axis, series, t)
+        end
+        (v.lower < out[k] < v.upper) || throw(ArgumentError(
+            "build_problem: [fit.$key]: \"$nm\" is $(out[k]) at bin $j (t = $(_ns_text(t)) ns) from " *
+            "file \"$path\", not strictly inside its bounds ($(v.lower), $(v.upper))"))
     end
     return out
 end
@@ -846,7 +985,7 @@ end
 `procedure = "staged"`'s two cross-section checks (Phase 4.F spec D3), run by `read_deck` once
 the channels and the variables are known: the deck is in the channel form with two or more
 channels; and every `start_from` entry names a fitted (`vary`) variable and a channel of
-`channels`.
+`channels`, and (Phase 4.I spec D12) not a variable `[fit.hold]` holds, which no stage fits.
 """
 function _check_staged_deck(sections::AbstractDict, channel_names::Union{Nothing,Vector{String}})
     sections["optimizer"]["procedure"] == STAGED_PROCEDURE || return nothing
@@ -866,6 +1005,10 @@ function _check_staged_deck(sections::AbstractDict, channel_names::Union{Nothing
         (chan isa AbstractString && chan in channel_names) || throw(ArgumentError(
             "read_deck: \"optimizer.staged.start_from.$name\" must name a channel of \"channels\", " *
             "$channel_names; got $(repr(chan))"))
+        hold = sections["fit_hold"]
+        (hold !== nothing && name in hold["variables"]) && throw(ArgumentError(
+            "read_deck: \"optimizer.staged.start_from\" names \"$name\", which [fit.hold] holds, so " *
+            "no stage fits it"))
     end
     return nothing
 end
@@ -1078,6 +1221,16 @@ function read_deck(path::AbstractString)
     sections["fit_dependent"] = _validate_dependent_section(dependent_raw)
     sections["fit"] = _validate_fit_scalars(fit_raw)
     sections["fit_regions"] = _validate_regions(get(fit_raw, "regions", nothing))
+    # Phase 4.I spec D8: the start and hold tables, nothing when the deck gives neither.
+    sections["fit_start"] = _validate_series_table(get(fit_raw, "start", nothing), "start", sections["fit_variables"])
+    sections["fit_hold"] = _validate_series_table(get(fit_raw, "hold", nothing), "hold", sections["fit_variables"])
+    if sections["fit_start"] !== nothing && sections["fit_hold"] !== nothing
+        for nm in sections["fit_start"]["variables"]
+            nm in sections["fit_hold"]["variables"] && throw(ArgumentError(
+                "read_deck: \"$nm\" is named in both [fit.start] and [fit.hold]; a variable is " *
+                "started from a series or held at one, not both"))
+        end
+    end
 
     haskey(raw, "plasma") || throw(ArgumentError("read_deck: \"$path\" is missing section \"plasma\""))
     sections["plasma"] = _validate_plasma_section(raw["plasma"], known_names)
@@ -1613,6 +1766,19 @@ function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
         end
     end
 
+    # Phase 4.I spec D8: [fit.hold]'s variables are held at the file's series on their own bins.
+    deck_units = _deck_unit_keys(bindings_plasma)
+    hold = get(s, "fit_hold", nothing)
+    if hold !== nothing
+        hfile = _read_series_file(hold["file"], "hold")
+        for (i, v) in enumerate(vars)
+            v.name in hold["variables"] || continue
+            series = _series_values(hfile, "hold", hold["file"], v, ivals, axis, deck_units)
+            vars[i] = FittedVariable(v.name; bounds=(v.lower, v.upper), init=v.init,
+                time_varying=v.time_varying, interval=v.interval, held=series)
+        end
+    end
+
     pspec = ParameterSpec(Tuple(expt0s); variables=vars, dependents=dep_pairs, intervals=ivals,
         bindings=vcat(bindings_plasma, bindings_instrument), axis_unit=axis_unit)
 
@@ -1633,8 +1799,38 @@ function _assemble_problem(s::AbstractDict, chan_list::AbstractVector,
     end
 
     optimizer = _build_optimizer(s["optimizer"])
-    start = flatten(pspec)
+    start = _deck_start(s, pspec, ivals, axis, deck_units)
     return problem, optimizer, start
+end
+
+"""
+    _deck_start(s, pspec, ivals, axis, deck_units) -> Vector{Float64}
+
+`build_problem`'s start (Phase 4.I spec D9): `flatten(pspec)` when the deck has no `[fit.start]`,
+the code path of every deck before Phase 4.I; else `flatten(pspec, values)` over the named
+variables that this deck fits (`vary`; a stage deck's frozen variable is skipped), each from
+`_series_values` -- a per-bin row on the whole axis (`NaN` outside the variable's interval, which
+`flatten` never reads) or a scalar -- and every other variable at its `init`.
+"""
+function _deck_start(s::AbstractDict, pspec::ParameterSpec, ivals::Vector{FitInterval},
+    axis::AbstractVector, deck_units::AbstractDict)
+    tbl = get(s, "fit_start", nothing)
+    tbl === nothing && return flatten(pspec)
+    sfile = _read_series_file(tbl["file"], "start")
+    nt = length(axis)
+    values = Pair{String,Any}[]
+    for v in pspec.variables
+        (v.vary && v.name in tbl["variables"]) || continue
+        series = _series_values(sfile, "start", tbl["file"], v, ivals, axis, deck_units)
+        if v.time_varying
+            row = fill(NaN, nt)
+            row[_interval_bins(v, ivals, nt)] .= series
+            push!(values, v.name => row)
+        else
+            push!(values, v.name => series[1])
+        end
+    end
+    return flatten(pspec, values)
 end
 
 """
@@ -1655,6 +1851,12 @@ resolves every binding for real, D9, and rebuilds the trace with the union of le
 regularizer (`[regularizer]`) and the optimizer (`[optimizer]`). Returns a plain `FitProblem` for
 one channel or a `JointFitProblem` for two or more, the optimizer, and the start vector
 `flatten(pspec)`.
+
+**`[fit.hold]` and `[fit.start]`** (Phase 4.I spec D8, D9): the variables `[fit.hold]` names are
+built held (`FittedVariable.held`) at its file's series on their own bins, so they are frozen and
+absent from θ; the start is `flatten(pspec, values)` with the variables `[fit.start]` names taken
+from its file, the rest at `init` (`_deck_start`). Each file is opened as the data file is,
+relative to the working directory; the refusals are `_read_series_file`'s and `_series_values`'.
 
 **Split into three stages at chunk 10 (D50, 2026-09-25)**: `_read_channels`, `_average_channels`
 and `_assemble_problem`, moved verbatim -- so that `slice_scatter` (D51) can call the same three
@@ -1750,6 +1952,8 @@ function effective_deck(deck::Deck, problem::AbstractFitProblem, ::AbstractOptim
         "intervals" => s["fit_intervals"], "variables" => variables,
         "dependent" => s["fit_dependent"])
     s["fit_regions"] === nothing || (fit_out["regions"] = s["fit_regions"])
+    get(s, "fit_start", nothing) === nothing || (fit_out["start"] = s["fit_start"])
+    get(s, "fit_hold", nothing) === nothing || (fit_out["hold"] = s["fit_hold"])
     out["fit"] = fit_out
 
     toml_value = _to_toml_value(out)
@@ -2126,6 +2330,10 @@ fitted bin's EPW resonance is narrower than `RESONANCE_WIDTH_WARN` wavelength pi
 channel does not yet sample each pixel finely enough, naming the bins and the
 `pixel_integration` count to refit with; silent otherwise. It changes nothing.
 
+**The start** (Phase 4.I spec D9): `write_result` is given the θ the final fit started from, written
+as `fit/start` -- `build_problem`'s start (from `[fit.start]` when the deck has one), or a staged
+deck's joint start, which `stages/start` also holds.
+
 Spec D33, D40.
 """
 function fit(deck::Deck)
@@ -2135,7 +2343,7 @@ function fit(deck::Deck)
     if deck.sections["optimizer"]["procedure"] == STAGED_PROCEDURE
         pin_blas_threads()
         staged = _staged_fit(deck)
-        problem, optimizer, result = staged.problem, staged.optimizer, staged.result
+        problem, optimizer, result, start = staged.problem, staged.optimizer, staged.result, staged.start
     else
         problem, optimizer, start = build_problem(deck)
         pin_blas_threads()
@@ -2149,7 +2357,7 @@ function fit(deck::Deck)
     mkpath(dir)
     eff = effective_deck(deck, problem, optimizer)
     write_result(joinpath(dir, "result.jld2"), result; problem=problem, deck=eff, source="fit",
-        gn_decrease=decrease, stages=staged)
+        gn_decrease=decrease, stages=staged, start=start)
     open(joinpath(dir, "effective_deck.toml"), "w") do io
         write(io, eff)
     end

@@ -91,3 +91,30 @@ end
         @test_throws "names \"T_D\", which is not a fitted variable" rd("frozen.toml", frozen)
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# ST5: the stage decks inherit [fit.start] and [fit.hold]; start_from cannot name a held variable
+# (Phase 4.I spec D12, Step 4.I.1)
+# ------------------------------------------------------------------------------------------
+
+include(joinpath(@__DIR__, "..", "fixtures", "start_hold_fixture.jl"))
+
+@testset "ST5: the stage decks inherit the start and hold tables" begin
+    mktempdir() do dir
+        _st_streaks(dir)
+        sp = _sh_start_file(dir)
+        text = _sh_tables(_st_text(dir); start=(sp, ["logn"]), hold=(sp, ["T_e"]))
+        deck = read_deck(_st_write(dir, "d.toml", text))
+        joint, _, _ = OTIS.build_problem(deck)
+        for c in 1:2
+            sdeck = OTIS._stage_deck(deck, c, "lbfgs", String[])
+            @test sdeck.sections["fit_start"] == deck.sections["fit_start"]
+            @test sdeck.sections["fit_hold"] == deck.sections["fit_hold"]
+            p, _, st = OTIS.build_problem(sdeck)
+            @test !only(v for v in p.pspec.variables if v.name == "T_e").vary
+            @test p.pspec.ntheta == joint.pspec.ntheta == 12
+        end
+        @test_throws "read_deck: \"optimizer.staged.start_from\" names \"T_D\", which [fit.hold] holds, so no stage fits it" read_deck(
+            _st_write(dir, "h.toml", _sh_tables(_st_text(dir); hold=(sp, ["T_D"]))))
+    end
+end

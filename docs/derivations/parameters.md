@@ -292,3 +292,48 @@ scalar variables get a `kernel_globals` column at all), and `_build_chain_global
 stage bindings get a closed-form column). A variable bound only into another channel therefore
 never becomes a global of this channel's Jacobian: its column is identically zero because nothing
 ever writes to it, not because something computes zero and writes it (JT18).
+
+## 6. Held series (Phase 4.I, Step 4.I.1, spec D7)
+
+A frozen variable (`vary = false`) has no entry in theta and has always taken one value, its
+`init`, at every bin. **A held variable is a frozen variable whose value is a series**:
+`FittedVariable(name; …, held = [h_1, …, h_n])`, one value per bin of the variable's interval (the
+whole axis for `interval = 0`) or one value for a scalar variable. Giving `held` implies `vary =
+false`; `held` with `vary = true` is refused. The deck builds one from `[fit.hold] = { file,
+variables }` (`data_layout.md` Section 5), the file's series interpolated onto the variable's own
+bins; the sequential staged fit (Step 4.I.3) builds one from an earlier stage's fitted series.
+
+**One reader.** `_frozen_value(v, j, intervals)` is a frozen variable's value at bin `j`:
+
+```
+_frozen_value(v, j) = init                         when held === nothing (every frozen variable before Phase 4.I)
+                    = held[1]                      for a scalar
+                    = held[j]                      on the whole axis
+                    = held[j - first(bins) + 1]    for j in the variable's interval
+                    = NaN                          for j outside it
+```
+
+`unflatten`, the Jacobian's per-bin dual pass, `_value_table` (the result's `values` and the
+regularizer's rows) and the regularizer's closed form (`_slot_value_and_grad`,
+`_dependent_value_and_grad`) all read a frozen variable through it, so a held series is used
+bitwise in every residual evaluation and in every derivative. **A held variable on an interval is
+defined where a fitted one is**, only inside its interval (`_slot_defined_at`): a leaf it is bound
+to is not written outside the interval, a dependent may not read it there (`_check_interval_reads`,
+unchanged) and a regularizer term may not select it there (Phase 4.C's rule, unchanged), exactly as
+for the fitted variable it replaces. **The regularizer's rule for a frozen selection is kept**: a
+term selecting a frozen variable, held or not, contributes rows evaluated at its values with no
+theta column, so they are constant in theta. `flatten` skips a held variable as it skips every
+frozen one, even when its `values` argument names it.
+
+**The values a held variable may take.** `FittedVariable` requires each held value finite and
+within the closed range `[lower, upper]`: a held value is never mapped through the logit, so a bound
+is a value it may take (an earlier stage's fitted value can sit exactly on one when the logit
+saturates). The deck's `[fit.hold]` and `[fit.start]` are stricter and refuse a file value on or
+outside a bound, as `init` is refused there, since a file at odds with the deck's bounds is a
+conflict for the user to resolve, not a value to clamp. `ParameterSpec`'s constructor checks a
+time-varying held series' length against its interval's bin count.
+
+**A frozen variable bound to a chain-stage instrument parameter** (`SpectralIRF`/`TemporalIRF`'s
+width, `Sensitivity.scale`, a background) has no chain global: through `c43e7d4` such a variable
+made `_build_chain_globals` read `theta[0]` and throw, so no deck could hold a sensitivity scale;
+it is skipped, as frozen variables are among the kernel globals (spec D11).

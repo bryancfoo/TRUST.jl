@@ -28,6 +28,8 @@ unconditionally).
 - no `[[fit.regions]]`: `"slice_scatter: the deck has no [[fit.regions]]"` (Pitfall 43);
 - `[fit.intervals]` non-empty, or any region naming an interval:
   `"slice_scatter: intervals are not supported"`;
+- a `[fit.hold]` table (Phase 4.I spec D12): `"slice_scatter: held series ([fit.hold]) are not
+  supported"`. A `[fit.start]` table is ignored: every window starts from `result`'s own values;
 - `result` was not fitted from `deck` (its θ's length does not match what `deck`'s own variables
   and regions imply, or `result.pspec.axis` does not match the coarse axis this deck's own
   channels average to): `"slice_scatter: result was not fitted from this deck"`.
@@ -64,6 +66,8 @@ function slice_scatter(deck::Deck, result::FitResult;
         isempty(region["interval"]) || throw(ArgumentError(
             "slice_scatter: intervals are not supported"))
     end
+    get(s, "fit_hold", nothing) === nothing || throw(ArgumentError(
+        "slice_scatter: held series ([fit.hold]) are not supported"))
 
     chan_list = _channel_list(s)
     nchannels = length(chan_list)
@@ -122,6 +126,9 @@ function slice_scatter(deck::Deck, result::FitResult;
     # deck has it, untouched.
     sw = deepcopy(deck.sections)
     sw["regularizer"] = nothing
+    # Phase 4.I spec D12: each window starts from result's own values (below), so a [fit.start] table
+    # would only be read and discarded, and refused where a window reaches past its file's times.
+    sw["fit_start"] = nothing
     free = String[]
     for v in result.pspec.variables
         if v.vary && v.time_varying

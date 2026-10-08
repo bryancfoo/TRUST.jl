@@ -156,6 +156,8 @@ not. `_build_chain_globals` supports a chain-stage binding only on a directly fi
 (not a dependent) — no test problem of this phase binds a dependent to a chain-stage parameter
 (D46), and doing so would need the chain rule through the dependent's own expression tree rather
 than one scalar `dc/dθ`; this is refused with a loud error rather than silently computed wrong.
+**A frozen variable has no column** (Phase 4.I spec D11): it has no θ entry, and through `c43e7d4`
+one bound to a chain-stage parameter made `_build_chain_globals` read `theta[0]`; it is skipped.
 
 ## 5. `jvp!` and `jtvp!`: the transposes, derived
 

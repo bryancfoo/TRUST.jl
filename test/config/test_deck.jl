@@ -1041,3 +1041,78 @@ end
                      "the two compose and would smear the spectrum twice" read_deck(deckpath)
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# DK24: fit(deck) writes fit/start (Phase 4.I spec D9, Step 4.I.1)
+# ------------------------------------------------------------------------------------------
+
+# DK20's one-bin deck (fixture C, Levenberg-Marquardt) with a [fit.<key>] table after its [fit].
+_dk_with_fit_table(text, key, file, names) = replace(text, "sigma = \"supplied\"" =>
+    "sigma = \"supplied\"\n\n[fit.$key]\nfile = \"$(replace(file, "\\" => "/"))\"\n" *
+    "variables = [$(join(("\"$n\"" for n in names), ", "))]")
+
+@testset "DK24: fit(deck) writes fit/start" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "p1.jld2")
+        _dk_p1_streak(datafile)
+        deckpath = joinpath(dir, "c.toml")
+        write(deckpath, _dk_p1_deck(datafile, joinpath(dir, "c")))
+        _, _, start = OTIS.build_problem(read_deck(deckpath))
+        fit(deckpath)
+        @test all(read_result(joinpath(dir, "c", "result.jld2")).fit.start .=== start)
+
+        sp = write_start(joinpath(dir, "s.jld2"); axis_ns=[0.0], values=Dict("T_D" => [240.0], "u_D" => [30.0]),
+            units=Dict("T_D" => "T_eV"))
+        deckpath_s = joinpath(dir, "s.toml")
+        write(deckpath_s, _dk_with_fit_table(_dk_p1_deck(datafile, joinpath(dir, "s")), "start", sp, ["T_D", "u_D"]))
+        problem, _, start_s = OTIS.build_problem(read_deck(deckpath_s))
+        @test all(start_s .=== flatten(problem.pspec, ["T_D" => 240.0, "u_D" => 30.0]))
+        fit(deckpath_s)
+        @test all(read_result(joinpath(dir, "s", "result.jld2")).fit.start .=== start_s)
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# DK25: a fit's own result file as a start and as a hold (Phase 4.I spec D8 to D10, Step 4.I.1)
+# ------------------------------------------------------------------------------------------
+
+@testset "DK25: a result file as [fit.start] and [fit.hold]" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "p1.jld2")
+        _dk_p1_streak(datafile)
+        deckpath = joinpath(dir, "c.toml")
+        write(deckpath, _dk_p1_deck(datafile, joinpath(dir, "c")))
+        fit(deckpath)
+        rpath = joinpath(dir, "c", "result.jld2")
+        r = read_result(rpath)
+
+        # its own result as its start: fit/theta to the logit's round trip, at most four ulps of the
+        # larger bound magnitude carried through dy/dx = 1/_dx_dy (spec D9)
+        write(joinpath(dir, "a.toml"), _dk_with_fit_table(_dk_p1_deck(datafile, joinpath(dir, "a")), "start", rpath, ["T_D", "u_D"]))
+        problem, _, start = OTIS.build_problem(read_deck(joinpath(dir, "a.toml")))
+        worst = 0.0
+        for (k, v) in enumerate(problem.pspec.variables)
+            x = r.variables[v.name].values[1]
+            tol = 4 * eps(max(abs(v.lower), abs(v.upper))) / OTIS._dx_dy(x, v.lower, v.upper)
+            worst = max(worst, abs(start[k] - r.fit.theta[k]) / tol)
+        end
+        @info "DK25: the start against fit/theta, in units of the round trip's bound" worst
+        @test worst <= 1
+
+        # its own result as a hold: u_D held at its fitted value, recorded with held = 1
+        write(joinpath(dir, "b.toml"), _dk_with_fit_table(_dk_p1_deck(datafile, joinpath(dir, "b")), "hold", rpath, ["u_D"]))
+        problem_b, _, _ = OTIS.build_problem(read_deck(joinpath(dir, "b.toml")))
+        @test problem_b.pspec.ntheta == 1
+        fit(joinpath(dir, "b.toml"))
+        rb = read_result(joinpath(dir, "b", "result.jld2"))
+        @test rb.variables["u_D"].held == 1 && rb.variables["u_D"].vary == 0
+        @test all(rb.variables["u_D"].values .=== r.variables["u_D"].values)
+        @test rb.variables["T_D"].held == 0
+
+        # a deck that binds T_D through T_keV refuses the file's T_eV
+        kev = replace(_dk_p1_deck(datafile, joinpath(dir, "k"); t_bounds="[0.05, 0.8]", t_init=0.2),
+            "T_eV = \"T_D\"" => "T_keV = \"T_D\"")
+        write(joinpath(dir, "k.toml"), _dk_with_fit_table(kev, "start", rpath, ["T_D"]))
+        @test_throws "gives \"T_D\" in \"T_eV\", but this deck binds it through \"T_keV\"" OTIS.build_problem(read_deck(joinpath(dir, "k.toml")))
+    end
+end

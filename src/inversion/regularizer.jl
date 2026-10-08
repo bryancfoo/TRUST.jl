@@ -346,7 +346,7 @@ function _value_table(pspec::ParameterSpec, theta::AbstractVector{T}) where {T<:
         for i in 1:nvar
             v = pspec.variables[i]
             if !v.vary
-                vals[i, j] = convert(T, v.init)
+                vals[i, j] = convert(T, _frozen_value(v, j, pspec.intervals))
             elseif !v.time_varying
                 vals[i, j] = scalar_x[i]
             else
@@ -509,7 +509,7 @@ function _dependent_value_and_grad(pspec::ParameterSpec, theta::AbstractVector{F
         for i in 1:nvar
             v = pspec.variables[i]
             if !v.vary
-                vals[i] = convert(T, v.init)
+                vals[i] = convert(T, _frozen_value(v, j, pspec.intervals))
             else
                 pos = get(slot_pos, i, 0)
                 vals[i] = pos == 0 ? T(NaN) : _from_unconstrained(z[pos], v.lower, v.upper)
@@ -530,7 +530,8 @@ end
 
 `vals[slot]` at bin `j` and its partials with respect to theta (D25). For a fitted variable
 (`slot <= nvar`) this is closed-form and trivial: a frozen variable contributes no theta entry at
-all; a scalar variable's one entry is `pspec.offsets[slot]`; a time-varying variable's entry at
+all (its value its `init`, or its held series' entry at `j`, Phase 4.I spec D7); a scalar
+variable's one entry is `pspec.offsets[slot]`; a time-varying variable's entry at
 bin `j` is looked up in `pspec.bin_entries[j]`/`bin_slots[j]`, or the variable is undefined at
 this bin (outside its own interval) and contributes nothing. For a dependent (`slot > nvar`) this
 defers to `_dependent_value_and_grad`.
@@ -542,7 +543,7 @@ function _slot_value_and_grad(pspec::ParameterSpec, theta::AbstractVector{Float6
     end
     v = pspec.variables[slot]
     if !v.vary
-        return v.init, Int[], Float64[]
+        return _frozen_value(v, j, pspec.intervals), Int[], Float64[]
     elseif !v.time_varying
         idx = pspec.offsets[slot]
         x = _from_unconstrained(theta[idx], v.lower, v.upper)

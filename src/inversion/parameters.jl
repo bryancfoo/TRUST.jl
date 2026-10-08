@@ -80,7 +80,7 @@ _dx_dy(x::Real, a::Real, b::Real) = (x - a) * (b - x) / (b - a)
 const _VARIABLE_NAME_RE = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
 """
-    FittedVariable(name; bounds, init, time_varying = false, vary = true, interval = 0)
+    FittedVariable(name; bounds, init, time_varying = false, vary = true, interval = 0, held = nothing)
 
 A scalar or per-bin fitted quantity: finite bounds `(a, b)`, an initial value strictly inside
 them, whether it varies over the trace axis, whether it is actually fitted (`vary = false` freezes
@@ -89,11 +89,19 @@ regularizer), and which named interval (an index into `ParameterSpec.intervals`,
 whole axis) it lives on. `name` must match `r"^[A-Za-z_][A-Za-z0-9_]*\$"` (a valid Julia
 identifier, since it is also written into dependent expressions).
 
+**`held`** (Phase 4.I spec D7, [OQ-59](../../dev/open_questions.md#oq-59) item 3): `nothing`, or the
+series a frozen variable is **held** at in place of `init`, one value per bin of its interval (`1:N_t`
+for `interval = 0`) or one value for a scalar variable. Giving `held` implies `vary = false`; `held`
+with `vary = true` is refused. Each value must be finite and within `[lower, upper]` (a held value is
+never mapped through the logit, so a bound itself is a value it may take; the deck's `[fit.hold]`
+refuses a file value on a bound, D8). The length of a time-varying variable's series is checked by
+`ParameterSpec`, which knows the interval's bins. `_frozen_value` is the one reader of the field.
+
 **A variable carries no unit**: `bounds` and `init` are read in the unit of the key it is later
 bound to (`conventions.md` 7.6, D9). All four numeric fields are stored as `Float64`, never `FT`
 -- they are user input, read once, never differentiated.
 
-Spec D4.
+Spec D4; Phase 4.I spec D7.
 """
 struct FittedVariable
     name::String
@@ -103,10 +111,11 @@ struct FittedVariable
     time_varying::Bool
     vary::Bool
     interval::Int
+    held::Union{Nothing,Vector{Float64}}
 end
 
 function FittedVariable(name::AbstractString; bounds, init::Real, time_varying::Bool=false,
-                         vary::Bool=true, interval::Integer=0)
+                         vary::Union{Nothing,Bool}=nothing, interval::Integer=0, held=nothing)
     occursin(_VARIABLE_NAME_RE, name) || throw(ArgumentError(
         "\"$name\" is not a valid variable name; expected $(_VARIABLE_NAME_RE.pattern)"))
     length(bounds) == 2 || throw(ArgumentError(
@@ -119,7 +128,21 @@ function FittedVariable(name::AbstractString; bounds, init::Real, time_varying::
     initf = Float64(init)
     (lower < initf < upper) || throw(ArgumentError(
         "FittedVariable \"$name\": init $initf must lie strictly inside the bounds ($lower, $upper)"))
-    return FittedVariable(String(name), lower, upper, initf, time_varying, vary, Int(interval))
+    heldv = nothing
+    if held !== nothing
+        vary === true && throw(ArgumentError(
+            "FittedVariable \"$name\": held is given, so the variable is not fitted; vary = true contradicts it"))
+        heldv = Float64.(collect(held))
+        isempty(heldv) && throw(ArgumentError("FittedVariable \"$name\": held is empty"))
+        (time_varying || length(heldv) == 1) || throw(ArgumentError(
+            "FittedVariable \"$name\": a scalar variable is held at one value; got $(length(heldv))"))
+        for (k, h) in enumerate(heldv)
+            (isfinite(h) && lower <= h <= upper) || throw(ArgumentError(
+                "FittedVariable \"$name\": held value $h (entry $k) must be finite and within the bounds [$lower, $upper]"))
+        end
+    end
+    varyb = vary === nothing ? (held === nothing) : vary
+    return FittedVariable(String(name), lower, upper, initf, time_varying, varyb, Int(interval), heldv)
 end
 
 # ------------------------------------------------------------------------------------------
@@ -180,6 +203,24 @@ end
 
 _interval_bins(v::FittedVariable, intervals::Vector{FitInterval}, nt::Int) =
     v.interval == 0 ? (1:nt) : intervals[v.interval].bins
+
+"""
+    _frozen_value(v::FittedVariable, j::Int, intervals::Vector{FitInterval}) -> Float64
+
+A frozen (`vary = false`) variable's value at bin `j` (Phase 4.I spec D7): its `init` when it is not
+held, as since Step 3.1; when held, its series' entry at `j` -- the one value of a scalar, `held[j]`
+on the whole axis, `held[j - first(bins) + 1]` inside its interval and `NaN` outside it, as a fitted
+variable is undefined outside its interval. The one place `held` is read: `unflatten`, the Jacobian's
+dual pass, `_value_table` and the regularizer's closed form all call it. Allocation-free.
+"""
+@inline function _frozen_value(v::FittedVariable, j::Int, intervals::Vector{FitInterval})
+    h = v.held
+    h === nothing && return v.init
+    v.time_varying || return h[1]
+    v.interval == 0 && return h[j]
+    bins = intervals[v.interval].bins
+    return j in bins ? h[j-first(bins)+1] : NaN
+end
 
 # ------------------------------------------------------------------------------------------
 # D8: DependentVariable, topological order, and the per-bin value vector's name map
@@ -605,13 +646,15 @@ end
 
 Whether `vals[slot]` (the per-bin value vector) holds a meaningful value at bin `j`: always true
 for a dependent's slot (`slot > nvar`, evaluated at every bin, D12 step 3) and for a scalar or
-frozen variable; for a varying trace variable, only within its own interval.
+frozen variable; for a varying trace variable, only within its own interval. A **held** trace
+variable (Phase 4.I spec D7) is a varying one's series fixed in place, so it is defined where the
+varying one is: only within its own interval.
 """
 function _slot_defined_at(slot::Int, j::Int, variables::Vector{FittedVariable}, nvar::Int,
                            intervals::Vector{FitInterval})
     slot > nvar && return true
     v = variables[slot]
-    (!v.vary || !v.time_varying || v.interval == 0) && return true
+    ((!v.vary && v.held === nothing) || !v.time_varying || v.interval == 0) && return true
     return j in intervals[v.interval].bins
 end
 
@@ -750,6 +793,11 @@ function ParameterSpec(expts::Tuple{Vararg{Experiment}}; variables, dependents=(
         push!(seen_names, v.name)
         v.interval == 0 || (1 <= v.interval <= length(ivals)) || throw(ArgumentError(
             "FittedVariable \"$(v.name)\": interval index $(v.interval) is out of range 1:$(length(ivals))"))
+        if v.held !== nothing && v.time_varying
+            nb = length(_interval_bins(v, ivals, nt))
+            length(v.held) == nb || throw(ArgumentError(
+                "ParameterSpec: \"$(v.name)\" is held at $(length(v.held)) values, but its interval has $nb bins"))
+        end
     end
 
     axis_boundary = Float64.(trace0.axis) ./ factor
@@ -859,7 +907,10 @@ Theta built from given `x` values rather than each variable's `init`: `values` a
 `name => x` pairs, `x` a scalar (used at every bin of the variable's interval) or, for a trace
 variable, a per-bin `AbstractVector` indexed by the trace's own bin number. A variable not named in
 `values` falls back to its `init`. **Not given an explicit shape by D10's abbreviated docstring;
-Level 3's choice, flagged under rule 11 zero** (chunk 4 report).
+Level 3's choice, flagged under rule 11 zero** (chunk 4 report). A frozen variable, held or not, has
+no theta entry and is skipped even when `values` names it (Phase 4.I spec D7). This is how every
+start the deck layer builds is made: `build_problem`'s from `[fit.start]` and `_staged_fit`'s joint
+start (Phase 4.I spec D9).
 """
 function flatten(pspec::ParameterSpec, values)
     valdict = Dict{String,Any}(String(k) => v for (k, v) in values)
@@ -983,7 +1034,7 @@ function unflatten(expt::Experiment, pspec::ParameterSpec, theta::AbstractVector
         for i in 1:nvar
             v = pspec.variables[i]
             if !v.vary
-                vals[i] = convert(T, v.init)
+                vals[i] = convert(T, _frozen_value(v, j, pspec.intervals))
             elseif !v.time_varying
                 vals[i] = scalar_x[i]
             else
@@ -1033,7 +1084,8 @@ function Base.show(io::IO, ::MIME"text/plain", pspec::ParameterSpec)
     println(io, "  variables ($(length(pspec.variables))):")
     for v in pspec.variables
         kind = v.time_varying ? "trace" : "scalar"
-        status = v.vary ? "fitted" : "frozen at $(v.init)"
+        status = v.vary ? "fitted" : v.held === nothing ? "frozen at $(v.init)" :
+                 "held at a series of $(length(v.held))"
         println(io, "    $(v.name): $kind, [$(v.lower), $(v.upper)], $status")
     end
     println(io, "  dependents ($(length(pspec.dependents))):")

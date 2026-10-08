@@ -210,7 +210,7 @@ function _jacobian_bin!(block::AbstractMatrix{FT}, kernel_globals::AbstractArray
         @inbounds for i in 1:nvar
             v = pspec.variables[i]
             if !v.vary
-                vals[i] = convert(T, v.init)
+                vals[i] = convert(T, _frozen_value(v, j, pspec.intervals))
             elseif !v.time_varying
                 gk = kernel_global_of_var[i]
                 if gk == 0
@@ -415,6 +415,11 @@ theta-space, matching `blocks`/`kernel_globals`. Only a **directly fitted** vari
 supported (`b.slot <= nvar`): a dependent bound to a chain-stage parameter would need the chain
 rule through the dependent's own expression, which is not exercised by any test problem of this
 phase (D46) and is refused here rather than silently mishandled -- see the chunk 6 report.
+
+**A frozen variable has no column** (Phase 4.I spec D11): it has no theta entry
+(`pspec.offsets` is `0` for it), and through `c43e7d4` a `vary = false` variable bound to a
+chain-stage parameter made this function read `theta[0]` and throw a `BoundsError`; it is skipped,
+as `jacobian` skips it among the kernel globals. A held variable is a frozen one.
 """
 function _build_chain_globals(problem::FitProblem, expt::Experiment, theta::AbstractVector{FT},
     P::AbstractMatrix, Q::AbstractMatrix, response::AbstractVector, curve0::AbstractVector,
@@ -440,6 +445,7 @@ function _build_chain_globals(problem::FitProblem, expt::Experiment, theta::Abst
             "directly fitted variable bound to a chain-stage parameter"))
 
         v = pspec.variables[b.slot]
+        v.vary || continue
         x = _from_unconstrained(theta[pspec.offsets[b.slot]], v.lower, v.upper)
         chainfactor = _dx_dy(x, v.lower, v.upper)
 
