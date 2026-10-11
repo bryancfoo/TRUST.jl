@@ -414,6 +414,42 @@ held variable that does not reach its stage's channel or that no earlier stage f
 for the final fit, that stopped at its optimizer's iteration cap (`status` `:iterations`); a report, the
 fit and the file unchanged.
 
+**`progress`** (Phase 4.K, Step 4.K.1, spec D4 to D10; [OQ-61](../../dev/open_questions.md#oq-61)): a key
+of `[optimizer.levenberg_marquardt]`, `[optimizer.lbfgs]` and `[optimizer.noisy_descent]`, an integer
+≥ 0, default 0, filled into the effective deck wherever the deck gives the table:
+
+```toml
+[optimizer.levenberg_marquardt]
+progress = 10
+
+[optimizer.lbfgs]
+progress = 10
+```
+
+With `progress = n > 0` the optimizer prints to stdout a header, a line at every recorded row whose
+index is a multiple of n (the start included: every accepted step for `levenberg_marquardt`, every
+iteration for `lbfgs`, every step for `noisy_descent`) and a final line, each flushed as it is written,
+so a log redirected to a file shows the fit as it runs. On the Phase 4.K test fixture at `progress = 3`:
+
+```
+progress levenberg_marquardt: start npixels=320 ntheta=20 cap=2000 every=3 g_abstol=1.00e-08
+progress levenberg_marquardt: it=0 chi2=1.00327e+08 chi2/n=313521.4498 R=0 obj=1.00327e+08 dchi2=+0.000e+00 rate=+0.000e+00 gmax=3.73e+06 nb=0/20 t=0.0s acc=0 rej=0 mu=1.59e+02
+progress levenberg_marquardt: it=7 chi2=142053 chi2/n=443.9160 R=972.8 obj=142054 dchi2=-1.002e+08 rate=-3.339e+07 gmax=1.49e+05 nb=0/20 t=0.0s s/it=0.00 acc=3 rej=4 mu=6.04e+03
+progress levenberg_marquardt: done status=x_tolerance converged=true it=13 chi2=1.78132e-24 chi2/n=0.0000 obj=1.79354e-24 t=0.0s
+```
+
+`it` is the row's iteration (for `levenberg_marquardt` the trial step's number, which skips the rejected
+ones); `chi2`, `chi2/n` (over the pixel count), `R` and `obj` the row's; `dchi2` the change in χ² since
+the row 20 rows earlier (or the first row) and `rate` that change per row; `gmax` the largest gradient
+entry, which the optimizer's gradient stop compares with the header's `g_abstol`; `nb` the fitted
+entries within `BOUND_PROXIMITY_TOL` of a bound; `t` the seconds since the fit started and `s/it` the
+seconds per iteration; then `acc`, `rej` and the damping `mu` for `levenberg_marquardt`, or the best
+objective so far and the step's noise for `noisy_descent`. The final line gives the result's status, χ²
+and objective. A staged deck (above) prints `progress: stage "<name>"` before each stage whose optimizer
+prints, and `progress: joint` before the joint fit. A negative value is refused by `read_deck`. The lines
+change nothing about the fit: every result is the same, bitwise, with them on or off. Nothing is added to
+the result file, and the key is not a version bump.
+
 **`pixel_integration`** (Phase 4.F, Step 4.F.2, spec D12): an `[instrument]` or
 `[channel.<name>.instrument]` key, `pixel_integration = { subsamples = N }`, a positive integer,
 builds `PixelIntegration(subsamples = N)` (`instrument.md` Section 7). Without the key no

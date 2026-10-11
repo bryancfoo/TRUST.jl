@@ -8,6 +8,7 @@
 
 import Optim
 using LinearAlgebra: dot, norm
+using Printf: @sprintf
 using Random: Xoshiro, randn, randn!
 
 # ------------------------------------------------------------------------------------------
@@ -198,13 +199,110 @@ function _build_result(problem::AbstractFitProblem, theta::AbstractVector{Float6
 end
 
 # ------------------------------------------------------------------------------------------
+# Phase 4.K: the progress lines (OQ-61)
+# ------------------------------------------------------------------------------------------
+
+"""
+    PROGRESS_WINDOW
+
+`20`: how many recorded rows back a progress line's `dchi2` reaches (Phase 4.K spec D6,
+[OQ-61](../../dev/open_questions.md#oq-61) item 3: the user's "d(chi^2) over the last 20
+iterations"). A module constant, not a deck key.
+"""
+const PROGRESS_WINDOW = 20
+
+"""
+    _progress_header(io, name, problem, cap, every, g_abstol) -> nothing
+
+The line a `solve` with `progress = every > 0` prints before its first iteration (Phase 4.K spec D6,
+[OQ-61](../../dev/open_questions.md#oq-61) item 3):
+
+    progress <name>: start npixels=<N> ntheta=<M> cap=<cap> every=<every> g_abstol=<g>
+
+`g_abstol` (`%.2e`) is the threshold the optimizer's gradient stop compares `gmax` with; `nothing`
+(the explorer, which has no gradient stop) leaves the field out. One `print` of the assembled line,
+then `flush` (`conventions.md` 8.6 (iv)).
+"""
+function _progress_header(io::IO, name::AbstractString, problem::AbstractFitProblem, cap::Integer,
+    every::Integer, g_abstol::Union{Nothing,Real})
+    gtext = g_abstol === nothing ? "" : @sprintf(" g_abstol=%.2e", g_abstol)
+    line = @sprintf("progress %s: start npixels=%d ntheta=%d cap=%d every=%d%s\n", name,
+        problem.npixels, problem.pspec.ntheta, cap, every, gtext)
+    print(io, line)
+    flush(io)
+    return nothing
+end
+
+"""
+    _progress_line(io, name, problem, trajectory, i, y, gmax, t0; acc, rej, mu, best, noise) -> nothing
+
+The line for the recorded row of index `i` (`0` the start; the row is `trajectory[i + 1]`, already
+recorded), Phase 4.K spec D6, [OQ-61](../../dev/open_questions.md#oq-61) item 3:
+
+    progress <name>: it=<it> chi2=<χ²> chi2/n=<χ²/N> R=<R> obj=<𝒪> dchi2=<Δ> rate=<Δ/w> gmax=<g> nb=<b>/<M> t=<t>s s/it=<t/it>
+
+followed by ` acc=<a> rej=<r> mu=<μ>` when `mu` is given (`LevenbergMarquardt`) or ` best=<𝒪_best>
+noise=<s>` when `best` is given (`NoisyGradientDescent`). `it` is the row's `iteration`; `chi2`, `R`
+and `obj` the row's own; `chi2/n` its χ² over `problem.npixels`; `dchi2` its χ² minus that of the row
+`w = min(i, PROGRESS_WINDOW)` rows earlier, and `rate = dchi2 / w`, both `0.0` at `i = 0`; `gmax` the
+caller's ∞-norm of ∇_y 𝒪 at `y`, as its own stop sees it; `nb` `_count_near_bound(problem.pspec, y)`
+over `ntheta`; `t` the seconds since `t0`; `s/it` `t / it`, left out at `it = 0`. Formats: `%.6g` for
+χ², 𝒪 and `best`, `%.4f` for χ²/n, `%.4g` for R, `%+.3e` for `dchi2` and `rate`, `%.2e` for `gmax`,
+`mu` and `noise`, `%.1f` for `t`, `%.2f` for `s/it`. It reads the trajectory, `y` and the numbers it is
+given and evaluates nothing of the problem but `_count_near_bound`, a pure walk over `y`. One `print`
+of the assembled line, then `flush`.
+"""
+function _progress_line(io::IO, name::AbstractString, problem::AbstractFitProblem,
+    trajectory::AbstractVector{_TRAJECTORY_ROW}, i::Integer, y::AbstractVector, gmax::Real, t0::Real;
+    acc::Union{Nothing,Integer}=nothing, rej::Union{Nothing,Integer}=nothing,
+    mu::Union{Nothing,Real}=nothing, best::Union{Nothing,Real}=nothing,
+    noise::Union{Nothing,Real}=nothing)
+    row = trajectory[i+1]
+    w = min(i, PROGRESS_WINDOW)
+    dchi2 = w == 0 ? 0.0 : row.chi2 - trajectory[i-w+1].chi2
+    rate = w == 0 ? 0.0 : dchi2 / w
+    t = time() - t0
+    it = Int(row.iteration)
+    sit = it == 0 ? "" : @sprintf(" s/it=%.2f", t / it)
+    tail = mu !== nothing ? @sprintf(" acc=%d rej=%d mu=%.2e", acc, rej, mu) :
+           best !== nothing ? @sprintf(" best=%.6g noise=%.2e", best, noise) : ""
+    line = @sprintf("progress %s: it=%d chi2=%.6g chi2/n=%.4f R=%.4g obj=%.6g dchi2=%+.3e rate=%+.3e gmax=%.2e nb=%d/%d t=%.1fs%s%s\n",
+        name, it, row.chi2, row.chi2 / problem.npixels, row.R, row.objective, dchi2, rate, gmax,
+        _count_near_bound(problem.pspec, y), problem.pspec.ntheta, t, sit, tail)
+    print(io, line)
+    flush(io)
+    return nothing
+end
+
+"""
+    _progress_final(io, result::FitResult) -> nothing
+
+The line a `solve` with `progress > 0` prints at every stop, once it has its `FitResult` (Phase 4.K
+spec D6, [OQ-61](../../dev/open_questions.md#oq-61) item 3):
+
+    progress <name>: done status=<status> converged=<bool> it=<it> chi2=<χ²> chi2/n=<χ²/N> obj=<𝒪> t=<t>s
+
+`name` the result's `optimizer`; `it` the last recorded row's `iteration`; `chi2`, `chi2/n`, `obj` and
+`t` the result's own `chi2`, `chi2 / npixels`, `objective` and `elapsed`: the fit as returned, which for
+`NoisyGradientDescent` is its best iterate, not its last row. One `print`, then `flush`.
+"""
+function _progress_final(io::IO, result::FitResult)
+    line = @sprintf("progress %s: done status=%s converged=%s it=%d chi2=%.6g chi2/n=%.4f obj=%.6g t=%.1fs\n",
+        result.optimizer, result.status, result.converged, Int(result.trajectory[end].iteration),
+        result.chi2, result.chi2 / result.npixels, result.objective, result.elapsed)
+    print(io, line)
+    flush(io)
+    return nothing
+end
+
+# ------------------------------------------------------------------------------------------
 # D27: LBFGS
 # ------------------------------------------------------------------------------------------
 
 """
     LBFGS(; m = 10, f_abstol_per_pixel = 1e-4, patience = 5, g_abstol_per_pixel = 1e-6,
           x_reltol = 0.0, iterations = 20_000, time_limit = NaN,
-          precondition = true, precond_refresh = 25)
+          precondition = true, precond_refresh = 25, progress = 0)
 
 Optim.jl's L-BFGS, the polisher (foo2026 Section III.D phase 2; [OQ-20](../../dev/open_questions.md#oq-20)).
 `m` is Optim's LBFGS memory. **The convergence criterion is stated per pixel** (Step 3.C.2, D30),
@@ -254,7 +352,11 @@ loop pass); a degenerate diagonal at a refresh (`_gauss_newton_floor` returning 
 `P` unchanged, and a degenerate diagonal at the very first build runs the fit unpreconditioned
 (`P = nothing`, `scaleinvH0 = true`, Optim's own default) rather than dividing by nothing.
 
-Spec D27, D30, D31, D32, D36, D37.
+**`progress`** (Phase 4.K spec D4, [OQ-61](../../dev/open_questions.md#oq-61)): `0`, the default, prints
+nothing; `n > 0` makes `solve` print a header, a line at every `n`th recorded iteration (the start
+included) and a final line to its `progress_io`, each flushed (`solve`'s docstring). Refused below 0.
+
+Spec D27, D30, D31, D32, D36, D37; Phase 4.K spec D4.
 """
 Base.@kwdef struct LBFGS <: AbstractOptimizer
     m::Int = 10
@@ -266,11 +368,18 @@ Base.@kwdef struct LBFGS <: AbstractOptimizer
     time_limit::Float64 = NaN
     precondition::Bool = true
     precond_refresh::Int = 25
+    progress::Int = 0
+    function LBFGS(m, f_abstol_per_pixel, patience, g_abstol_per_pixel, x_reltol, iterations,
+        time_limit, precondition, precond_refresh, progress)
+        progress >= 0 || throw(ArgumentError("LBFGS: progress must be an integer ≥ 0; got $progress"))
+        return new(m, f_abstol_per_pixel, patience, g_abstol_per_pixel, x_reltol, iterations,
+            time_limit, precondition, precond_refresh, progress)
+    end
 end
 
 """
     solve(problem::FitProblem, opt::LBFGS; start = flatten(problem.pspec),
-          g_trace::Union{Nothing,Vector} = nothing) -> FitResult
+          g_trace::Union{Nothing,Vector} = nothing, progress_io::IO = stdout) -> FitResult
 
 Runs Optim's L-BFGS on `objective`/`_objective_and_gradient!` (D26) through
 `Optim.OnceDifferentiable(f, g!, fg!, start)` with a **two**-argument `fg!(G, y) -> F` (D2, D27):
@@ -327,10 +436,21 @@ floor binds on at each refresh"). A degenerate refresh that leaves `P` untouched
 Not part of D36/D37's own signature (given as a reporting requirement, not a hook); Level 3's
 addition, on the same footing as `g_trace` above, flagged under rule 11 zero.
 
-Spec D27, D13, D30, D31, D34, D36, D37.
+**The progress lines** (Phase 4.K spec D5 to D7, [OQ-61](../../dev/open_questions.md#oq-61)): with
+`opt.progress = n > 0`, a header before the preconditioner's first build, a line from the callback at
+every recorded iteration whose index is a multiple of `n` (the start included) and a final line once the
+`FitResult` is built, each one `print` and one `flush` to `progress_io`, which is looked up at the call
+(`stdout` by default, so a `redirect_stdout` around the call catches it). `gmax` is
+`maximum(abs, state.g_x)`, the quantity Optim's gradient stop compares with `g_abstol`; `nb` counts the
+near-bound entries of `state.x`. Nothing is evaluated for them that the fit does not already compute,
+`_count_near_bound` aside, so every `FitResult` field but `elapsed` is the same, bitwise, with the lines
+on and off.
+
+Spec D27, D13, D30, D31, D34, D36, D37; Phase 4.K spec D5 to D7.
 """
 function solve(problem::AbstractFitProblem, opt::LBFGS; start::AbstractVector=flatten(problem.pspec),
-    g_trace::Union{Nothing,Vector}=nothing, precond_trace::Union{Nothing,Vector}=nothing)
+    g_trace::Union{Nothing,Vector}=nothing, precond_trace::Union{Nothing,Vector}=nothing,
+    progress_io::IO=stdout)
     t0 = time()
     y0 = Vector{Float64}(start)
 
@@ -350,12 +470,18 @@ function solve(problem::AbstractFitProblem, opt::LBFGS; start::AbstractVector=fl
                 gnorm_2=sqrt(sum(abs2, state.g_x)),
                 near_bound=_count_near_bound(problem.pspec, state.x)))
         end
+        if opt.progress > 0 && iter_counter[] % opt.progress == 0
+            _progress_line(progress_io, _optimizer_short_name(opt), problem, trajectory, iter_counter[],
+                state.x, maximum(abs, state.g_x), t0)
+        end
         iter_counter[] += 1
         return false
     end
 
     f_abstol = opt.f_abstol_per_pixel * problem.npixels
     g_abstol = opt.g_abstol_per_pixel * problem.npixels
+    opt.progress > 0 && _progress_header(progress_io, _optimizer_short_name(opt), problem,
+        opt.iterations, opt.progress, g_abstol)
 
     od = Optim.OnceDifferentiable(f, g!, fg!, y0)
 
@@ -433,9 +559,11 @@ function solve(problem::AbstractFitProblem, opt::LBFGS; start::AbstractVector=fl
     end
 
     elapsed = time() - t0
-    return _build_result(problem, theta, Optim.minimum(res), trajectory, converged,
+    result = _build_result(problem, theta, Optim.minimum(res), trajectory, converged,
         status, Optim.iterations(res), Optim.f_calls(res), Optim.g_calls(res), elapsed, "lbfgs";
         termination=termination)
+    opt.progress > 0 && _progress_final(progress_io, result)
+    return result
 end
 
 Base.show(io::IO, opt::LBFGS) = print(io, "LBFGS(m = ", opt.m,
@@ -449,7 +577,7 @@ Base.show(io::IO, opt::LBFGS) = print(io, "LBFGS(m = ", opt.m,
 """
     LevenbergMarquardt(; iterations = 2000, g_abstol = 1e-8, x_reltol = 1e-10, mu_init = 1e-3,
                         cgls_tol = 1e-6, cgls_maxiter = 2000, seed = 20260908,
-                        precondition = true)
+                        precondition = true, progress = 0)
 
 Levenberg-Marquardt, expected fastest near the minimum for a least-squares objective
 ([OQ-20](../../dev/open_questions.md#oq-20)). `iterations` caps the outer loop; `g_abstol` stops
@@ -476,7 +604,11 @@ paragraph of `solve`'s own docstring below describes; `false` passes `precond = 
 solve. Deck-settable like every other field, on the same footing as `LBFGS`'s own
 `precondition::Bool`.
 
-Spec D28, D32, D41.
+**`progress`** (Phase 4.K spec D4, [OQ-61](../../dev/open_questions.md#oq-61)): `0`, the default, prints
+nothing; `n > 0` makes `solve` print a header, a line at every `n`th accepted step (the start included)
+and a final line to its `progress_io`, each flushed (`solve`'s docstring). Refused below 0.
+
+Spec D28, D32, D41; Phase 4.K spec D4.
 """
 Base.@kwdef struct LevenbergMarquardt <: AbstractOptimizer
     iterations::Int = 2000
@@ -487,6 +619,14 @@ Base.@kwdef struct LevenbergMarquardt <: AbstractOptimizer
     cgls_maxiter::Int = 2000
     seed::Int = 20260908
     precondition::Bool = true
+    progress::Int = 0
+    function LevenbergMarquardt(iterations, g_abstol, x_reltol, mu_init, cgls_tol, cgls_maxiter, seed,
+        precondition, progress)
+        progress >= 0 || throw(ArgumentError(
+            "LevenbergMarquardt: progress must be an integer ≥ 0; got $progress"))
+        return new(iterations, g_abstol, x_reltol, mu_init, cgls_tol, cgls_maxiter, seed, precondition,
+            progress)
+    end
 end
 
 """
@@ -556,7 +696,7 @@ end
 
 """
     solve(problem::FitProblem, opt::LevenbergMarquardt; start = flatten(problem.pspec),
-          cgls_iterations::Union{Nothing,Vector{Int}} = nothing) -> FitResult
+          cgls_iterations::Union{Nothing,Vector{Int}} = nothing, progress_io::IO = stdout) -> FitResult
 
 Levenberg-Marquardt on the unconstrained `y` of the logit transform, on top of Step 3.2's block
 Jacobian (D28). Working with `F(y) = 1/2 ‖r_full‖^2 = 𝒪/2` and `gvec = Jᵀ_full r_full`, each trial
@@ -611,15 +751,28 @@ against `mu_trace[k]` shows what iteration `k`'s accept/reject did to it), letti
 Nielsen's update directly. Neither is part of D28's own signature; Level 3's additions, flagged
 under rule 11 zero, the same footing as `jacobian`'s own `chunk` keyword (chunk 6).
 
-Spec D28.
+**The progress lines** (Phase 4.K spec D5 to D7, [OQ-61](../../dev/open_questions.md#oq-61)): with
+`opt.progress = n > 0`, a header before the first Jacobian, a line at every recorded row (the start and
+each accepted step) whose index is a multiple of `n`, and a final line once the `FitResult` is built,
+each one `print` and one `flush` to `progress_io`, which is looked up at the call (`stdout` by default).
+On a row, `it` is the outer counter `k`, with gaps where steps were rejected; `acc` the accepted steps
+so far (the row's index) and `rej = k - acc` the rejected ones, so `acc + rej = it`; `mu` the damping
+going into the next trial step; `gmax` `2 maximum(abs, gvec)`, the quantity the gradient stop compares
+with `opt.g_abstol`. Nothing is evaluated for them that the fit does not already compute,
+`_count_near_bound` aside, so every `FitResult` field but `elapsed` is the same, bitwise, with the lines
+on and off.
+
+Spec D28; Phase 4.K spec D5 to D7.
 """
 function solve(problem::AbstractFitProblem, opt::LevenbergMarquardt;
     start::AbstractVector=flatten(problem.pspec),
     cgls_iterations::Union{Nothing,Vector{Int}}=nothing,
-    mu_trace::Union{Nothing,Vector{Float64}}=nothing)
+    mu_trace::Union{Nothing,Vector{Float64}}=nothing, progress_io::IO=stdout)
     t0 = time()
     y = Vector{Float64}(start)
     ntheta = length(y)
+    opt.progress > 0 && _progress_header(progress_io, _optimizer_short_name(opt), problem,
+        opt.iterations, opt.progress, opt.g_abstol)
 
     r, Jac = _residuals_jacobian(problem, y)
     F = 0.5 * sum(abs2, r)
@@ -639,6 +792,8 @@ function solve(problem::AbstractFitProblem, opt::LevenbergMarquardt;
 
     trajectory = _TRAJECTORY_ROW[(iteration=0.0, objective=2 * F, chi2=_chi2_from_r(problem, r),
         R=_R_value(problem, y))]
+    opt.progress > 0 && _progress_line(progress_io, _optimizer_short_name(opt), problem, trajectory, 0,
+        y, maximum(abs, gvec) * 2, t0; acc=0, rej=0, mu=mu)
 
     status = :iterations
     converged = false
@@ -681,6 +836,11 @@ function solve(problem::AbstractFitProblem, opt::LevenbergMarquardt;
 
             push!(trajectory, (iteration=Float64(k), objective=2 * F,
                 chi2=_chi2_from_r(problem, r), R=_R_value(problem, y)))
+            if opt.progress > 0
+                i = length(trajectory) - 1
+                i % opt.progress == 0 && _progress_line(progress_io, _optimizer_short_name(opt), problem,
+                    trajectory, i, y, maximum(abs, gvec) * 2, t0; acc=i, rej=k - i, mu=mu)
+            end
 
             if xtol_ok
                 status = :x_tolerance
@@ -703,8 +863,10 @@ function solve(problem::AbstractFitProblem, opt::LevenbergMarquardt;
     end
 
     elapsed = time() - t0
-    return _build_result(problem, y, 2 * F, trajectory, converged, status, iters_run,
+    result = _build_result(problem, y, 2 * F, trajectory, converged, status, iters_run,
         f_calls_count, g_calls_count, elapsed, "levenberg_marquardt")
+    opt.progress > 0 && _progress_final(progress_io, result)
+    return result
 end
 
 Base.show(io::IO, opt::LevenbergMarquardt) = print(io, "LevenbergMarquardt(iterations = ",
@@ -716,7 +878,7 @@ Base.show(io::IO, opt::LevenbergMarquardt) = print(io, "LevenbergMarquardt(itera
 
 """
     NoisyGradientDescent(; steps = 2000, step_size = 1.0e-1, noise = 0.1, noise_decay = 500.0,
-                          seed = 1)
+                          seed = 1, progress = 0)
 
 Normalized gradient descent on `𝒪` in the unconstrained `y` of the logit transform, bumped by
 Gaussian noise of decaying amplitude, the explorer of foo2026 Section III.D's two-phase routine
@@ -756,7 +918,11 @@ at `0.91`/`0.91` of its start), and `1e-1` is the best value measured on it (`0.
 raw gradient is used in its place, which at an exactly-zero gradient is itself a zero step -- the
 noise kick still moves the iterate (`conventions.md` 5.14: both branches return the same type).
 
-Spec D29, D38.
+**`progress`** (Phase 4.K spec D4, [OQ-61](../../dev/open_questions.md#oq-61)): `0`, the default, prints
+nothing; `n > 0` makes `solve` print a header, a line at every `n`th step (the start included) and a
+final line to its `progress_io`, each flushed (`solve`'s docstring). Refused below 0.
+
+Spec D29, D38; Phase 4.K spec D4.
 """
 Base.@kwdef struct NoisyGradientDescent <: AbstractOptimizer
     steps::Int = 2000              # provisional
@@ -764,11 +930,17 @@ Base.@kwdef struct NoisyGradientDescent <: AbstractOptimizer
     noise::Float64 = 0.1           # provisional: s0
     noise_decay::Float64 = 500.0   # provisional: tau, in steps
     seed::Int = 1                  # provisional
+    progress::Int = 0              # Phase 4.K: print a line every `progress` steps, 0 = never
+    function NoisyGradientDescent(steps, step_size, noise, noise_decay, seed, progress)
+        progress >= 0 || throw(ArgumentError(
+            "NoisyGradientDescent: progress must be an integer ≥ 0; got $progress"))
+        return new(steps, step_size, noise, noise_decay, seed, progress)
+    end
 end
 
 """
     solve(problem::FitProblem, opt::NoisyGradientDescent; start = flatten(problem.pspec),
-          y_trace::Union{Nothing,Vector} = nothing) -> FitResult
+          y_trace::Union{Nothing,Vector} = nothing, progress_io::IO = stdout) -> FitResult
 
 Runs `opt.steps` steps of the update in `NoisyGradientDescent`'s own docstring, seeded from
 `Xoshiro(opt.seed)` so two runs are bitwise identical (OP6). **Returns the best iterate seen,
@@ -787,11 +959,22 @@ never `y` or `x`, so without it there is no way to see the optimizer's own itera
 -- OP9 reads this to check that every iterate the optimizer actually takes stays inside its
 bounds, which replaying the update formula in a test can't do (Pitfall 13).
 
-Spec D29.
+**The progress lines** (Phase 4.K spec D5 to D7, [OQ-61](../../dev/open_questions.md#oq-61)): with
+`opt.progress = n > 0`, a header before the first evaluation (no `g_abstol`: the explorer has no
+gradient stop), a line at every step whose index is a multiple of `n` (the start included) and a final
+line once the `FitResult` is built, each one `print` and one `flush` to `progress_io`, which is looked
+up at the call (`stdout` by default). `gmax` is `maximum(abs, g)` and `nb` the near-bound count, both at
+the step's own iterate; `best` the best objective so far; `noise` the `s_k` of the step just taken (`0`
+at the start). The trajectory is preallocated, so a line reads its row by index, never `trajectory[end]`.
+Nothing is evaluated for them that the fit does not already compute, `_count_near_bound` aside, and no
+random number is drawn, so every `FitResult` field but `elapsed` is the same, bitwise, with the lines on
+and off.
+
+Spec D29; Phase 4.K spec D5 to D7.
 """
 function solve(problem::AbstractFitProblem, opt::NoisyGradientDescent;
     start::AbstractVector=flatten(problem.pspec),
-    y_trace::Union{Nothing,Vector}=nothing)
+    y_trace::Union{Nothing,Vector}=nothing, progress_io::IO=stdout)
     t0 = time()
     ntheta = problem.pspec.ntheta
     y = Vector{Float64}(start)
@@ -800,11 +983,15 @@ function solve(problem::AbstractFitProblem, opt::NoisyGradientDescent;
     rng = Xoshiro(opt.seed)
 
     trajectory = Vector{_TRAJECTORY_ROW}(undef, opt.steps + 1)
+    opt.progress > 0 && _progress_header(progress_io, _optimizer_short_name(opt), problem, opt.steps,
+        opt.progress, nothing)
 
     Ov, chi2v, Rval = _eval_all!(g, problem, y)
     trajectory[1] = (iteration=0.0, objective=Ov, chi2=chi2v, R=Rval)
     best_obj = Ov
     best_y = copy(y)
+    opt.progress > 0 && _progress_line(progress_io, _optimizer_short_name(opt), problem, trajectory, 0,
+        y, maximum(abs, g), t0; best=best_obj, noise=0.0)
 
     for k in 1:opt.steps
         randn!(rng, xi)
@@ -820,11 +1007,16 @@ function solve(problem::AbstractFitProblem, opt::NoisyGradientDescent;
             best_obj = Ov
             best_y = copy(y)
         end
+        opt.progress > 0 && k % opt.progress == 0 && _progress_line(progress_io,
+            _optimizer_short_name(opt), problem, trajectory, k, y, maximum(abs, g), t0;
+            best=best_obj, noise=sk)
     end
 
     elapsed = time() - t0
-    return _build_result(problem, best_y, best_obj, trajectory, false, :steps, opt.steps,
+    result = _build_result(problem, best_y, best_obj, trajectory, false, :steps, opt.steps,
         opt.steps + 1, opt.steps + 1, elapsed, "noisy_descent")
+    opt.progress > 0 && _progress_final(progress_io, result)
+    return result
 end
 
 Base.show(io::IO, opt::NoisyGradientDescent) = print(io, "NoisyGradientDescent(steps = ",
@@ -837,6 +1029,12 @@ Base.show(io::IO, opt::NoisyGradientDescent) = print(io, "NoisyGradientDescent(s
 _optimizer_short_name(::LBFGS) = "lbfgs"
 _optimizer_short_name(::LevenbergMarquardt) = "levenberg_marquardt"
 _optimizer_short_name(::NoisyGradientDescent) = "noisy_descent"
+
+# Phase 4.K spec D8 (OQ-61 item 5): whether an optimizer prints progress lines, which decides whether
+# _staged_fit prints a stage's banner. A sequence's method is below, after its type.
+_progress_on(opt::LBFGS) = opt.progress > 0
+_progress_on(opt::LevenbergMarquardt) = opt.progress > 0
+_progress_on(opt::NoisyGradientDescent) = opt.progress > 0
 
 """
     OptimizerSequence(members::AbstractOptimizer...)
@@ -860,17 +1058,26 @@ function _optimizer_short_name(opt::OptimizerSequence)
     return join((_optimizer_short_name(m) for m in opt.members), "_")
 end
 
+_progress_on(opt::OptimizerSequence) = any(_progress_on, opt.members)
+
 """
-    solve(problem::FitProblem, opt::OptimizerSequence; start = flatten(problem.pspec)) -> FitResult
+    solve(problem::FitProblem, opt::OptimizerSequence; start = flatten(problem.pspec),
+          progress_io::IO = stdout) -> FitResult
 
 Runs `opt.members` in order (D30), each from the previous member's `FitResult.theta` (its best
 iterate). OP10 is the row this warm-start discipline is written for: the second member's first
 trajectory entry is the first member's **best**, not its last.
 
-Spec D30.
+**The progress lines** (Phase 4.K spec D8, [OQ-61](../../dev/open_questions.md#oq-61) item 4):
+`progress_io` (looked up at the call, `stdout` by default) is passed to every member, and each member
+with `progress > 0` prints its own header, lines and final line under its own name, its `it` the
+member's own row index, not the combined trajectory's offset iteration. The sequence prints nothing of
+its own.
+
+Spec D30; Phase 4.K spec D8.
 """
 function solve(problem::AbstractFitProblem, opt::OptimizerSequence;
-    start::AbstractVector=flatten(problem.pspec))
+    start::AbstractVector=flatten(problem.pspec), progress_io::IO=stdout)
     t0 = time()
     combined = _TRAJECTORY_ROW[]
     current_start = Vector{Float64}(start)
@@ -879,7 +1086,7 @@ function solve(problem::AbstractFitProblem, opt::OptimizerSequence;
     total_g_calls = 0
     local result::FitResult
     for member in opt.members
-        result = solve(problem, member; start=current_start)
+        result = solve(problem, member; start=current_start, progress_io=progress_io)
         for entry in result.trajectory
             push!(combined, (iteration=entry.iteration + offset, objective=entry.objective,
                 chi2=entry.chi2, R=entry.R))

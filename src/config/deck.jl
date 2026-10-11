@@ -956,6 +956,11 @@ function _validate_optimizer_section(given::AbstractDict)
         entry = given[key]
         entry isa AbstractDict || throw(ArgumentError("read_deck: \"optimizer.$key\" must be a table"))
         out[key] = _fill_option_fields(ctor, entry, empty_names, "optimizer.$key", false)
+        # Phase 4.K spec D10 (OQ-61 item 1): refused here, at read time, as the constructor refuses it;
+        # a non-integer was already refused by _fill_option_field's integer check
+        out[key]["progress"] >= 0 || throw(ArgumentError(
+            "read_deck: key \"progress\" in section \"optimizer.$key\" must be an integer ≥ 0; " *
+            "got $(out[key]["progress"])"))
     end
     if procedure == STAGED_PROCEDURE
         entry = get(given, "staged", Dict{String,Any}())
@@ -2138,6 +2143,12 @@ that stage's series (the warm start); and a variable's joint start comes from th
 fitted it, unless `start_from` names a stage, which must fit it. Refused before any stage runs: a
 held variable that does not reach its stage's channel, or that no earlier stage fits; a `start_from`
 stage that holds its variable. Without `sequence` every step is the one above, unchanged.
+
+**The progress banners** (Phase 4.K spec D9, [OQ-61](../../dev/open_questions.md#oq-61) item 5): before
+a stage's `solve`, `progress: stage "<name>"`, and before the joint `solve`, `progress: joint`, each one
+`print` to `stdout` and one `flush`, when that optimizer prints progress lines (`_progress_on`: any
+member with `progress > 0`); nothing otherwise. Each stage's optimizer is built from its stage deck's
+own option tables, which `_stage_deck` copies, so the key reaches it. `polish` prints nothing.
 """
 function _staged_fit(deck::Deck;
     stage_procedure=deck.sections["optimizer"]["staged"]["stage_procedure"],
@@ -2217,6 +2228,7 @@ function _staged_fit(deck::Deck;
             end
             _build_problem(sdeck; held=held_c, start=warm_c)
         end
+        _progress_on(opt_c) && (print(stdout, "progress: stage \"$(names[c])\"\n"); flush(stdout))
         r_c = solve(p_c, opt_c; start=start_c)
         held_names = String[v.name for v in p_c.pspec.variables if v.held !== nothing]
         push!(stages, (name=names[c], deck=sdeck, problem=p_c, result=r_c, frozen=frozen[c], held=held_names))
@@ -2233,6 +2245,7 @@ function _staged_fit(deck::Deck;
         push!(values, v.name => (v.time_varying ? row : row[1]))
     end
     start = flatten(pspec, values)
+    _progress_on(joint_optimizer) && (print(stdout, "progress: joint\n"); flush(stdout))
     joint = solve(problem, joint_optimizer; start=start)
     pol = polish(problem, joint; tol=polish_tol)
 

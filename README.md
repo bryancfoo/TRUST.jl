@@ -219,6 +219,16 @@ the window, one scale per camera biases the fitted density by 17 % (median) and 
 recovers it to 1.7 %, the un-ramped fit's own accuracy. Without the new keys every fit is exactly what
 it was.
 
+**Phase 4.K (progress lines during a fit) is complete.** A long fit whose output goes to a file can now
+show how it is going while it runs: `progress = 10` in `[optimizer.levenberg_marquardt]`,
+`[optimizer.lbfgs]` or `[optimizer.noisy_descent]` prints a line every ten iterations with the iteration,
+χ² and χ² per pixel, the change in χ² over the last 20 iterations and its rate, the largest gradient entry
+beside the optimizer's own stopping threshold, the number of fitted values at a bound and the time per
+iteration, each line written out at once, then a final line with the fit's status; a staged deck names
+each stage before it runs. The lines go to standard output (or to any stream passed to `solve` as
+`progress_io`) and change nothing about the fit: every result is the same, bitwise, with them on or off.
+Without the key nothing is printed.
+
 ## Installing and testing
 
 ```

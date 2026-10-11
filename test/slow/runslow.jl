@@ -18,6 +18,7 @@ using Test
     @safetestset "streak averaging (slow)" begin include("test_average.jl") end
     @safetestset "two-channel problem (slow)" begin include("test_two_channel.jl") end
     @safetestset "staged fit (slow)" begin include("test_deck_staged.jl") end
+    @safetestset "progress (slow)" begin include("test_progress.jl") end
     @safetestset "pixel integration (slow)" begin include("test_pixel_integration.jl") end
     @safetestset "resonance width (slow)" begin include("test_deck_resonance.jl") end
     @safetestset "tabulated k-smearing (slow)" begin include("test_tabulated_k_smearing.jl") end
