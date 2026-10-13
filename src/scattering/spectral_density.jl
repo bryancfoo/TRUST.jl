@@ -18,6 +18,12 @@ threaded down so the convective gain of Step 2.3b can reuse it rather than calli
 second time (spec D39). `spectral_density` stays the pure structure factor of rule 1.7 either
 way — the sum-rule test of `conventions.md` 8.5 depends on it.
 
+`Z_i` is the ion species' `charge`, a real number since Phase 4.J. With charge fractions its weight
+`Z_i² n_i / n_e` is `Z_i · fraction_i`, as is its share of `ε`, so charge states of one element
+sharing T, u, mass and shape are reproduced exactly by one species of charge ⟨Z²⟩/⟨Z⟩ and their summed
+fraction; that is what a non-integer charge is (`conventions.md` 1.7,
+[OQ-60](../../dev/open_questions.md#oq-60)).
+
 Sheffield Eq. 5.1.2 (one electron, one ion species), generalized to any number of species by
 `conventions.md` 1.7 ([OQ-6](../../dev/open_questions.md#oq-6));
 `docs/derivations/spectral_density.md`.

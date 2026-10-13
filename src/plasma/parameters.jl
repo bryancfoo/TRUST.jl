@@ -16,8 +16,9 @@ thermal_speed(sp::Union{Species,SpeciesSpec}) = sqrt(2 * sp.T / sp.mass)
 """
     plasma_frequency(sp::Species) -> FT
 
-The species plasma frequency `ω_p = √(n q² / (ε₀ m))`, with `q = charge·e`. `sp.n` is in m⁻³,
-`sp.mass` in kg; returns rad/s.
+The species plasma frequency `ω_p = √(n q² / (ε₀ m))`, with `q = charge·e`, `charge` the species'
+charge number, a real number since Phase 4.J (`-1` for an electron;
+[OQ-60](../../dev/open_questions.md#oq-60)). `sp.n` is in m⁻³, `sp.mass` in kg; returns rad/s.
 
 `conventions.md` 1.6.
 """
@@ -26,8 +27,8 @@ plasma_frequency(sp::Species) = sqrt(sp.n * (sp.charge * ELEMENTARY_CHARGE)^2 / 
 """
     debye_length(sp::Species) -> FT
 
-The species Debye length `λ_D = √(ε₀ T / (n q²))`, with `q = charge·e`. `sp.T` is in J, `sp.n`
-in m⁻³; returns m.
+The species Debye length `λ_D = √(ε₀ T / (n q²))`, with `q = charge·e`, `charge` a real number since
+Phase 4.J. `sp.T` is in J, `sp.n` in m⁻³; returns m.
 
 `conventions.md` 1.6.
 """

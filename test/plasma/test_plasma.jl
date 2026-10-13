@@ -150,8 +150,9 @@ end
     FT = typeof(p.n_e)
     @test typeof(p.electrons["e"].T) === FT
     @test typeof(p.ions["D"].T) === FT
-    @test p.electrons["e"].charge isa Int
-    @test p.ions["D"].charge isa Int
+    # amended 2026-10-10 (Phase 4.J spec D4): the charge is FT, like the other scalar fields
+    @test p.electrons["e"].charge isa FT
+    @test p.ions["D"].charge isa FT
 end
 
 @testset "SD10: zeff" begin

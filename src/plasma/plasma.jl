@@ -29,13 +29,15 @@ _spec_eltype(::SpeciesSpec{FT}) where {FT} = FT
 function _resolve_electron(sp::SpeciesSpec, n_e::FT) where {FT}
     n = FT(sp.fraction) * n_e
     F = typeof(sp.f)
-    return Species{FT,F}(sp.name, FT(sp.mass), sp.charge, FT(sp.u), FT(sp.T), sp.f, FT(sp.fraction), n)
+    return Species{FT,F}(sp.name, FT(sp.mass), FT(sp.charge), FT(sp.u), FT(sp.T), sp.f, FT(sp.fraction), n)
 end
 
+# Phase 4.J spec D5: the division by the charge goes through _divide_by_charge, which keeps the dual
+# arithmetic of a charge without partials bitwise what it was while the charge was an Int.
 function _resolve_ion(sp::SpeciesSpec, n_e::FT) where {FT}
-    n = FT(sp.fraction) * n_e / sp.charge
+    n = _divide_by_charge(FT(sp.fraction) * n_e, sp.charge)
     F = typeof(sp.f)
-    return Species{FT,F}(sp.name, FT(sp.mass), sp.charge, FT(sp.u), FT(sp.T), sp.f, FT(sp.fraction), n)
+    return Species{FT,F}(sp.name, FT(sp.mass), FT(sp.charge), FT(sp.u), FT(sp.T), sp.f, FT(sp.fraction), n)
 end
 
 function _validate_species_set(specs::Tuple, kind::String)
@@ -106,6 +108,12 @@ end
 The number-weighted mean ion charge state, `Z̄ = Σ_i n_i Z_i / Σ_i n_i` (equivalently
 `n_e / Σ_i n_i`, by the neutrality closure). Throws for a plasma with no ion species.
 
+Each `Z_i` is a species' own `charge`, a real number since Phase 4.J. A species that stands for a
+mixture of charge states carries the equivalent single-state ion (charge ⟨Z²⟩/⟨Z⟩, density
+`fraction · n_e / charge`), so for a plasma holding one this averages the equivalent ions, not the
+mixture's own states; the mixture's number-average charge is not a package output
+([OQ-60](../../dev/open_questions.md#oq-60)).
+
 `conventions.md` Section 4; spec D20.
 """
 function mean_charge_state(p::Plasma)
@@ -133,6 +141,10 @@ The "other" mean charge, `Z_eff = ⟨Z²⟩/⟨Z⟩ = Σ_i n_i Z_i² / n_e`, the
 that appear in `spectral_density` (`conventions.md` 1.7, Section 4). Unlike
 `mean_charge_state` and `mean_ion_mass`, **`zeff` is 0, not an error, for a plasma with no ion
 species** — it is a plain sum with `init = zero(p.n_e)`; that contrast is by design.
+
+A real `charge` (Phase 4.J) changes nothing here: each species contributes `charge · fraction`, so a
+species at ⟨Z²⟩/⟨Z⟩ contributes exactly what the mixture it stands for would
+([OQ-60](../../dev/open_questions.md#oq-60)).
 
 `conventions.md` Section 4; spec D10.
 """

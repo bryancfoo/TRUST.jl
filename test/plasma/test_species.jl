@@ -39,11 +39,13 @@ end
     @test sp isa SpeciesSpec{Float64, Maxwellian}
 end
 
-@testset "S7: Dual promotion, charge stays Int" begin
+# S7 amended 2026-10-10 (Phase 4.J spec D4, OQ-60 item 1): the charge is FT, promoted with the other
+# scalar fields, no longer an Int; its value is unchanged.
+@testset "S7: Dual promotion, charge is FT" begin
     d = ForwardDiff.Dual(300.0, 1.0)
     sp = ion(mass_amu = 2.0, charge = 1, T_eV = d, fraction = 1.0)
     @test sp isa SpeciesSpec{typeof(d), Maxwellian}
-    @test sp.charge isa Int
+    @test sp.charge isa typeof(d)
 end
 
 @testset "S8: species name validation" begin
@@ -118,7 +120,8 @@ end
     @test_throws "mass must be positive; got 0.0 kg for species \"D\"" ion(name = "D", mass_kg = 0.0, charge = 1, T_eV = 300)
     @test_throws "temperature must be positive" ion(name = "D", mass_amu = 2, charge = 1, T_eV = -1)
     @test_throws "ion \"D\" has charge 0" ion(name = "D", mass_amu = 2, charge = 0, T_eV = 300)
-    @test_throws "ion \"D\" has charge -1; an ion's charge number must be a positive integer" ion(name = "D", mass_amu = 2, charge = -1, T_eV = 300)
+    # amended 2026-10-10 (Phase 4.J spec D4, D7): the floor's message
+    @test_throws "ion \"D\" has charge -1; an ion's charge number must be a finite real ≥ 1" ion(name = "D", mass_amu = 2, charge = -1, T_eV = 300)
 end
 
 # ------------------------------------------------------------------------------------------

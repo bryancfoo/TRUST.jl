@@ -696,9 +696,10 @@ function _validate_species_entry(sptable::AbstractDict, valid_keys, section::Abs
             out[k] = _fill_numeric_scalar(sptable[k], known_names, section, k, false)
         end
         if haskey(sptable, "charge")
-            sptable["charge"] isa Integer || throw(ArgumentError(
-                "read_deck: key \"charge\" in section \"$section\" must be an integer"))
-            out["charge"] = Int(sptable["charge"])
+            # Phase 4.J spec D8 (OQ-60 item 2): an integer, a real or a variable reference, as T_eV is;
+            # the floor (>= 1) is ion's own, met where build_problem builds the template, so the deck
+            # adds no second check
+            out["charge"] = _fill_numeric_scalar(sptable["charge"], known_names, section, "charge", true)
         end
     end
     if haskey(sptable, "shape")

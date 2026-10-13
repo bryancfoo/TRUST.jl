@@ -103,11 +103,19 @@ with h5py.File("streak.jld2", "r") as f:
     source = f["meta/source"][()].decode()
 ```
 
-## 2. The trace layout, `otis-trace-1`
+## 2. The trace layout, `otis-trace-2`
+
+**Bumped from `otis-trace-1` at Step 4.J.1** (2026-10-10; Phase 4.J spec D9,
+[OQ-60](../../dev/open_questions.md#oq-60) item 6), one bump carrying one change:
+`template/<set>/<name>/charge` is `Float64`, where `otis-trace-1` wrote `Int64`, since a species'
+charge is a real number (an ion's at least 1, an electron's `-1.0`). `read_trace` refuses an
+`otis-trace-1` file, naming both versions; there is no reader for the old layout, and no committed
+file was written in it (the local `runs/*_trace.jld2` are the example scripts' outputs, regenerated
+by them).
 
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-trace-1"` | yes |
+| `layout_version` | `String` | scalar, `"otis-trace-2"` | yes |
 | `axis_name` | `String` | scalar, e.g. `"t"` | yes |
 | `axis` | `Float64` | `(N_t)`, **SI** | yes |
 | `axis_unit` | `String` | scalar, `"s"` for `:t`, else `"SI"` | yes |
@@ -116,7 +124,7 @@ with h5py.File("streak.jld2", "r") as f:
 | `template/n_e_m3` | `Float64` | | yes |
 | `template/electrons/names` | `String` | `(N_e)` | yes |
 | `template/electrons/<name>/mass_kg` | `Float64` | | yes |
-| `template/electrons/<name>/charge` | `Int64` | | yes |
+| `template/electrons/<name>/charge` | `Float64` | (`Int64` in `otis-trace-1`) | yes |
 | `template/electrons/<name>/u_ms` | `Float64` | | yes |
 | `template/electrons/<name>/T_J` | `Float64` | | yes |
 | `template/electrons/<name>/fraction` | `Float64` | | yes |

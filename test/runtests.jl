@@ -200,6 +200,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("sequential staging")
         @safetestset "sequential staging" begin include("config/test_deck_sequence.jl") end
     end
+    if _wanted("continuous charge")
+        @safetestset "continuous charge" begin include("plasma/test_charge.jl") end
+    end
     if _wanted("progress")
         @safetestset "progress" begin include("inversion/test_progress.jl") end
     end

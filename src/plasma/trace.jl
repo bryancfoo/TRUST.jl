@@ -296,7 +296,7 @@ end
 
 function _widen_species(sp::Species, ::Type{FT}) where {FT}
     newf = _widen_shape(sp.f, FT)
-    return Species{FT,typeof(newf)}(sp.name, FT(sp.mass), sp.charge, FT(sp.u), FT(sp.T), newf,
+    return Species{FT,typeof(newf)}(sp.name, FT(sp.mass), FT(sp.charge), FT(sp.u), FT(sp.T), newf,
         FT(sp.fraction), FT(sp.n))
 end
 
@@ -493,8 +493,11 @@ function _leaf_value(p::Plasma, ref::LeafRef)
     return sp.fraction
 end
 
+# A species' density from its fraction (conventions.md 3.6). An ion's divides by its charge through
+# _divide_by_charge, so that a dual pass whose charge carries no partials divides exactly as it did
+# while the charge was an Int (Phase 4.J spec D5).
 _density(fraction, n_e, kind::Symbol, charge) =
-    kind === :electrons ? fraction * n_e : fraction * n_e / charge
+    kind === :electrons ? fraction * n_e : _divide_by_charge(fraction * n_e, charge)
 
 function _redensify(sp::Species{FT,F}, n_e::FT, kind::Symbol) where {FT,F}
     n = _density(sp.fraction, n_e, kind, sp.charge)

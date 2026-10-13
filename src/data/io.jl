@@ -16,10 +16,13 @@ const STREAK_LAYOUT_VERSION = "otis-streak-1"
     TRACE_LAYOUT_VERSION
 
 The `layout_version` string written to every trace JLD2 file and checked on read.
+**`"otis-trace-2"` since Step 4.J.1** (Phase 4.J spec D9, [OQ-60](../../dev/open_questions.md#oq-60)
+item 6): a species' `charge` is written `Float64`, where `otis-trace-1` wrote `Int64`. `read_trace`
+refuses an `otis-trace-1` file, naming both versions; there is no reader for the old layout.
 
-Spec D20, D45.
+Spec D20, D45; Phase 4.J spec D9.
 """
-const TRACE_LAYOUT_VERSION = "otis-trace-1"
+const TRACE_LAYOUT_VERSION = "otis-trace-2"
 
 
 # Keys written explicitly by _write_meta! and _write_probe_collection_meta!: an sd.meta entry
@@ -131,7 +134,7 @@ _shape_name(f::AbstractVelocityDistribution) = string(nameof(typeof(f)))
 
 function _write_species_group!(f, prefix::AbstractString, sp)
     f["$prefix/mass_kg"] = Float64(sp.mass)
-    f["$prefix/charge"] = Int64(sp.charge)
+    f["$prefix/charge"] = Float64(sp.charge)
     f["$prefix/u_ms"] = Float64(sp.u)
     f["$prefix/T_J"] = Float64(sp.T)
     f["$prefix/fraction"] = Float64(sp.fraction)
@@ -290,7 +293,7 @@ function _species_spec_from_dict(name::AbstractString, d::AbstractDict, kind::Sy
     if kind === :electrons
         return electrons(; name=name, T_eV=T_eV, u_ms=d["u_ms"], fraction=d["fraction"], f=f)
     else
-        return ion(; name=name, mass_kg=d["mass_kg"], charge=Int(d["charge"]), T_eV=T_eV,
+        return ion(; name=name, mass_kg=d["mass_kg"], charge=d["charge"], T_eV=T_eV,
             u_ms=d["u_ms"], fraction=d["fraction"], f=f)
     end
 end
