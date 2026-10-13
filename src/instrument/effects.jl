@@ -365,8 +365,9 @@ Built with `GradientSmearing(template::Plasma; leaf::AbstractString, width::Real
 SI (joules), the one public keyword in Phase 2 carrying a temperature in a unit no other keyword
 uses. The density is the one exception: `leaf = "n_e"` (never `"n_e_cm3"`/`"n_e_m3"`, refused
 loudly) takes a **dimensionless** (log) `width`, since it is the σ of the multiplicative
-lognormal offset below, not a unit-bearing quantity. `fraction` and a shape parameter are refused
-(offsetting a fraction breaks the sum-to-one closure with no repair, and a shape parameter's
+lognormal offset below, not a unit-bearing quantity. `fraction`, an ion's `charge` and a shape
+parameter are refused (offsetting a fraction breaks the sum-to-one closure with no repair, additive
+nodes on a charge could carry it below its floor of 1 (Phase 4.J spec D14), and a shape parameter's
 `reconstruct` per sample per bin is a cost this phase does not pay).
 
 Spec D10, D11, D28, A17.
@@ -393,6 +394,8 @@ function GradientSmearing(template::Plasma; leaf::AbstractString, width::Real, n
     ref = _resolve_leaf(template, path)
     ref.field === :fraction && throw(ArgumentError(
         "GradientSmearing: a fraction cannot be gradient-smeared"))
+    ref.field === :charge && throw(ArgumentError(
+        "GradientSmearing: a charge cannot be gradient-smeared"))
     ref.shape && throw(ArgumentError(
         "GradientSmearing: a shape parameter cannot be gradient-smeared"))
     logarithmic = ref.set === :n_e

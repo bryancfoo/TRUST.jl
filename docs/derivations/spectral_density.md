@@ -164,3 +164,52 @@ formula (D21 row 7, D10) carries the opposite sign from what is printed in Sheff
 Both sum rules are integrated exactly as `docs/derivations/spectral_density.md` Section 5.1
 describes: finite limits `±8 k v_th,e`, breakpoints at `0, ±ω_ia, ±ω_epw` (Sheffield Eqs. 5.3.5,
 5.3.9), `rtol = 1e-10`, `atol = 1e-14` (spec D20).
+
+## 6. A real charge and the mixture it stands for (Phase 4.J)
+
+A species' `charge` is a real number since Step 4.J.1 ([OQ-60](../../dev/open_questions.md#oq-60),
+decided 2026-10-10). Nothing in this document's formulas changes; this section says what a
+non-integer charge means, and why no new weight is needed.
+
+**Every place an ion's charge enters is the product `Z_i f_i`.** With charge fractions
+(`conventions.md` 3.6) an ion species of charge `Z_i` and fraction `f_i` has `n_i = f_i n_e / Z_i`
+(`_resolve_ion`, `_density`). It enters the spectrum twice, through its weight in the ion sum
+(Section 1) and through its susceptibility in `ε`:
+
+    Z_i² n_i / n_e = Z_i f_i,
+    α_i² = n_i (Z_i e)² / (ε₀ T_i k²) = Z_i f_i · n_e e² / (ε₀ T_i k²),
+
+and the rest of `χ_i = −(α_i²/2) 𝒞φ_i(ξ_i)` and of `f_lab(sp_i, ω/k) = φ_i(ξ_i)/v_th,i` depends on
+`T_i`, `m_i`, `u_i` and the shape alone (`ξ_i = (ω/k − u_i)/v_th,i`, `v_th,i = √(2T_i/m_i)`).
+
+**Charge states of one element are one species.** If species `1..N` share `T`, `m`, `u` and the
+shape, their contributions to the ion sum and to `ε` are `(Σ Z_i f_i)` times one common function, so
+one species of charge `Z*` and fraction `x` reproduces them exactly — in `dielectric`,
+`spectral_density`, the convective gain (which reads only `χ_e` and `ε`), `measure` and every
+derivative — if and only if `Z* x = Σ Z_i f_i`:
+
+    x = Σ f_i,        Z* = Σ Z_i f_i / Σ f_i = Σ Z_i² n_i / Σ Z_i n_i = ⟨Z²⟩/⟨Z⟩,
+
+the number-weighted moments over that element's states. **The spectrum constrains `⟨Z²⟩/⟨Z⟩` of each
+element and nothing else about its charge-state distribution**, and that is what a real `charge` is.
+CZ5 holds the identity for C⁴⁺ + C⁶⁺ against one carbon at `Z*`, Maxwellian and kappa, to
+`rtol = 1e-12`.
+
+**Two consequences.** (i) `Z*` is not the number-average charge `Z̄ = ⟨Z⟩ = x / Σ (f_i/Z_i)`:
+`Z̄ ≤ Z*`, equal only for one state; for the C⁴⁺/C⁶⁺ pair `Z* = 10 − 24/Z̄` (5.2 at `Z̄ = 5`). One
+carbon at `Z̄` is a different spectrum: its weight is `Z̄ x` against the pair's `Z* x` (CZ6: 0.96 of it
+at equal fractions). (ii) The number density the package derives for the species, `x n_e / Z*`, is
+that of the equivalent single-state ion, below the mixture's true number density `x n_e / Z̄` by
+`Z̄/Z*`. Recovering `Z̄` or the true density needs an ionization model, which the package does not have.
+
+**The floor.** For integer states `Z_i ≥ 0`, `Z_i² ≥ Z_i`, so `⟨Z²⟩/⟨Z⟩ ≥ 1` for any mixture with at
+least one ion (neutrals drop out of both moments), with equality only for pure `Z = 1`. `ion` refuses
+a charge below 1 or not finite; there is no ceiling.
+
+**In the derivative.** A fitted charge is a leaf (`ions.<name>.charge`, dimensionless) and reaches
+the Jacobian as any leaf does, through the dual trace and `plasma(trace, j)`, whose density is
+re-resolved from the per-bin charge. The one division by a charge goes through `_divide_by_charge`
+(Phase 4.J spec D5): a charge that carries no derivative is divided by its value, so the partials are
+`p / Z` exactly as they were while the charge was an integer; ForwardDiff's dual-by-dual division
+would form them as `p · inv(Z)`, which differs in the last place for a charge that is not a power of
+two, and would have moved every Jacobian of a plasma with carbon by round-off.

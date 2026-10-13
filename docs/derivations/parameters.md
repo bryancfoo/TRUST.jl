@@ -188,6 +188,20 @@ tabulate gains a new row, built once at `ParameterSpec`'s construction with the 
 original leaves (in their original order) and every newly bound leaf (in binding order), each new
 row initialized to the template's own constant value.
 
+**The charge leaf** (Phase 4.J, spec D13 to D15, [OQ-60](../../dev/open_questions.md#oq-60)): an ion
+species' `charge` is a leaf, `ions.<name>.charge`, dimensionless (factor 1, no unit key), bound by
+writing a variable's or a dependent's name where the deck's `charge` expects a number (`charge =
+"ZC"`). It carries `time_varying`, `interval`, `vary`, `[fit.start]`, `[fit.hold]` and any regularizer
+term like every trace variable, and `plasma(trace, j)` re-resolves the ion's density from the per-bin
+value. **The floor**: a `FittedVariable` bound to a charge, fitted, frozen or held, must have a lower
+bound of at least 1, and `_resolve_bindings` refuses one below, naming the variable, the bound and the
+floor; every value a fitted variable takes lies strictly inside its bounds, so that is the whole guard.
+**A dependent bound to a charge is not range-checked**, as no dependent is: an expression that takes
+the charge below 1 at some bin gives the ion a density above its fraction of `n_e` (and an infinite one
+at 0) without an error, and the deck that writes such a dependent answers for it. An electron's charge
+(`-1` by definition) and every `mass` are not leaves, each refused with its own message;
+`GradientSmearing` refuses a charge leaf (spec D14).
+
 ## 4. Theta's layout and the index map
 
 Theta is **variable-major**: in declaration order over the `vary = true` variables, a scalar

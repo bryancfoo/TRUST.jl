@@ -26,5 +26,6 @@ using Test
     @safetestset "held series (slow)" begin include("test_held_series.jl") end
     @safetestset "per-bin amplitude (slow)" begin include("test_per_bin_amplitude.jl") end
     @safetestset "sequential staging (slow)" begin include("test_deck_sequence.jl") end
+    @safetestset "continuous charge (slow)" begin include("test_charge.jl") end
     @safetestset "uncertainty (slow)" begin include("test_uncertainty.jl") end
 end

@@ -34,8 +34,9 @@ Base.hash(p::LeafPath, h::UInt) = hash(p.segments, hash(:LeafPath, h))
 
 The resolved form of a `LeafPath` against one `Plasma`: which set (`:n_e`, `:electrons` or
 `:ions`), which position in that `SpeciesSet` (`0` when `set === :n_e`), which field (`:T`,
-`:u`, `:fraction`, or a shape-parameter key), and whether that field is a shape parameter
-(`shape`). `isbits`, unexported, built once at construction and never in the per-bin kernel.
+`:u`, `:fraction`, `:charge` for an ion species since Phase 4.J, or a shape-parameter key), and
+whether that field is a shape parameter (`shape`). `isbits`, unexported, built once at construction
+and never in the per-bin kernel.
 
 Spec D5.
 """
@@ -51,22 +52,25 @@ end
 
 Validate `path` against `p` and resolve it to a `LeafRef`. Throws (spec D28) for a first
 segment other than `"n_e"`, `"electrons"` or `"ions"`; a species name not in the named set; a
-field other than `T`, `u`, `fraction` or `f.<parameter>`; `mass` or `charge` (not fittable
-leaves); a shape parameter not a key of `parameters(sp.f)`; or the wrong number of segments.
+field other than `T`, `u`, `fraction`, an ion's `charge` or `f.<parameter>`; `mass` (not a
+fittable leaf); an electron species' `charge` (`-1` by definition); a shape parameter not a key
+of `parameters(sp.f)`; or the wrong number of segments. **An ion species' `charge` is a leaf
+since Phase 4.J** ([OQ-60](../../dev/open_questions.md#oq-60) item 3; Phase 4.J spec D13):
+dimensionless, factor 1, the ion's density re-resolved from it wherever a snapshot is built.
 
-Spec D5, D28.
+Spec D5, D28; Phase 4.J spec D13.
 """
 function _resolve_leaf(p::Plasma, path::LeafPath)
     segs = path.segments
     root = segs[1]
     if root == "n_e"
         length(segs) == 1 || throw(ArgumentError(
-            "\"$(string(path))\" is not a leaf; expected T, u, fraction or f.<parameter>"))
+            "\"$(string(path))\" is not a leaf; expected T, u, fraction, charge (ions) or f.<parameter>"))
         return LeafRef(:n_e, 0, :n_e, false)
     elseif root == "electrons" || root == "ions"
         set = root == "electrons" ? (:electrons) : (:ions)
         length(segs) >= 3 || throw(ArgumentError(
-            "\"$(string(path))\" is not a leaf; expected T, u, fraction or f.<parameter>"))
+            "\"$(string(path))\" is not a leaf; expected T, u, fraction, charge (ions) or f.<parameter>"))
         name = segs[2]
         species_set = set === :electrons ? p.electrons : p.ions
         idx = findfirst(==(name), species_set.names)
@@ -75,10 +79,16 @@ function _resolve_leaf(p::Plasma, path::LeafPath)
         rest = segs[3:end]
         if length(rest) == 1
             field = rest[1]
-            field in ("mass", "charge") && throw(ArgumentError(
-                "\"$(string(path))\": mass and charge are not fittable leaves"))
+            field == "mass" && throw(ArgumentError(
+                "\"$(string(path))\": mass is not a fittable leaf"))
+            if field == "charge"
+                set === :ions || throw(ArgumentError(
+                    "\"$(string(path))\": an electron species' charge is -1 by definition and is not a " *
+                    "fittable leaf (only an ion's charge is)"))
+                return LeafRef(set, idx, :charge, false)
+            end
             field in ("T", "u", "fraction") || throw(ArgumentError(
-                "\"$(string(path))\" is not a leaf; expected T, u, fraction or f.<parameter>"))
+                "\"$(string(path))\" is not a leaf; expected T, u, fraction, charge (ions) or f.<parameter>"))
             return LeafRef(set, idx, Symbol(field), false)
         elseif length(rest) == 2 && rest[1] == "f"
             pname = rest[2]
@@ -88,7 +98,7 @@ function _resolve_leaf(p::Plasma, path::LeafPath)
             return LeafRef(set, idx, Symbol(pname), true)
         else
             throw(ArgumentError(
-                "\"$(string(path))\" is not a leaf; expected T, u, fraction or f.<parameter>"))
+                "\"$(string(path))\" is not a leaf; expected T, u, fraction, charge (ions) or f.<parameter>"))
         end
     else
         throw(ArgumentError(
@@ -133,24 +143,27 @@ end
     SpeciesRows{NP}
 
 The inverted index for one species: the row of `PlasmaTrace.values` holding its flow, its
-temperature, its fraction (`0` when that leaf is constant), and one row per entry of
-`parameters(sp.f)`, in that `NamedTuple`'s key order (`0` for an entry that is constant). `NP`
-is `length(parameters(sp.f))`.
+temperature, its fraction, its charge (`0` when that leaf is constant; always `0` for an electron
+species, whose charge is not a leaf; Phase 4.J), and one row per entry of `parameters(sp.f)`, in
+that `NamedTuple`'s key order (`0` for an entry that is constant). `NP` is
+`length(parameters(sp.f))`.
 
-Spec D6.
+Spec D6; Phase 4.J spec D13.
 """
 struct SpeciesRows{NP}
     u::Int
     T::Int
     fraction::Int
+    charge::Int
     shape::NTuple{NP,Int}
 end
 
 """
     PlasmaTrace{FT<:Real, P<:Plasma{FT}, A<:AbstractVector{FT}, M<:AbstractMatrix{FT}, E<:Tuple, I<:Tuple}
 
-A time-dependent plasma: a template `Plasma` whose species, shapes, masses and charges are
-fixed; a named axis (`axis_name`, SI values in `axis`, strictly increasing); the SI leaf paths
+A time-dependent plasma: a template `Plasma` whose species, shapes and masses are fixed (and an
+ion's charge, unless tabulated as `ions.<name>.charge`: Phase 4.J); a named axis (`axis_name`, SI
+values in `axis`, strictly increasing); the SI leaf paths
 tabulated (`paths`, row order) and their values (`values`, `N_leaf x N_t`, SI); and the row plan
 `plasma(trace, j)` walks (`n_e_row`, `electron_rows`, `ion_rows`). `paths`/`values` and the row
 fields are two views of the same information built together at construction and never diverging.
@@ -242,6 +255,7 @@ function _species_rows(sp::Species, set::Symbol, idx::Int, refs::Vector{LeafRef}
     u_row = 0
     T_row = 0
     frac_row = 0
+    charge_row = 0
     shape_rows = zeros(Int, NP)
     for i in eachindex(refs)
         r = refs[i]
@@ -255,9 +269,11 @@ function _species_rows(sp::Species, set::Symbol, idx::Int, refs::Vector{LeafRef}
             u_row = i
         elseif r.field === :fraction
             frac_row = i
+        elseif r.field === :charge
+            charge_row = i
         end
     end
-    return SpeciesRows{NP}(u_row, T_row, frac_row, Tuple(shape_rows))
+    return SpeciesRows{NP}(u_row, T_row, frac_row, charge_row, Tuple(shape_rows))
 end
 
 function _finish_trace(template::Plasma{FT}, axis_name::Symbol, axis_si::Vector{FT},
@@ -379,6 +395,9 @@ function _enumerate_leaves(template::Plasma)
             push!(out, (LeafRef(setsym, idx, :u, false), LeafPath([String(setsym), nm, "u"])))
             push!(out, (LeafRef(setsym, idx, :fraction, false),
                         LeafPath([String(setsym), nm, "fraction"])))
+            if setsym === :ions      # Phase 4.J spec D13: an ion's charge is a leaf, an electron's is not
+                push!(out, (LeafRef(setsym, idx, :charge, false), LeafPath([String(setsym), nm, "charge"])))
+            end
             for pname in keys(parameters(sp.f))
                 push!(out, (LeafRef(setsym, idx, pname, true),
                             LeafPath([String(setsym), nm, "f", String(pname)])))
@@ -399,7 +418,8 @@ function _check_same_species(template::Plasma, p::Plasma, j::Integer)
     end
     for idx in 1:length(template.ions)
         t_sp, p_sp = template.ions[idx], p.ions[idx]
-        (typeof(t_sp.f) === typeof(p_sp.f) && t_sp.mass == p_sp.mass && t_sp.charge == p_sp.charge) ||
+        # Phase 4.J spec D13: an ion's charge is a leaf, compared (or tabulated) as every leaf is
+        (typeof(t_sp.f) === typeof(p_sp.f) && t_sp.mass == p_sp.mass) ||
             throw(ArgumentError(
                 "snapshot at bin $j differs from the template's species \"$(t_sp.name)\""))
     end
@@ -411,7 +431,9 @@ end
 
 Build a trace from a vector of snapshot `Plasma`s, one per bin. `leaves` is an iterable of SI
 path strings (not boundary keys) naming the leaves to tabulate; the template is `snapshots[1]`.
-Every snapshot must share the template's species names, shape types, masses and charges. A leaf
+Every snapshot must share the template's species names, shape types and masses, and its electron
+species' charges; an ion's charge is a leaf like any other since Phase 4.J (`ions.<name>.charge`,
+tabulated when named in `leaves`; Phase 4.J spec D13). A leaf
 not named in `leaves` that differs from the template at any bin is an error naming the leaf and
 the first bin where it differs (compared with `!=` on the SI value, so a bitwise-constant leaf
 passes); this check runs once, at construction.
@@ -490,6 +512,7 @@ function _leaf_value(p::Plasma, ref::LeafRef)
     ref.shape && return parameters(sp.f)[ref.field]
     ref.field === :T && return sp.T
     ref.field === :u && return sp.u
+    ref.field === :charge && return sp.charge     # Phase 4.J spec D13, before the fraction fall-through
     return sp.fraction
 end
 
@@ -509,7 +532,8 @@ end
 
 `sp` (species `i` of set `kind`) with the one field `ref` names replaced by `v` when `ref` points
 at this species, otherwise `sp` unchanged — the A15 rewrite (`conventions.md` 5.2, roadmap Step
-2.3a): the **field values** (`u`, `T`, `fraction`) are each selected by their own ternary first,
+2.3a): the **field values** (`u`, `T`, `fraction`, and since Phase 4.J an ion's `charge`, from
+which the density is re-resolved; Phase 4.J spec D13) are each selected by their own ternary first,
 so every ternary's two branches are plain scalars, and `Species{FT,F}` is constructed **exactly
 once** from them. The naive form this replaced (`_maybe_update_species`/`_apply_field`, returning
 a whole `Species` from each of several branches) forced the compiler to merge several
@@ -530,8 +554,9 @@ Spec D40 (Step 2.3a Build), A15.
     u        = (hit & (ref.field === :u))        ? v : sp.u
     T        = (hit & (ref.field === :T))        ? v : sp.T
     fraction = (hit & (ref.field === :fraction)) ? v : sp.fraction
-    n        = _density(fraction, n_e, kind, sp.charge)
-    return Species{FT,F}(sp.name, sp.mass, sp.charge, u, T, sp.f, fraction, n)
+    charge   = (hit & (ref.field === :charge))   ? v : sp.charge
+    n        = _density(fraction, n_e, kind, charge)
+    return Species{FT,F}(sp.name, sp.mass, charge, u, T, sp.f, fraction, n)
 end
 
 """
@@ -591,9 +616,10 @@ function _snapshot_species(sp::Species{FT}, r::SpeciesRows, values::AbstractMatr
     u = r.u == 0 ? sp.u : values[r.u, j]
     T = r.T == 0 ? sp.T : values[r.T, j]
     fraction = r.fraction == 0 ? sp.fraction : values[r.fraction, j]
+    charge = r.charge == 0 ? sp.charge : values[r.charge, j]    # Phase 4.J spec D13: the per-bin charge
     f = _snapshot_shape(sp.f, r.shape, values, j)
-    n = _density(fraction, n_e, kind, sp.charge)
-    return Species{FT,typeof(f)}(sp.name, sp.mass, sp.charge, u, T, f, fraction, n)
+    n = _density(fraction, n_e, kind, charge)
+    return Species{FT,typeof(f)}(sp.name, sp.mass, charge, u, T, f, fraction, n)
 end
 
 """

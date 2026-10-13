@@ -453,7 +453,9 @@ end
 
 Resolve every `name => target` pair into a `Binding`, checking, in order: the name is a declared
 variable or dependent; a probe/collection key is refused naming `WavelengthCalibration`; the target leaf or
-effect parameter exists; the one-conversion-factor rule (D9); the scalar-instrument rule for an
+effect parameter exists; for a leaf that is an ion's `charge`, the floor (a `FittedVariable` bound to
+it, fitted, frozen or held, needs a lower bound of at least 1; a dependent is not range-checked;
+Phase 4.J spec D15); the one-conversion-factor rule (D9); the scalar-instrument rule for an
 `:effect` target (D9); the one-variable-per-leaf rule for a `:leaf` target (D9). `row` is left `0`
 for a leaf the trace does not yet tabulate; `ParameterSpec`'s constructor fills it in after the
 trace rebuild.
@@ -494,7 +496,15 @@ function _resolve_bindings(bindings_input, variables::Vector{FittedVariable},
                 "instrument chain instead."))
             si_path, factor = _leaf_si_path(key)
             path = LeafPath(si_path)
-            _resolve_leaf(template, path)
+            ref = _resolve_leaf(template, path)
+            # Phase 4.J spec D15 (OQ-60 item 4): a variable bound to an ion's charge may not reach below
+            # the floor of 1; a dependent is not range-checked, as no dependent is
+            if ref.field === :charge && !ref.shape && slot <= nvar && variables[slot].lower < 1
+                throw(ArgumentError(
+                    "\"$name\" is bound to \"$si_path\" with lower bound $(variables[slot].lower), below 1: " *
+                    "an ion's charge number is a finite real ≥ 1 (for a mixture of charge states it is " *
+                    "⟨Z²⟩/⟨Z⟩), so a variable bound to a charge needs a lower bound of at least 1"))
+            end
             unit_key = factor == 1.0 ? "" : String(split(key, '.')[end])
             _check_unit_factor!(name_factor, name, factor, unit_key)
             if haskey(leaf_owner, si_path) && leaf_owner[si_path] != name

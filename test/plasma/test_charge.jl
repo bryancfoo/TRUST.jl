@@ -1,13 +1,17 @@
 using Test
 using OTIS
-using OTIS: _divide_by_charge, _widen_trace
+using OTIS: _divide_by_charge, _widen_trace, LeafRef, _resolve_leaf, _leaf_value, _leaf_si_path,
+    _leaf_display_unit, _enumerate_leaves, _with_leaf
 import ForwardDiff
+import TOML
 using JLD2: jldopen
 
 # Phase 4.J (OQ-60): the continuous ion charge, gated "continuous charge". Step 4.J.1, CZ1 to CZ8 (Phase
 # 4.J spec D12): ion's real charge and its floor, today's model bitwise, the guarded division by a
 # charge, the identity with the C4/C6 pair and its contrast at the number average, the trace layout
-# otis-trace-2, the deck's real literal. The derivative and the recovery are in test/slow/test_charge.jl.
+# otis-trace-2, the deck's real literal. Step 4.J.2, CZ9 to CZ13 (spec D18): the leaf, a trace whose
+# charge differs per bin, _with_leaf and GradientSmearing, the binding and its floor, the deck's
+# charge = "ZC". The derivative and the recovery are in test/slow/test_charge.jl.
 
 include(joinpath(@__DIR__, "..", "fixtures", "charge_fixture.jl"))
 
@@ -199,5 +203,135 @@ end
         @test_throws "ion \"C\" has charge 0.5; $_CZ_MSG" OTIS.build_problem(low)
         @test_throws "read_deck: key \"charge\" in section \"plasma.ions.C\" refers to \"nope\", which is not a declared variable or dependent" read_deck(
             _cz_write(dir, "nope.toml", _cz_deck_text(dir; charge="\"nope\"")))
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# CZ9: ions.<name>.charge is a leaf; an electron's charge and every mass are not (OQ-60 (b), item 3)
+# ------------------------------------------------------------------------------------------
+
+@testset "CZ9: the charge leaf" begin
+    p = _cz_single(5.0, 0.7)
+    ref = _resolve_leaf(p, LeafPath("ions.C.charge"))
+    @test ref == LeafRef(:ions, 2, :charge, false)
+    @test _leaf_value(p, ref) === 5.0
+    @test _leaf_si_path("ions.C.charge") == ("ions.C.charge", 1.0)
+    @test _leaf_display_unit(LeafPath("ions.C.charge")) == ("", 1.0)
+    @test_throws "\"electrons.e.charge\": an electron species' charge is -1 by definition and is not a fittable leaf (only an ion's charge is)" _resolve_leaf(
+        p, LeafPath("electrons.e.charge"))
+    @test_throws "\"ions.D.mass\": mass is not a fittable leaf" _resolve_leaf(p, LeafPath("ions.D.mass"))
+    @test_throws "\"electrons.e.mass\": mass is not a fittable leaf" _resolve_leaf(p, LeafPath("electrons.e.mass"))
+    @test_throws "\"ions.D.bogus\" is not a leaf; expected T, u, fraction, charge (ions) or f.<parameter>" _resolve_leaf(
+        p, LeafPath("ions.D.bogus"))
+    paths = [string(path) for (_, path) in _enumerate_leaves(p)]
+    @test "ions.D.charge" in paths && "ions.C.charge" in paths && !("electrons.e.charge" in paths)
+end
+
+# ------------------------------------------------------------------------------------------
+# CZ10: a trace whose carbon charge differs per bin (OQ-60 (f))
+# ------------------------------------------------------------------------------------------
+
+const _CZ_ZS = [4.2, 4.6, 5.1, 5.6]
+
+@testset "CZ10: a trace whose carbon charge differs per bin" begin
+    t_ns = [0.0, 1.0, 2.0, 3.0]
+    template = _cz_single(5.0, 0.7)
+    snaps = [_cz_single(z, 0.7) for z in _CZ_ZS]
+    tv = PlasmaTrace(template; t_ns=t_ns, leaves=["ions.C.charge" => _CZ_ZS])
+    ts = PlasmaTrace(snaps; t_ns=t_ns, leaves=["ions.C.charge"])
+    for trace in (tv, ts), j in 1:4
+        q = plasma(trace, j)
+        @test q.ions["C"].charge === _CZ_ZS[j]
+        @test q.ions["C"].n === snaps[j].ions["C"].n
+        @test q.ions["D"].n === template.ions["D"].n
+    end
+    @test_throws "\"ions.C.charge\" varies at bin 2 but is not in the leaves list" PlasmaTrace(snaps; t_ns=t_ns)
+    _p() = plasma(tv, 2)
+    _p()
+    @test (@allocated _p()) == 0
+    mktempdir() do dir
+        path = joinpath(dir, "trace.jld2")
+        write_trace(path, tv; source="CZ10")
+        rebuilt = read_trace(path; as=:trace)
+        @test string.(rebuilt.paths) == ["ions.C.charge"]
+        @test all(rebuilt.values .=== tv.values)
+        @test all(plasma(rebuilt, j).ions["C"].charge === _CZ_ZS[j] for j in 1:4)
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# CZ11: _with_leaf serves a charge; GradientSmearing refuses one (spec D14)
+# ------------------------------------------------------------------------------------------
+
+@testset "CZ11: _with_leaf on a charge, and GradientSmearing's refusal" begin
+    p = _cz_single(5.0, 0.7)
+    ref = _resolve_leaf(p, LeafPath("ions.C.charge"))
+    q = _with_leaf(p, ref, 4.5)
+    @test q.ions["C"].charge === 4.5
+    @test q.ions["C"].n === p.ions["C"].fraction * p.n_e / 4.5
+    @test q.ions["C"].T === p.ions["C"].T
+    @test q.ions["D"].n === p.ions["D"].n
+    @test_throws "GradientSmearing: a charge cannot be gradient-smeared" GradientSmearing(p; leaf="ions.C.charge", width=0.1)
+end
+
+# ------------------------------------------------------------------------------------------
+# CZ12: a variable bound to ions.C.charge, and the floor on its bounds (OQ-60 (b), item 4; spec D15)
+# ------------------------------------------------------------------------------------------
+
+@testset "CZ12: the charge binding and its floor" begin
+    expt = Experiment(; trace=PlasmaTrace(_cz_single(5.0, 0.7); t_ns=[0.0, 1.0, 2.0, 3.0]),
+        probe=ProbeBeam(lambda_probe_nm=263.25), collection=_CZ_COLL, lambda_m=_CZ_IAW,
+        effects=(SpectralIRF(fwhm_nm=0.03), Sensitivity(scale=1.0e-6)))
+    zc = FittedVariable("ZC"; bounds=(3.0, 7.0), init=5.0, time_varying=true)
+    pspec = ParameterSpec(expt; variables=[zc], bindings=["ZC" => "ions.C.charge"])
+    b = only(pspec.bindings)
+    @test b.kind === :leaf && string(b.path) == "ions.C.charge" && b.factor == 1.0 && b.unit_key == ""
+    working = Experiment(; trace=pspec.trace, probe=expt.probe, collection=expt.collection,
+        lambda_m=expt.lambda, effects=expt.effects)
+    out = unflatten(working, pspec, flatten(pspec, ["ZC" => _CZ_ZS]))
+    for j in 1:4
+        q = plasma(out.trace, j)
+        @test isapprox(q.ions["C"].charge, _CZ_ZS[j]; rtol=1e-13)
+        @test q.ions["C"].n === q.ions["C"].fraction * q.n_e / q.ions["C"].charge
+    end
+    msg = "is bound to \"ions.C.charge\" with lower bound 0.9, below 1: an ion's charge number is a finite real ≥ 1"
+    @test_throws "\"ZC\" $msg" ParameterSpec(expt;
+        variables=[FittedVariable("ZC"; bounds=(0.9, 7.0), init=5.0, time_varying=true)], bindings=["ZC" => "ions.C.charge"])
+    @test_throws "\"ZF\" $msg" ParameterSpec(expt;
+        variables=[FittedVariable("ZF"; bounds=(0.9, 7.0), init=5.0, vary=false)], bindings=["ZF" => "ions.C.charge"])
+    # a dependent bound to a charge is not range-checked (no dependent is): ZC - 2.5 reaches 0.5 at ZC's lower bound
+    dep = ParameterSpec(expt; variables=[zc], dependents=["Zd" => "ZC - 2.5"], bindings=["Zd" => "ions.C.charge"])
+    @test only(dep.bindings).name == "Zd"
+end
+
+# ------------------------------------------------------------------------------------------
+# CZ13: charge = "ZC" in a deck; [fit.start] and [fit.hold] on it (OQ-60 (g))
+# ------------------------------------------------------------------------------------------
+
+@testset "CZ13: charge = \"ZC\" in a deck" begin
+    mktempdir() do dir
+        _cz_streak(dir)
+        zc = "ZC = { bounds = [3.0, 7.0], init = 5.0, time_varying = true }"
+        deck = read_deck(_cz_write(dir, "zc.toml", _cz_deck_text(dir; charge="\"ZC\"", variables=zc)))
+        problem, optimizer, _ = OTIS.build_problem(deck)
+        @test any(b -> b.name == "ZC" && b.kind === :leaf && string(b.path) == "ions.C.charge", problem.pspec.bindings)
+        eff = effective_deck(deck, problem, optimizer)
+        @test TOML.parse(eff)["fit"]["variables"]["ZC"]["bindings"] == ["ions.C.charge"]
+        @test read_deck(_cz_write(dir, "zc_eff.toml", eff)) == deck
+        sp = write_start(joinpath(dir, "start.jld2"); axis_ns=[4.0, 5.0], values=Dict("ZC" => [4.4, 4.8]),
+            source="CZ13")
+        table(key) = "[fit.$key]\nfile = \"$(replace(sp, "\\" => "/"))\"\nvariables = [\"ZC\"]\n"
+        ps, _, start = OTIS.build_problem(read_deck(_cz_write(dir, "zs.toml",
+            _cz_deck_text(dir; charge="\"ZC\"", variables=zc, tables=table("start")))))
+        z_start = plasma(unflatten(ps.experiment, ps.pspec, start).trace, 1).ions["C"].charge
+        @test isapprox(z_start, 4.6; rtol=1e-13)
+        ph, _, start_h = OTIS.build_problem(read_deck(_cz_write(dir, "zh.toml",
+            _cz_deck_text(dir; charge="\"ZC\"", variables=zc, tables=table("hold")))))
+        held = only(v for v in ph.pspec.variables if v.name == "ZC").held
+        @test length(held) == 1 && isapprox(held[1], 4.6; rtol=1e-14)
+        @test plasma(unflatten(ph.experiment, ph.pspec, start_h).trace, 1).ions["C"].charge === held[1]
+        low = "ZC = { bounds = [0.9, 7.0], init = 5.0, time_varying = true }"
+        @test_throws "\"ZC\" is bound to \"ions.C.charge\" with lower bound 0.9, below 1" OTIS.build_problem(
+            read_deck(_cz_write(dir, "zlow.toml", _cz_deck_text(dir; charge="\"ZC\"", variables=low))))
     end
 end

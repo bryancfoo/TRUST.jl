@@ -212,8 +212,10 @@ end
     @test_throws "is not a valid leaf path" LeafPath("a..b")
     @test_throws "must begin with" _resolve_leaf(template, LeafPath("bogus.e.T"))
     @test_throws "has no species named" _resolve_leaf(template, LeafPath("electrons.x.T"))
-    @test_throws "is not a leaf; expected T, u, fraction or f.<parameter>" _resolve_leaf(template, LeafPath("electrons.e.bogus"))
-    @test_throws "mass and charge are not fittable leaves" _resolve_leaf(template, LeafPath("electrons.e.mass"))
+    # amended 2026-10-10 (Phase 4.J spec D4, D13): an ion's charge is a leaf, the shared message names it,
+    # and mass is refused on its own
+    @test_throws "is not a leaf; expected T, u, fraction, charge (ions) or f.<parameter>" _resolve_leaf(template, LeafPath("electrons.e.bogus"))
+    @test_throws "mass is not a fittable leaf" _resolve_leaf(template, LeafPath("electrons.e.mass"))
     @test_throws "is not a parameter of" _resolve_leaf(template, LeafPath("electrons.e.f.bogus"))
 
     t_ns8 = collect(range(0.0, 3.0; length=8))

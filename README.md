@@ -229,6 +229,16 @@ each stage before it runs. The lines go to standard output (or to any stream pas
 `progress_io`) and change nothing about the fit: every result is the same, bitwise, with them on or off.
 Without the key nothing is printed.
 
+**Phase 4.J (the continuous ion charge) is complete.** An ion's `charge` may now be any real number of
+at least 1, and a fitted variable: write `charge = 4.6` in a `[plasma.ions.<name>]` table, or `charge =
+"ZC"` with `ZC` declared in `[fit.variables]`, time-varying and regularized like any other variable; its
+lower bound must be at least 1. A non-integer charge stands for a mixture of charge states of one
+element at one temperature and flow and is that mixture's ⟨Z²⟩/⟨Z⟩, which the spectrum reproduces
+exactly; it is not the number-average charge, and the density the package derives for the species is
+the equivalent single-state ion's. Trace files are now written as `otis-trace-2`, the charge a real
+number, and an older trace file is refused. For every integer charge the model and every fit are
+exactly what they were.
+
 ## Installing and testing
 
 ```
