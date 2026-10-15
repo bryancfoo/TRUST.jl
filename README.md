@@ -249,6 +249,16 @@ deck, laplace, scatter)` writes the same file from a script, adding the Laplace 
 `slice_scatter`, every fine window's fitted values with that window's own data and model. `readable =
 false` in `[output]` switches the file off; `result.jld2` and every fit are the same either way.
 
+**Phase 4.L (a stall test for Levenberg–Marquardt) is complete.** A `levenberg_marquardt` fit that has
+reached a plateau can now end there instead of running on to its iteration cap: `lm_rtol = 1e-6` and
+`lm_rtol_window = 50` in `[optimizer.levenberg_marquardt]` end the fit, reported converged with status
+`lm_rtol`, once the objective has moved by less than one part in a million over the last 50 accepted
+steps, the change the progress lines' six printed figures show. Up to the step where it stops the fit is
+exactly the one without the keys, and `fit`'s warnings, among them the check of whether the stopped point
+is a minimum, run as before; the result file's `fit/status` reads `"lm_rtol"`. Without the keys every fit
+is exactly what it was. A deck fit with `readable = false` now also removes a `readable.h5` an earlier run
+left in its output directory.
+
 ## Installing and testing
 
 ```

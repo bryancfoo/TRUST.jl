@@ -962,6 +962,17 @@ function _validate_optimizer_section(given::AbstractDict)
         out[key]["progress"] >= 0 || throw(ArgumentError(
             "read_deck: key \"progress\" in section \"optimizer.$key\" must be an integer ≥ 0; " *
             "got $(out[key]["progress"])"))
+        # Phase 4.L spec D4 (OQ-62 item 2): the stall keys, refused here as the constructor refuses
+        # them; a value of the wrong type was already refused by _fill_option_field
+        if key == "levenberg_marquardt"
+            rtol = out[key]["lm_rtol"]
+            (isfinite(rtol) && rtol >= 0) || throw(ArgumentError(
+                "read_deck: key \"lm_rtol\" in section \"optimizer.$key\" must be a finite number ≥ 0; " *
+                "got $rtol"))
+            out[key]["lm_rtol_window"] >= 1 || throw(ArgumentError(
+                "read_deck: key \"lm_rtol_window\" in section \"optimizer.$key\" must be an integer ≥ 1; " *
+                "got $(out[key]["lm_rtol_window"])"))
+        end
     end
     if procedure == STAGED_PROCEDURE
         entry = get(given, "staged", Dict{String,Any}())
@@ -2515,7 +2526,10 @@ It changes nothing.
 **The readable companion** (Phase 4.M spec D6, [OQ-63](../../dev/open_questions.md#oq-63)): after
 `result.jld2` and `effective_deck.toml`, `fit` writes `<dir>/readable.h5` (`otis-readable-1`, the file
 `write_readable` writes, with `source = "fit"`, the effective deck's text and `fit/gn_decrease`),
-unless the deck gives `[output] readable = false`. `result.jld2` is the same either way.
+unless the deck gives `[output] readable = false`. `result.jld2` is the same either way. With
+`readable = false`, a `readable.h5` an earlier run left in the directory is removed (Phase 4.L spec D9,
+[OQ-62](../../dev/open_questions.md#oq-62) item 8), so the directory never holds a companion older than
+its `result.jld2`.
 
 Spec D33, D40.
 """
@@ -2550,10 +2564,13 @@ function fit(deck::Deck)
     open(joinpath(dir, "effective_deck.toml"), "w") do io
         write(io, eff)
     end
-    # Phase 4.M spec D6 (OQ-63 item 1): the readable companion, unless the deck switches it off
+    # Phase 4.M spec D6 (OQ-63 item 1): the readable companion, unless the deck switches it off;
+    # switched off, an earlier run's companion is removed (Phase 4.L spec D9, OQ-62 item 8)
     if deck.sections["output"]["readable"]
         _write_readable(joinpath(dir, "readable.h5"), result, problem; deck=eff, source="fit",
             gn_decrease=decrease)
+    else
+        rm(joinpath(dir, "readable.h5"); force=true)
     end
     return result
 end

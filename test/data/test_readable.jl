@@ -8,6 +8,7 @@ using OTIS
 # test_uncertainty.jl's SX deck on noisy streaks (camera b's first two wavelength rows masked), whose
 # problem types the "uncertainty" gate has already compiled; the RD deck's rows (an interval, a held
 # series, dependents, scalars, a frozen variable, a near-bound entry) are test/slow/test_readable.jl's.
+# RD14 is Phase 4.L's (spec D9, OQ-62 item 8): a key-off fit removes an earlier run's readable.h5.
 
 include(joinpath(@__DIR__, "..", "fixtures", "readable_fixture.jl"))
 
@@ -334,4 +335,29 @@ end
                 sc.coarse_bin, sc.counts, sc.status, sc.decrease, sc.values, sc.near_bound, sc.s_stat,
                 sc.n_near_bound))
     end
+end
+
+# ------------------------------------------------------------------------------------------
+# RD14: a key-off fit removes an earlier run's readable.h5 (Phase 4.L spec D9; OQ-62 item 8)
+# ------------------------------------------------------------------------------------------
+
+@testset "RD14: readable = false removes an earlier run's readable.h5; result.jld2 the same either way" begin
+    dir = joinpath(_RD_DIR, "out_rd14")
+    on_deck = read_deck(_rd_write(_RD_DIR, "rd14_on.toml", _rd_sx_text(_RD_SA, _RD_SB, dir)))
+    off_deck = read_deck(_rd_write(_RD_DIR, "rd14_off.toml", _rd_sx_text(_RD_SA, _RD_SB, dir; readable=false)))
+    _rd_fit(on_deck)
+    @test sort(readdir(dir)) == ["effective_deck.toml", "readable.h5", "result.jld2"]
+    on = _rd_dict(joinpath(dir, "result.jld2"))
+    _rd_fit(off_deck)
+    @test sort(readdir(dir)) == ["effective_deck.toml", "result.jld2"]
+    off = _rd_dict(joinpath(dir, "result.jld2"))
+    # RD2's comparison: every dataset by name, bitwise, but the three clock datasets and the deck text,
+    # which differs only by its [output] table
+    @test Set(keys(on)) == Set(keys(off))
+    clock = ("meta/created", "meta/created_unix", "fit/elapsed")
+    @test sort([k for k in keys(on) if !(k in clock) && k != "deck" && !isequal(on[k], off[k])]) == String[]
+    @test replace(off["deck"], "readable = false" => "readable = true") == on["deck"]
+    # into the same directory again, now without a companion: nothing raised, nothing written
+    @test _rd_fit(off_deck) isa FitResult
+    @test sort(readdir(dir)) == ["effective_deck.toml", "result.jld2"]
 end

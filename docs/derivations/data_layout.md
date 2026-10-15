@@ -198,7 +198,8 @@ shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
 | `fit/term_values` | `Float64` | `(n_terms)` | yes |
 | `fit/npixels`, `fit/iterations`, `fit/f_calls`, `fit/g_calls` | `Int64` | scalar | yes |
 | `fit/converged` | `UInt8` | scalar | yes |
-| `fit/status`, `fit/optimizer` | `String` | scalar | yes |
+| `fit/status` | `String` | scalar, the `FitResult`'s `status` without its colon: for `levenberg_marquardt` `"gradient_norm"`, `"x_tolerance"`, `"f_tolerance"`, `"iterations"` or, with `lm_rtol > 0`, `"lm_rtol"` (Phase 4.L spec D6); for `lbfgs` also `"saturated"`, `"converged_at_start"` and `"failed"`; `"steps"` for `noisy_descent`; a sequence's last member's | yes |
+| `fit/optimizer` | `String` | scalar | yes |
 | `fit/termination` | `String` | scalar, Optim's finer code (`:none` for the non-Optim optimizers) | yes |
 | `fit/near_bound_fraction` | `Float64` | scalar, `_near_bound_fraction(result)` | yes |
 | `fit/gn_decrease` | `Float64` | scalar, the Gauss–Newton predicted decrease at `fit/theta` over the free entries; `NaN` when `JᵀJ` there is not positive definite (Phase 4.B spec D5) | only when `write_result` is given it, which `fit(deck)` always does |
@@ -460,6 +461,29 @@ prints, and `progress: joint` before the joint fit. A negative value is refused 
 change nothing about the fit: every result is the same, bitwise, with them on or off. Nothing is added to
 the result file, and the key is not a version bump.
 
+**`lm_rtol` and `lm_rtol_window`** (Phase 4.L, Step 4.L.1, spec D4 to D6; [OQ-62](../../dev/open_questions.md#oq-62)):
+two keys of `[optimizer.levenberg_marquardt]` alone, the stall test:
+
+```toml
+[optimizer.levenberg_marquardt]
+lm_rtol = 1e-6
+lm_rtol_window = 50
+```
+
+With `lm_rtol > 0` the fit ends, converged, with status `lm_rtol` (`fit/status = "lm_rtol"` in the result
+file) once the objective has moved by at most `lm_rtol` of itself over the last `lm_rtol_window` accepted
+steps, so a fit that has reached a plateau ends there instead of running on to its `iterations` cap. The
+window counts accepted steps, the trajectory's rows: on a fit with rejected steps it spans more iterations
+than its value. Every other stop of `levenberg_marquardt` fires first, where it fires without the keys. A
+tolerance of `1e-6` is the change the progress lines show, since they print the objective to six
+significant figures: the fit stops when its printed objective has not moved over the window. `fit`'s
+checks all run as before, and the `gn_decrease` warning still says whether the stopped point is a minimum.
+Up to the row where it stops, the fit is the fit without the keys, bitwise. The defaults are `lm_rtol =
+0.0` (off) and `lm_rtol_window = 50`, filled into the effective deck wherever the deck gives the table;
+`read_deck` refuses an `lm_rtol` that is negative, `nan` or `inf`, and an `lm_rtol_window` below 1.
+`fit/termination` is `"none"` for this stop, as for every `levenberg_marquardt` stop. Not a version bump:
+the keys are new in an existing table, and `fit/status` is an existing dataset.
+
 **`pixel_integration`** (Phase 4.F, Step 4.F.2, spec D12): an `[instrument]` or
 `[channel.<name>.instrument]` key, `pixel_integration = { subsamples = N }`, a positive integer,
 builds `PixelIntegration(subsamples = N)` (`instrument.md` Section 7). Without the key no
@@ -673,8 +697,9 @@ since Phase 4.M; the result file's `scatter/` group does not write them and is u
 **What it is not.** Not a round trip: nothing in the package reads it, and `result.jld2` stays the
 record of a fit; `leaves/`, `fit/theta`, the trajectory, `effects/*`, the stages, the calibration
 scan and the covariance matrices are only there. Its own family: a change to it bumps
-`otis-readable-<n>`, never `otis-result-3`. `[output] readable = false` writes nothing (an earlier
-`readable.h5` in the directory is left as it was).
+`otis-readable-<n>`, never `otis-result-3`. `[output] readable = false` writes nothing, and removes a
+`readable.h5` an earlier run left in the directory (Phase 4.L spec D9, [OQ-62](../../dev/open_questions.md#oq-62)
+item 8), so the directory never holds a companion older than its `result.jld2`.
 
 ### An h5py snippet
 

@@ -577,7 +577,7 @@ Base.show(io::IO, opt::LBFGS) = print(io, "LBFGS(m = ", opt.m,
 """
     LevenbergMarquardt(; iterations = 2000, g_abstol = 1e-8, x_reltol = 1e-10, mu_init = 1e-3,
                         cgls_tol = 1e-6, cgls_maxiter = 2000, seed = 20260908,
-                        precondition = true, progress = 0)
+                        precondition = true, progress = 0, lm_rtol = 0.0, lm_rtol_window = 50)
 
 Levenberg-Marquardt, expected fastest near the minimum for a least-squares objective
 ([OQ-20](../../dev/open_questions.md#oq-20)). `iterations` caps the outer loop; `g_abstol` stops
@@ -608,7 +608,15 @@ solve. Deck-settable like every other field, on the same footing as `LBFGS`'s ow
 nothing; `n > 0` makes `solve` print a header, a line at every `n`th accepted step (the start included)
 and a final line to its `progress_io`, each flushed (`solve`'s docstring). Refused below 0.
 
-Spec D28, D32, D41; Phase 4.K spec D4.
+**`lm_rtol` and `lm_rtol_window`** (Phase 4.L spec D4, [OQ-62](../../dev/open_questions.md#oq-62)): the
+stall test. `lm_rtol = 0.0`, the default, is off, and the fit is exactly what it was without it. With
+`lm_rtol > 0`, `solve` ends the fit, converged, with `status = :lm_rtol` when the objective 𝒪 has moved
+by at most `lm_rtol * |𝒪|` over the last `lm_rtol_window` accepted steps (`solve`'s docstring), so a
+fit that has stopped improving ends there instead of at `iterations`. The window counts accepted steps,
+the trajectory's rows, not attempted ones. `lm_rtol` must be a finite number ≥ 0 and `lm_rtol_window`
+an integer ≥ 1; anything else is refused.
+
+Spec D28, D32, D41; Phase 4.K spec D4; Phase 4.L spec D4.
 """
 Base.@kwdef struct LevenbergMarquardt <: AbstractOptimizer
     iterations::Int = 2000
@@ -620,12 +628,18 @@ Base.@kwdef struct LevenbergMarquardt <: AbstractOptimizer
     seed::Int = 20260908
     precondition::Bool = true
     progress::Int = 0
+    lm_rtol::Float64 = 0.0
+    lm_rtol_window::Int = 50
     function LevenbergMarquardt(iterations, g_abstol, x_reltol, mu_init, cgls_tol, cgls_maxiter, seed,
-        precondition, progress)
+        precondition, progress, lm_rtol, lm_rtol_window)
         progress >= 0 || throw(ArgumentError(
             "LevenbergMarquardt: progress must be an integer ≥ 0; got $progress"))
+        (isfinite(lm_rtol) && lm_rtol >= 0) || throw(ArgumentError(
+            "LevenbergMarquardt: lm_rtol must be a finite number ≥ 0; got $lm_rtol"))
+        lm_rtol_window >= 1 || throw(ArgumentError(
+            "LevenbergMarquardt: lm_rtol_window must be an integer ≥ 1; got $lm_rtol_window"))
         return new(iterations, g_abstol, x_reltol, mu_init, cgls_tol, cgls_maxiter, seed, precondition,
-            progress)
+            progress, lm_rtol, lm_rtol_window)
     end
 end
 
@@ -743,6 +757,20 @@ theta) rejects every trial step forever, doubling `mu` without bound until an ov
 reaches CGLS as a `NaN`. Every **accepted** iterate appends `(k, 𝒪, chi2, R)` to the trajectory,
 `k` the outer loop's own counter, so a run with rejected steps has gaps in `k`.
 
+**The stall test** (Phase 4.L spec D5 and D6, [OQ-62](../../dev/open_questions.md#oq-62)): with
+`opt.lm_rtol > 0`, checked before each trial step, immediately after the gradient test, with `i` the
+accepted steps so far (`length(trajectory) - 1`) and `w = opt.lm_rtol_window`: when `i >= w` and
+`abs(trajectory[i + 1 - w].objective - trajectory[i + 1].objective) <= opt.lm_rtol *
+abs(trajectory[i + 1].objective)`, the fit ends with `status = :lm_rtol` and `converged = true`: 𝒪
+has moved by at most `lm_rtol` of itself over the last `w` accepted steps. The window counts accepted
+steps, the trajectory's rows, so a run of rejected steps, which leaves 𝒪 unchanged, never passes for a
+stall. Every other stop fires first, where it fires without the key: `:gradient_norm` at the same loop
+top, `:x_tolerance` and `:f_tolerance` inside the previous trial step, `:iterations` at the loop's end;
+so the test first holds right after an accepted step, and `result.iterations` is then that step's `k`,
+the last row's `iteration`. The test evaluates nothing and changes nothing, so a fit it ends is the fit
+without it, bitwise, up to that row. `lm_rtol = 0.0`, the default, never reads the trajectory.
+`FitResult.termination` is `:none` for this stop, as for every `LevenbergMarquardt` stop.
+
 `cgls_iterations`, given a `Vector{Int}`, has one entry per attempted outer iteration (accepted
 or not) pushed onto it: the number of CGLS iterations that trial step took (D43 item 9's
 measurement hook). `mu_trace`, given a `Vector{Float64}`, has one entry per attempted outer
@@ -762,7 +790,7 @@ with `opt.g_abstol`. Nothing is evaluated for them that the fit does not already
 `_count_near_bound` aside, so every `FitResult` field but `elapsed` is the same, bitwise, with the lines
 on and off.
 
-Spec D28; Phase 4.K spec D5 to D7.
+Spec D28; Phase 4.K spec D5 to D7; Phase 4.L spec D5 and D6.
 """
 function solve(problem::AbstractFitProblem, opt::LevenbergMarquardt;
     start::AbstractVector=flatten(problem.pspec),
@@ -804,6 +832,21 @@ function solve(problem::AbstractFitProblem, opt::LevenbergMarquardt;
             status = :gradient_norm
             converged = true
             break
+        end
+        # The stall test (Phase 4.L spec D5, OQ-62 item 1): the objective's change over the last
+        # lm_rtol_window accepted steps, two rows of the trajectory apart; off at lm_rtol = 0.0.
+        if opt.lm_rtol > 0
+            i = length(trajectory) - 1
+            w = opt.lm_rtol_window
+            if i >= w
+                O_now = trajectory[i+1].objective
+                O_then = trajectory[i+1-w].objective
+                if abs(O_then - O_now) <= opt.lm_rtol * abs(O_now)
+                    status = :lm_rtol
+                    converged = true
+                    break
+                end
+            end
         end
         iters_run = k
         mu_trace === nothing || push!(mu_trace, mu)   # mu going into this iteration's decision
