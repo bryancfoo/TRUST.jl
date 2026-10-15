@@ -42,6 +42,7 @@ include("config/options.jl")              # new (3.6a): option structs, spec D32
 include("config/registry.jl")             # new (3.6a): component registries, spec D32
 include("data/result.jl")                 # new (3.6a): write_result/read_result, spec D34
 include("data/start.jl")                  # new (4.I.1): write_start/read_start, the otis-start-1 layout
+include("data/readable.jl")               # new (4.M.1): write_readable, the otis-readable-1 layout
 include("config/deck.jl")                 # new (3.6b): read_deck, build_problem, effective_deck, fit
 include("config/scatter.jl")              # new (4.A.4b): slice_scatter; needs Deck and D50's stages
 
@@ -92,6 +93,9 @@ export write_result, read_result
 
 # data (4.I.1): the start file
 export write_start, read_start
+
+# data (4.M.1): the readable companion of a result file
+export write_readable
 
 # config (3.6b): build_problem, Deck and DECK_VERSION are deliberately not exported (the chunk 12
 # prompt names exactly these three); tests reach the others through OTIS.build_problem etc.

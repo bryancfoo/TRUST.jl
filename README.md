@@ -239,6 +239,16 @@ the equivalent single-state ion's. Trace files are now written as `otis-trace-2`
 number, and an older trace file is refused. For every integer charge the model and every fit are
 exactly what they were.
 
+**Phase 4.M (the readable fit output) is complete.** Every deck fit now also writes `readable.h5`
+beside `result.jld2`, a file to read directly from Python: the time and wavelength axes in ns and nm;
+per camera the data, σ and model the fit was made against, every pixel, with the mask of fitted pixels
+and the χ² of each time bin; every fitted variable and dependent as one array in its deck unit, with
+its unit and a flag per bin saying whether it was fitted, held, a dependent or left on a bound; and the
+fit's summary. In h5py the arrays read one row per time bin. `write_readable(path, result, problem;
+deck, laplace, scatter)` writes the same file from a script, adding the Laplace σ and, after
+`slice_scatter`, every fine window's fitted values with that window's own data and model. `readable =
+false` in `[output]` switches the file off; `result.jld2` and every fit are the same either way.
+
 ## Installing and testing
 
 ```

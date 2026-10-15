@@ -283,7 +283,9 @@ the `scatter` keyword, and `scatter.theta == result.theta` is required exactly (
 otherwise, `"scatter was computed at a different θ than result.theta"`) -- `write_result` has no
 other way to know the `ScatterResult` it is given was computed at the θ `result` itself reports.
 One entry per **free** (`vary && time_varying`) fitted variable only; a scalar or a frozen variable
-has no `scatter/variables/<name>` group at all.
+has no `scatter/variables/<name>` group at all. The five fields Phase 4.M added to `ScatterResult`
+(each window's `data`, `sigma`, `mask`, `model` and `chi2`) are not written here, and this group is
+unchanged by them; the readable file carries them (Section 6).
 
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
@@ -553,4 +555,137 @@ with h5py.File("start.jld2", "r") as f:
     axis_s = f["axis"][:]                          # shape (N,), s
     Te = f["variables/T_e/values"][:]              # shape (N,) or (1,)
     unit = f["variables/T_e/unit"][()].decode() if "unit" in f["variables/T_e"] else ""
+```
+
+## 6. The readable layout, `otis-readable-1` (Phase 4.M, Step 4.M.1, spec D5)
+
+One fit, written to be read directly from Python or any HDF5 reader
+([OQ-63](../../dev/open_questions.md#oq-63)): the time and wavelength axes in ns and nm, per channel
+the data, σ, model and mask the fit was made against with the χ² of each bin, every fitted variable
+and dependent in its deck unit, and, when given, the Laplace σ and the per-slice scatter's windows.
+**`fit(deck)` writes it as `<output.dir>/readable.h5`**, after `result.jld2` and
+`effective_deck.toml`, with `source = "fit"`, the effective deck's text and `fit/gn_decrease`, unless
+the deck switches it off (a new key in an existing table, so not a deck-version bump; the effective
+deck carries it, `true` by default):
+
+```toml
+[output]
+dir = "runs/my_fit"
+readable = false   # default true: readable.h5 is written beside result.jld2
+```
+
+A script writes the same file with `write_readable(path, result, problem; deck = nothing, laplace =
+nothing, scatter = nothing)`, `problem` the one `result` was fitted from or one rebuilt from the same
+deck (its channel names, time axis, `ntheta` and image sizes must match `result`'s); **each call
+rewrites the whole file**. After a deck fit, the call that adds the Laplace σ and the scatter is
+
+```julia
+deck = read_deck("my_fit.toml")
+result = fit(deck)
+problem, _, _ = OTIS.build_problem(deck)
+pol = polish(problem, result)
+lap = laplace(problem, pol.result.theta)
+sc = slice_scatter(deck, pol.result)          # a deck with [[fit.regions]], no intervals, no hold
+dir = deck.sections["output"]["dir"]
+write_readable(joinpath(dir, "readable.h5"), pol.result, problem;
+    deck = read(joinpath(dir, "effective_deck.toml"), String), laplace = lap, scatter = sc)
+```
+
+| Dataset | Type | Shape | Written |
+|---|---|---|---|
+| `layout_version` | `String` | scalar, `"otis-readable-1"` | always |
+| `README` | `String` | scalar: what the file holds, its orientation and its units | always |
+| `source` | `String` | `"fit"` or `"write_readable"` | always |
+| `deck` | `String` | the effective deck's TOML text | when given and not empty (`fit(deck)` always gives it) |
+| `t_ns` | `Float64` | `(N_t)`, the fitted bins' centres, ns | always |
+| `bin_lo_ns`, `bin_hi_ns` | `Float64` | `(N_t)`, each bin's averaging window, ns; equal to `t_ns` when the data were not averaged | always |
+| `channels/<name>/lambda_nm` | `Float64` | `(N_λ,c)`, nm | one group per channel, `main` for a shorthand deck |
+| `channels/<name>/data`, `sigma`, `model` | `Float64` | `(N_λ,c, N_t)`, every pixel | yes |
+| `channels/<name>/mask` | `UInt8` | `(N_λ,c, N_t)`, `1` where the pixel was fitted | yes |
+| `channels/<name>/chi2` | `Float64` | `(N_t)`, per bin over the fitted pixels | yes |
+| `channels/<name>/npixels` | `Int64` | `(N_t)`, the fitted pixels per bin | yes |
+| `channels/<name>/chi2_total` | `Float64` | scalar, the sum of `chi2`: the channel's unweighted χ² | yes |
+| `channels/<name>/weight` | `Float64` | scalar, the channel's weight | yes |
+| `params/<name>` | `Float64` | `(N_t)`, or scalar for a scalar variable; the deck unit; `NaN` outside the variable's interval | one per variable and per dependent |
+| `units/<name>` | `String` | scalar, never empty (`"-"` for no unit) | yes |
+| `flags/<name>` | `String` | `(N_t)`, or scalar for a scalar variable | yes |
+| `fit/chi2`, `chi2_per_n`, `R`, `objective` | `Float64` | scalar | always |
+| `fit/status`, `termination` | `String` | scalar | always |
+| `fit/converged` | `UInt8` | scalar | always |
+| `fit/iterations`, `npixels`, `ntheta` | `Int64` | scalar | always |
+| `fit/gn_decrease` | `Float64` | scalar | from `fit(deck)`, or from `write_readable` with `laplace` |
+| `laplace/decrease` | `Float64` | scalar | only with `laplace` |
+| `laplace/sigma/<name>`, `sigma_samp/<name>` | `Float64` | as `params/<name>`, raw, `NaN` where the entry was left out | one per fitted variable |
+| `laplace/near_bound/<name>` | `UInt8` | as `params/<name>` | yes |
+| `scatter/t_ns` | `Float64` | `(N_w)`, the fine windows' centres, ns | only with `scatter` |
+| `scatter/bin` | `Int64` | `(N_w)`, the fitted bin each window lies in | yes |
+| `scatter/status` | `String` | `(N_w)` | yes |
+| `scatter/decrease`, `chi2` | `Float64` | `(N_w)`, each window's own | yes |
+| `scatter/params/<name>` | `Float64` | `(N_w)`, the deck unit | one per free time-varying variable |
+| `scatter/near_bound/<name>` | `UInt8` | `(N_w)` | yes |
+| `scatter/sigma_stat/<name>` | `Float64` | `(N_t)`, **never divided by `sqrt(m)`** | yes |
+| `scatter/channels/<name>/data`, `sigma`, `model` | `Float64` | `(N_λ,c, N_w)` | one group per channel |
+| `scatter/channels/<name>/mask` | `UInt8` | `(N_λ,c, N_w)` | yes |
+
+**The orientation** is Section 1's: arrays are written in Julia's column-major order, wavelength
+first, so h5py reads `(N_t, N_λ)`, **one row per time bin**, and the file's own `README` says so.
+One layout serves single-channel and joint fits: every channel's arrays sit under
+`channels/<name>/` and nothing is repeated at the top level.
+
+**The units.** The parameters are not converted: `params/<name>` is `FitResult.values[name]`, which
+already holds each variable in the unit of the key it is bound through (Phase 3 spec D26), so a fit
+of `logn` bound through `n_e_cm3 = "ne"`, `ne = "10^logn"` reads `logn` as written and `ne` in cm⁻³.
+The axes are converted from SI by the package's converters (`t_from_si`, `lambda_from_si`). **`units/<name>`**
+is the `unit_key` of the name's first binding, to a plasma leaf or an effect parameter alike
+(`"T_eV"`, `"n_e_cm3"`, `"u_kms"`, `"fwhm_nm"`, `"lambda_offset_nm"`), and **`"-"`** for a
+dimensionless target, a key already in SI (`u_ms`, `n_e_m3`, `mass_kg`: factor one) or a name bound
+to nothing (a dependent only other dependents read). The result file's `variables/<name>/unit` names
+leaf bindings only, so the two differ for a variable bound to an effect parameter.
+
+**No scalar string in the file is empty** (the user's choice of 2026-10-14, Phase 4.M spec D4 U4):
+h5py 3.9 cannot read an empty scalar string as JLD2 writes it (`H5Tget_size` fails on its zero-size
+type), so a unit with no name is `"-"`, an empty `deck` text is not written, and the only empty strings
+are elements of a `flags` array (a variable-length string array, which h5py reads). The result file's
+own `variables/<name>/unit = ""` has the same defect and is not changed here.
+
+**The χ² per bin** is computed once, over the problem's fitted pixels, `((model − data)/σ)²` summed
+down each column; `chi2_total` is its sum, the channel's unweighted χ² (the result file's
+`channels/<name>/chi2`, to rounding). `fit/chi2` is the weighted total over channels, as in the
+result file, and `fit/chi2_per_n` is `fit/chi2 / fit/npixels`: **the scaled Laplace σ is
+`laplace/sigma/<name> * sqrt(fit/chi2_per_n)`**; the file stores the raw σ and commits to no
+reporting rule.
+
+**The flags**: `"F"` fitted; `"H"` not fitted (held at a `[fit.hold]` series, or frozen at its `init`
+with `vary = false`); `"B"` fitted and ended within `BOUND_PROXIMITY_TOL` of a bound, so a value on
+its bound and not a measurement; `"D"` a dependent; `""` wherever `params` is `NaN` (outside the
+variable's interval).
+
+**The bin windows** come from the averaging that made the data (`average_regions`'s `regions_starts`,
+`regions_ends` and `regions_nbins`, Section 1), computed as it computes them, when those windows
+count exactly the fitted bins; otherwise (data never averaged, or a prepared averaged file cropped by
+`t_range_ns`) both equal `t_ns`.
+
+**The scatter's windows** are `slice_scatter`'s: each fine window's averaged data, σ and mask as its
+one-bin fit saw them, and its model at that fit's polished solution, with no temporal IRF (a one-bin
+window cannot carry one). `scatter/chi2` is each window's weighted χ². `ScatterResult` keeps them
+since Phase 4.M; the result file's `scatter/` group does not write them and is unchanged.
+
+**What it is not.** Not a round trip: nothing in the package reads it, and `result.jld2` stays the
+record of a fit; `leaves/`, `fit/theta`, the trajectory, `effects/*`, the stages, the calibration
+scan and the covariance matrices are only there. Its own family: a change to it bumps
+`otis-readable-<n>`, never `otis-result-3`. `[output] readable = false` writes nothing (an earlier
+`readable.h5` in the directory is left as it was).
+
+### An h5py snippet
+
+Checked on 2026-10-14 with h5py 3.9.0 against files the package wrote (Phase 4.M spec D23): every
+dataset reads, each channel's `data` as `(N_t, N_λ)`, and χ² recomputed with numpy from `data`, `model`,
+`sigma` and `mask` equals `chi2` to within 4e-16, relative.
+
+```python
+import h5py
+with h5py.File("readable.h5", "r") as f:
+    lam = f["channels/main/lambda_nm"][:]   # (N_λ,), nm
+    spectrum = f["channels/main/data"][5]   # time bin 5's spectrum, against lam
+    Te = f["params/T_e"][:]                 # (N_t,), in the unit f["units/T_e"][()].decode()
 ```

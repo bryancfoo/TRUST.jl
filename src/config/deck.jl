@@ -1076,13 +1076,17 @@ end
 # [output]
 # ------------------------------------------------------------------------------------------
 
-const _OUTPUT_KEYS = ("dir",)
+const _OUTPUT_KEYS = ("dir", "readable")
 
 function _validate_output_section(given::AbstractDict)
     _check_known_keys(given, _OUTPUT_KEYS, "output")
     haskey(given, "dir") || throw(ArgumentError("read_deck: section \"output\" needs \"dir\""))
     given["dir"] isa AbstractString || throw(ArgumentError("read_deck: \"output.dir\" must be a string"))
-    return Dict{String,Any}("dir" => String(given["dir"]))
+    # Phase 4.M spec D14 (OQ-63 item 1): the readable companion's switch, default true, a Bool only
+    readable = get(given, "readable", true)
+    readable isa Bool || throw(ArgumentError(
+        "read_deck: key \"readable\" in section \"output\" must be true or false; got $(repr(readable))"))
+    return Dict{String,Any}("dir" => String(given["dir"]), "readable" => readable)
 end
 
 # ------------------------------------------------------------------------------------------
@@ -2508,6 +2512,11 @@ the resonance-width check, `fit` calls `_warn_iteration_cap` for each stage of a
 order they ran, and then for the final fit: one warning for each that stopped at its iteration cap.
 It changes nothing.
 
+**The readable companion** (Phase 4.M spec D6, [OQ-63](../../dev/open_questions.md#oq-63)): after
+`result.jld2` and `effective_deck.toml`, `fit` writes `<dir>/readable.h5` (`otis-readable-1`, the file
+`write_readable` writes, with `source = "fit"`, the effective deck's text and `fit/gn_decrease`),
+unless the deck gives `[output] readable = false`. `result.jld2` is the same either way.
+
 Spec D33, D40.
 """
 function fit(deck::Deck)
@@ -2540,6 +2549,11 @@ function fit(deck::Deck)
         gn_decrease=decrease, stages=staged, start=start)
     open(joinpath(dir, "effective_deck.toml"), "w") do io
         write(io, eff)
+    end
+    # Phase 4.M spec D6 (OQ-63 item 1): the readable companion, unless the deck switches it off
+    if deck.sections["output"]["readable"]
+        _write_readable(joinpath(dir, "readable.h5"), result, problem; deck=eff, source="fit",
+            gn_decrease=decrease)
     end
     return result
 end

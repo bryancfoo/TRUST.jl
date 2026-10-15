@@ -52,6 +52,13 @@ one-bin axis, so the decoupling into independent windows is exact only without o
 approximation OQ-24 item 3's "each detector slice fitted on its own" makes, stated and accepted
 for this phase, not corrected.
 
+**Each window's data and model** (Phase 4.M spec D13, [OQ-63](../../dev/open_questions.md#oq-63)
+item 5): the returned `ScatterResult` also keeps, per channel, column `j` of `data`, `sigma` and
+`mask` the window problem's own (its one-bin averaged image, σ and mask) and of `model`
+`measure(pol.result.experiments[c])`, the model at the window's polished solution, one evaluation
+per window; and `chi2[j]`, that solution's χ². Nothing else in the loop changes, so every value the
+scatter reported before is bitwise what it was.
+
 Spec D51.
 """
 function slice_scatter(deck::Deck, result::FitResult;
@@ -143,6 +150,13 @@ function slice_scatter(deck::Deck, result::FitResult;
     decrease = Vector{Float64}(undef, n_fine)
     values = Dict{String,Vector{Float64}}(name => Vector{Float64}(undef, n_fine) for name in free)
     near_bound = Dict{String,BitVector}(name => falses(n_fine) for name in free)
+    # Phase 4.M spec D13 (OQ-63 item 5): each window's data, sigma, mask and model, one column per
+    # window, and its chi2, kept for write_readable.
+    win_data = [Matrix{Float64}(undef, length(fine_data[c].lambda), n_fine) for c in 1:nchannels]
+    win_sigma = [Matrix{Float64}(undef, length(fine_data[c].lambda), n_fine) for c in 1:nchannels]
+    win_mask = [Matrix{Bool}(undef, length(fine_data[c].lambda), n_fine) for c in 1:nchannels]
+    win_model = [Matrix{Float64}(undef, length(fine_data[c].lambda), n_fine) for c in 1:nchannels]
+    win_chi2 = Vector{Float64}(undef, n_fine)
 
     # D51 step 5: each fine window, its own one-bin joint fit, LM then polish.
     for jj in 1:n_fine
@@ -164,6 +178,14 @@ function slice_scatter(deck::Deck, result::FitResult;
             values[name][jj] = pol.result.values[name][1]
             near_bound[name][jj] = pol.result.near_bound[name][1]
         end
+        for c in 1:nchannels
+            ch = _channel_problem(problem_j, c)
+            win_data[c][:, jj] = ch.data.image
+            win_sigma[c][:, jj] = ch.sigma
+            win_mask[c][:, jj] = ch.mask
+            win_model[c][:, jj] = measure(pol.result.experiments[c])
+        end
+        win_chi2[jj] = pol.result.chi2
     end
 
     # D51 step 6: the detrended spread, per coarse bin and free variable, over that bin's own
@@ -179,5 +201,5 @@ function slice_scatter(deck::Deck, result::FitResult;
     end
 
     return ScatterResult(copy(result.theta), m, t_fine, coarse_bin, counts, status, decrease,
-        values, near_bound, s_stat, n_near_bound)
+        values, near_bound, s_stat, n_near_bound, win_data, win_sigma, win_mask, win_model, win_chi2)
 end

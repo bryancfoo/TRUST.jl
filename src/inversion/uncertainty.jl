@@ -542,8 +542,17 @@ report, a fine-grid **joint** fit at single-slice resolution.
     windows, **never divided by `sqrt(m)`** (Pitfall 40);
   - `n_near_bound`: length = the number of coarse bins, the count of `near_bound` over the bin's
     own fine windows.
+- Per channel, in channel order (Phase 4.M spec D13, [OQ-63](../../dev/open_questions.md#oq-63) item
+  5), each `(N_λ, N_fine)`, column `j` fine window `j` as its one-bin fit saw it: `data`, `sigma` and
+  `mask`, the window's averaged image, σ and used-pixel mask; `model`, the model at the window's
+  solution.
+- `chi2`: length `N_fine`, each window's χ² at its solution (the weighted total over channels).
 
-Spec D51.
+The eleven-argument positional constructor (every field but the last five) stays, as an outer method
+filling those five empty, so a `ScatterResult` built by hand keeps compiling; `write_result` writes
+none of the five (the result file's `scatter/*` is unchanged), `write_readable` writes all of them.
+
+Spec D51; Phase 4.M spec D13.
 """
 struct ScatterResult
     theta::Vector{Float64}
@@ -557,7 +566,17 @@ struct ScatterResult
     near_bound::Dict{String,BitVector}
     s_stat::Dict{String,Vector{Float64}}
     n_near_bound::Dict{String,Vector{Int}}
+    data::Vector{Matrix{Float64}}
+    sigma::Vector{Matrix{Float64}}
+    mask::Vector{Matrix{Bool}}
+    model::Vector{Matrix{Float64}}
+    chi2::Vector{Float64}
 end
+
+ScatterResult(theta, m, t_fine, coarse_bin, counts, status, decrease, values, near_bound, s_stat,
+    n_near_bound) = ScatterResult(theta, m, t_fine, coarse_bin, counts, status, decrease, values,
+    near_bound, s_stat, n_near_bound, Matrix{Float64}[], Matrix{Float64}[], Matrix{Bool}[],
+    Matrix{Float64}[], Float64[])
 
 """
     _median_finite(v::AbstractVector) -> Float64
