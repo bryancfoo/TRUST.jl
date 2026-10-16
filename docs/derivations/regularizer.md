@@ -140,6 +140,11 @@ current value, so it depends on theta through bin `a(r)` — and *only* through 
 `∂N_r/∂x_j = delta_{j,a(r)}`. This single fact is what Section 4 turns into `relative`'s
 quotient-rule term.
 
+**`relative` is biased upward** (Phase E's finding on real data; Phase 4.N spec D23). It divides each
+curvature row by the local value, so the same curvature costs more where the trace is small: a cold
+stretch beside a hot one is far dearer than a smooth ramp between them, and the term pulls a cold
+stretch up toward its neighbours.
+
 ### The withdrawn design, and why it changed
 
 **Until 2026-09-13 this file specified the opposite order: normalize the trace, then apply the

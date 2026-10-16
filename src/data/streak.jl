@@ -99,17 +99,34 @@ nbins(sd::StreakData) = length(sd.t)
 # --- plotting stubs (spec D26; methods exist only when Makie is loaded, Step 2.6) ---
 
 """
-    streakplot(sd::StreakData; kwargs...)
-    streakplot!(ax, sd::StreakData; kwargs...)
+    streakplot(sd::StreakData; masked = true, kwargs...)
+    streakplot!(ax, sd::StreakData; masked = true, kwargs...)
     streakplot(lambda, t, image; kwargs...)
 
-A heatmap of a measured streak, λ up, t across. A method exists only when Makie is loaded.
+A heatmap of a measured streak, λ up, t across. A method exists only when Makie is loaded. With
+`masked = true`, the default, a `StreakData` with a mask is drawn with its masked-out pixels blank
+(`NaN`, Makie's `nan_color`; `_masked_image`, Phase 4.N spec D18); `masked = false` draws every pixel.
 
-Spec D26.
+Spec D26; Phase 4.N spec D18.
 """
 function streakplot end
 function streakplot! end
 @doc (@doc streakplot) streakplot!
+
+"""
+    _masked_image(sd::StreakData) -> Matrix
+
+What `streakplot` draws of `sd` (Phase 4.N spec D18, [OQ-65](../../dev/open_questions.md#oq-65) item 1):
+`sd.image` itself, not a copy, when `sd` has no mask; otherwise a `Matrix{Float64}` copy of the image
+with `NaN` at every pixel whose mask is `false` (the pixels the fit does not use), every other pixel
+unchanged. Pure; `sd` is not modified.
+"""
+function _masked_image(sd::StreakData)
+    sd.mask === nothing && return sd.image
+    img = Matrix{Float64}(sd.image)
+    img[.!sd.mask] .= NaN
+    return img
+end
 
 """
     spectrumplot(lambda, P; kwargs...)

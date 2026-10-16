@@ -401,5 +401,8 @@ equal-variance uniform spread captures most of the smearing, and the rays captur
 model and Jacobian take 2.18 and 1.96 times the five-node `KSmearing`'s (warmed medians, 8.06 against
 3.70 ms and 31.8 against 16.2 ms; Phase 4.G spec D10).
 
+**No smearing** is written by omitting the effect, not by a degenerate table: `TabulatedKSmearing`
+refuses repeated offsets (Phase E's finding; Phase 4.N spec D23).
+
 **Not modelled.** A flow direction per ray (above); a fittable scale on the offsets; absolute angles;
 a ray list on the `Collection`; reading the rays from a file (the deck quotes them).

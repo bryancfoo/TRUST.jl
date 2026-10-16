@@ -31,13 +31,32 @@ const TRACE_LAYOUT_VERSION = "otis-trace-2"
 const _RESERVED_META_KEYS = ("source", "created_unix", "otis_version",
     "lambda_probe_nm", "theta_deg", "polarization_deg", "k_model")
 
+"""
+    _empty_marker(s::AbstractString) -> String
+
+`s`, or `"-"` when `s` is empty (Phase 4.N spec D20, `conventions.md` Section 4's rule): no writer of the
+package writes an empty scalar string dataset, whose zero-size string type h5py cannot read
+(`H5Tget_size` fails), while an array holding `""` reads. Every reader turns the marker back into `""`
+(`_from_empty_marker`), so a caller sees `""` as before and a file written before Phase 4.N reads the same.
+"""
+_empty_marker(s::AbstractString) = isempty(s) ? "-" : String(s)
+
+"""
+    _from_empty_marker(v) -> v
+
+The readers' half of `_empty_marker` (Phase 4.N spec D20): `""` where a scalar string dataset holds the
+marker `"-"`, every other value as it is. A string deliberately written as `"-"` therefore reads back as
+`""` (the user's choice of 2026-10-16, Phase 4.N summary U2).
+"""
+_from_empty_marker(v) = (v isa AbstractString && v == "-") ? "" : v
+
 function _write_meta!(f, sd::StreakData, source::AbstractString)
-    f["meta/source"] = String(source)
+    f["meta/source"] = _empty_marker(source)
     f["meta/created_unix"] = Float64(time())
     f["meta/otis_version"] = string(pkgversion(OTIS))
     for (k, v) in sd.meta
         k in _RESERVED_META_KEYS && continue
-        f["meta/$k"] = v isa AbstractArray ? collect(v) : v
+        f["meta/$k"] = v isa AbstractArray ? collect(v) : v isa AbstractString ? _empty_marker(v) : v
     end
     return nothing
 end
@@ -59,7 +78,9 @@ Writes `sd` to `path` as a JLD2 file of plain numeric arrays and strings (`docs/
 `layout_version`, `lambda_nm`, `t_ns`, `image`, optionally `sigma` and `mask` (`UInt8`, `1` = use
 the pixel), and a `meta` group (`source`, `created_unix`, `otis_version`, the probe/collection
 geometry keys when given, and every entry of `sd.meta`). Arrays are written in Julia's
-column-major order, **wavelength first**, so an h5py reader sees the transpose `(N_t, N_λ)`.
+column-major order, **wavelength first**, so an h5py reader sees the transpose `(N_t, N_λ)`. An empty
+`source`, or an empty string value in `sd.meta`, is written as `"-"` (Phase 4.N spec D20: h5py cannot read
+an empty scalar string), and `read_streak` returns it as `""`.
 
 `sd`'s element type must be a plain float (`Float64`, `Float32`, ...; converted to `Float64` in
 the file) — a **dual** streak is a computation, not data, and throws naming its element type
@@ -94,7 +115,7 @@ function _read_meta(f)
     meta = Dict{String,Any}()
     haskey(f, "meta") || return meta
     for k in keys(f["meta"])
-        meta[k] = f["meta/$k"]
+        meta[k] = _from_empty_marker(f["meta/$k"])
     end
     return meta
 end
@@ -105,9 +126,11 @@ end
 Reads a streak written by `write_streak`. Throws, naming the dataset and the path, if a required
 dataset is missing; throws, naming the version found and expected, if `layout_version` does not
 match `STREAK_LAYOUT_VERSION`. Converts `lambda_nm`/`t_ns` to SI; converts `mask` back to `Bool`;
-every `meta/*` entry becomes an entry of the returned `StreakData.meta` under its own key.
+every `meta/*` entry becomes an entry of the returned `StreakData.meta` under its own key, a scalar string
+`"-"` as `""` (`write_streak` writes an empty string as `"-"`, Phase 4.N spec D20). A `Bool` (or an array
+of them) reads back as a `Bool`.
 
-Spec D19.
+Spec D19; Phase 4.N spec D20.
 """
 function read_streak(path::AbstractString)
     jldopen(path, "r") do f
@@ -162,9 +185,9 @@ Writes the trace's tabulated values (`docs/derivations/data_layout.md`): `layout
 x N_t`, SI), and a `template` group describing `trace.template` (density, and, per species,
 mass, charge, flow, temperature, fraction, shape name and shape parameters). Does **not** write
 enough to reconstruct a `PlasmaTrace` (that needs the component registry of Step 3.6);
-`read_trace` returns plain arrays.
+`read_trace` returns plain arrays. An empty `source` is written as `"-"` (Phase 4.N spec D20).
 
-Spec D20.
+Spec D20; Phase 4.N spec D20.
 """
 function write_trace(path::AbstractString, trace::PlasmaTrace; source="")
     jldopen(path, "w") do f
@@ -177,7 +200,7 @@ function write_trace(path::AbstractString, trace::PlasmaTrace; source="")
         f["template/n_e_m3"] = Float64(trace.template.n_e)
         _write_species_set!(f, "template/electrons", trace.template.electrons)
         _write_species_set!(f, "template/ions", trace.template.ions)
-        f["meta/source"] = String(source)
+        f["meta/source"] = _empty_marker(source)
         f["meta/created_unix"] = Float64(time())
         f["meta/otis_version"] = string(pkgversion(OTIS))
     end

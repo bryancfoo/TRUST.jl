@@ -7,7 +7,7 @@ using Makie
 
 using OTIS
 using OTIS: PlasmaTrace, StreakData, LeafPath, _resolve_leaf, _leaf_row, _leaf_display_unit,
-    _leaf_value
+    _leaf_value, _masked_image
 
 function _streak_heatmap!(ax, lambda, t, image; kwargs...)
     return Makie.heatmap!(ax, t, lambda, permutedims(image); kwargs...)
@@ -21,20 +21,21 @@ function OTIS.streakplot(lambda, t, image; kwargs...)
     return fig
 end
 
-function OTIS.streakplot(sd::StreakData; kwargs...)
+# Phase 4.N spec D18: masked pixels drawn blank (NaN) unless masked = false.
+function OTIS.streakplot(sd::StreakData; masked::Bool=true, kwargs...)
     lambda_nm = lambda_from_si.(sd.lambda, :lambda_nm)
     t_ns = t_from_si.(sd.t, :t_ns)
     fig = Makie.Figure()
     ax = Makie.Axis(fig[1, 1]; xlabel="t (ns)", ylabel="λ (nm)")
-    hm = _streak_heatmap!(ax, lambda_nm, t_ns, sd.image; kwargs...)
+    hm = _streak_heatmap!(ax, lambda_nm, t_ns, masked ? _masked_image(sd) : sd.image; kwargs...)
     Makie.Colorbar(fig[1, 2], hm)
     return fig
 end
 
-function OTIS.streakplot!(ax, sd::StreakData; kwargs...)
+function OTIS.streakplot!(ax, sd::StreakData; masked::Bool=true, kwargs...)
     lambda_nm = lambda_from_si.(sd.lambda, :lambda_nm)
     t_ns = t_from_si.(sd.t, :t_ns)
-    return _streak_heatmap!(ax, lambda_nm, t_ns, sd.image; kwargs...)
+    return _streak_heatmap!(ax, lambda_nm, t_ns, masked ? _masked_image(sd) : sd.image; kwargs...)
 end
 
 function OTIS.spectrumplot(lambda, P; kwargs...)

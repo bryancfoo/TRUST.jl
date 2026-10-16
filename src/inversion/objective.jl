@@ -207,6 +207,8 @@ Prints, in order (D26): the optimizer, `converged` and `status`, `iterations`, `
 `chi2/npixels`, `R`, `Lambda`, `objective`, the elapsed time, and then one line per variable that
 has any `near_bound` flag set, naming the variable, the flagged bins and which bound each is
 closest to (compared against `pspec.variables`' own bounds in the same unit as `values`). A
+scalar variable is named without a bin, `name (scalar): near the lower bound` (Phase 4.N spec D21,
+[OQ-65](../../dev/open_questions.md#oq-65) item 3), as `fit(deck)`'s near-bound warning names it. A
 result with no flags prints nothing there.
 """
 function Base.show(io::IO, ::MIME"text/plain", result::FitResult)
@@ -232,6 +234,10 @@ function Base.show(io::IO, ::MIME"text/plain", result::FitResult)
         vals = result.values[v.name]
         bins = findall(nb)
         which = [vals[j] - v.lower <= v.upper - vals[j] ? "lower" : "upper" for j in bins]
+        if !v.time_varying
+            println(io, "  ", v.name, " (scalar): near the ", only(which), " bound")
+            continue
+        end
         label = length(bins) == 1 ? "bin" : "bins"
         println(io, "  ", v.name, ": near the ", join(unique(which), "/"), " bound at ", label,
             " ", join(bins, ", "))

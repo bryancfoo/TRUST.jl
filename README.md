@@ -259,7 +259,7 @@ is a minimum, run as before; the result file's `fit/status` reads `"lm_rtol"`. W
 is exactly what it was. A deck fit with `readable = false` now also removes a `readable.h5` an earlier run
 left in its output directory.
 
-**Phase 4.N (the per-slice scatter on a real deck, and housekeeping): its first step is complete.**
+**Phase 4.N (the per-slice scatter on a real deck, and housekeeping) is complete.**
 `slice_scatter(deck, result)` now runs on a deck with `[fit.intervals]` and `[fit.hold]`, as real decks
 have them: a variable with an interval is fitted in the windows of the bins its interval holds and fixed
 at its `init` in the others, and a held variable takes its series at each window's averaged time, or the
@@ -269,6 +269,12 @@ the scatter now reports the median and the 16th and 84th percentiles of the bin'
 (`held`); `write_readable(…; scatter = sc)` writes them as `scatter/p16/<name>`, `scatter/median/<name>`,
 `scatter/p84/<name>` and `scatter/held/<name>`, and the readable file is now `otis-readable-2`. On a deck
 without intervals or held series the scatter is exactly what it was, and `result.jld2` is unchanged.
+Its second step is housekeeping: `streakplot` draws masked-out pixels blank (`masked = false` draws them
+all); no file the package writes holds an empty text value any more, which h5py could not read, so an
+empty source, deck text, unit or metadata string is written `"-"` and read back by the package as empty;
+a fit's printed summary names a scalar variable near a bound without a bin; the Makie compatibility bound
+admits Makie 0.24.13; and the derivation notes gain six rules learned from the first real-data fit. A
+`Bool` in a streak's metadata already wrote and read back as a `Bool`. Every fit is exactly what it was.
 
 ## Installing and testing
 

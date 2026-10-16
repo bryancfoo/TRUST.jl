@@ -93,3 +93,17 @@ end
         @test eltype(back.meta["regions_usable_counts"]) <: Integer
     end
 end
+
+@testset "SD7: _masked_image blanks the masked-out pixels; without a mask it is the image itself" begin
+    # Phase 4.N spec D18 (OQ-65 item 1): what streakplot draws; tested here without Makie.
+    image = [1.0 2.0 3.0; 4.0 5.0 6.0]
+    sd0 = StreakData(lambda_nm=[262.0, 263.0], t_ns=[0.0, 1.0, 2.0], image=image)
+    @test OTIS._masked_image(sd0) === sd0.image
+    mask = [true false true; true true false]
+    sd = StreakData(lambda_nm=[262.0, 263.0], t_ns=[0.0, 1.0, 2.0], image=image, mask=mask)
+    m = OTIS._masked_image(sd)
+    @test m isa Matrix{Float64} && m !== sd.image
+    @test isnan.(m) == .!mask
+    @test m[mask] == image[mask]
+    @test sd.image == [1.0 2.0 3.0; 4.0 5.0 6.0]
+end

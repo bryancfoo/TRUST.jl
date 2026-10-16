@@ -21,7 +21,7 @@ Real}`), not by an actual h5py read.
 | `image` | `Float64` | `(N_λ, N_t)` | yes |
 | `sigma` | `Float64` | `(N_λ, N_t)` | no |
 | `mask` | `UInt8` | `(N_λ, N_t)`, `1` = use the pixel | no |
-| `meta/source` | `String` | free text | yes |
+| `meta/source` | `String` | free text, `"-"` when empty (Phase 4.N) | yes |
 | `meta/created_unix` | `Float64` | seconds since the Unix epoch | yes |
 | `meta/otis_version` | `String` | `string(pkgversion(OTIS))` | yes |
 | `meta/lambda_probe_nm` | `Float64` | | when a probe is given |
@@ -38,6 +38,15 @@ Real}`), not by an actual h5py read.
 | `meta/regions_window_counts` | `Int` | `(N_t,)`, `\|W_k\|` | when `average_regions` produced this streak |
 | `meta/regions_usable_counts` | `Int` | `(N_λ, N_t)`, `\|U_k,l\|` | when `average_regions` produced this streak |
 | `meta/<user key>` | as given | | every entry of `sd.meta` |
+
+**No scalar string is written empty, in this or any OTIS layout** (Phase 4.N, Step 4.N.2, spec D20;
+`conventions.md` Section 4's rule): JLD2 writes `""` as a string type of size zero, which h5py 3.9 cannot
+read (`H5Tget_size` fails), while an array holding `""` reads. So `write_streak` writes an empty
+`meta/source`, or an empty string value of `sd.meta`, as **`"-"`**, and `read_streak` returns every
+scalar `meta` string `"-"` as `""`: a caller sees `""` as before, a file written before Phase 4.N reads
+the same, and a value deliberately set to `"-"` reads back as `""` (the user's choice of 2026-10-16).
+Arrays of strings are written as they are. **A `Bool`** (or an array of them) in `sd.meta` is written as
+JLD2 writes a `Bool` and reads back as one; h5py reads it as `uint8`, `1` or `0`. No layout bump.
 
 **The nine `regions_*` keys (Step 4.A.2, 2026-09-23; spec D16, amended).** Written by
 `average_regions` (`src/data/average.jl`) when it produces a streak by averaging a source streak
@@ -131,7 +140,7 @@ by them).
 | `template/electrons/<name>/shape` | `String` | e.g. `"SuperGaussian"` | yes |
 | `template/electrons/<name>/shape_p/<p>` | `Float64` | one per `parameters(f)` entry | when non-empty |
 | `template/ions/…` | | the same, for ion species | yes |
-| `meta/source`, `meta/created_unix`, `meta/otis_version` | | as the streak layout | yes |
+| `meta/source`, `meta/created_unix`, `meta/otis_version` | | as the streak layout (`meta/source` `"-"` when empty) | yes |
 
 **The axis is SI here, not `t_ns` as the streak layout uses.** A `PlasmaTrace`'s axis need not
 be time ([OQ-26](../../dev/open_questions.md#oq-26)) — `axis_name` need not be `:t` — so there
@@ -170,20 +179,26 @@ the group named `channels/`, not `datasets/`. **Every `otis-result-3` file has `
 since every `FitResult` carries at least one `ChannelSummary` (D36): a single-channel fit (the
 shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
 
+**No scalar string is written empty** (Phase 4.N, Step 4.N.2, spec D20; Section 1's rule): `meta/source`,
+`deck` (empty unless a deck text is given: `fit(deck)` always gives one) and `variables/<name>/unit` (empty
+for a name bound through a key already in SI or to no leaf) are written as `"-"` when empty, and
+`read_result` returns `""` for them, as it does for a file written before Phase 4.N. A value convention in
+existing datasets, so no layout bump.
+
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
 | `layout_version` | `String` | scalar, `"otis-result-3"` | yes |
-| `meta/source` | `String` | free text | yes |
+| `meta/source` | `String` | free text, `"-"` when empty (Phase 4.N) | yes |
 | `meta/created` | `String` | ISO-8601 UTC, e.g. `"2026-09-15T12:00:00.000Z"` | yes |
 | `meta/created_unix` | `Float64` | seconds since the Unix epoch | yes |
 | `meta/otis_version` | `String` | `string(pkgversion(OTIS))` | yes |
-| `deck` | `String` | the effective TOML deck (spec D33) | yes |
+| `deck` | `String` | the effective TOML deck (spec D33), `"-"` when none was given (Phase 4.N) | yes |
 | `axis_name` | `String` | scalar, e.g. `"t"` | yes |
 | `axis` | `Float64` | `(N_t)`, SI | yes |
 | `axis_unit` | `String` | scalar, `"s"` for `:t`, else `"SI"` | yes |
 | `axis_boundary_unit` | `String` | `"ns"` or `"s"`: the unit `t` and the regularizer's operators used | yes |
 | `variables/<name>/values` | `Float64` | `(N_t)` or `(1)` for a scalar, in the variable's own unit | yes, one group per fitted variable |
-| `variables/<name>/unit` | `String` | the boundary keyword it was bound through, `""` if none | yes |
+| `variables/<name>/unit` | `String` | the boundary keyword it was bound through, `"-"` if none (`""` before Phase 4.N; `read_result` returns `""` for both) | yes |
 | `variables/<name>/bounds` | `Float64` | `(2)` | yes |
 | `variables/<name>/bins` | `Int64` | `(2)`: first and last bin of its interval | yes |
 | `variables/<name>/time_varying` | `UInt8` | | yes |
@@ -349,7 +364,10 @@ would otherwise be silently ignored and the fit would run single-channel.
 ([OQ-34](../../dev/open_questions.md#oq-34), D39), so the averaging windows are declared once,
 under `[fit]`, rather than once per channel; a `regions` key left inside a `[data]` or
 `[channel.<name>.data]` table is refused, naming its new home. Per-camera keys (`file`,
-`t_shift_ns`/`t_shift_s`, `min_usable_fraction`) stay in each channel's own `data` table.
+`t_shift_ns`/`t_shift_s`, `min_usable_fraction`) stay in each channel's own `data` table. **A region's
+`nbins` follows the feature's speed** (Phase E's finding on real data; Phase 4.N spec D23), not the time
+axis alone: choose it so that the feature moves by less than about 0.3 of its own width per bin, or a
+fast-moving feature is smeared across the bin it is averaged into.
 
 **The pooled axis.** With one channel the fitted axis is that channel's own averaged `t̄`
 (`docs/derivations/` -- the averaging rule itself is unchanged, D14), bitwise identical to a deck
@@ -420,6 +438,12 @@ stage fits (a fitted variable, not one `[fit.hold]` holds). Refused by `fit` bef
 held variable that does not reach its stage's channel or that no earlier stage fits, and a
 `start_from` stage that holds its variable. The result file records `stages/sequence` and each stage's
 `held` list (Section 3). Not a deck-version bump.
+
+**What a stage fits, and what `hold` cannot do** (Phase E's finding on real data; Phase 4.N spec D23). A
+stage fits every variable that reaches its channel. A variable its channel cannot constrain (ions in an
+EPW stage) drifts freely there, and a later stage starts from that drift. `hold` cannot hold a variable
+in the first stage, since a stage holds only what an earlier one fitted. Run the stage that constrains
+the variable first, or hold it deck-wide with `[fit.hold]`.
 
 **The iteration cap** (Phase 4.I, Step 4.I.3, spec D25): `fit(deck)` warns once for each stage, and once
 for the final fit, that stopped at its optimizer's iteration cap (`status` `:iterations`); a report, the
@@ -548,10 +572,10 @@ foreign format.
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
 | `layout_version` | `String` | scalar, `"otis-start-1"` | yes |
-| `meta/source` | `String` | free text | yes (`write_start` writes `""` when not given; `read_start` reads a missing one as `""`) |
+| `meta/source` | `String` | free text | yes (`write_start` writes `"-"` when not given, `""` before Phase 4.N; `read_start` reads `"-"`, `""` or a missing one as `""`) |
 | `axis` | `Float64` | `(N)`, **s**, strictly increasing | yes |
 | `variables/<name>/values` | `Float64` | `(N)`, or `(1)` for a value that holds at every time | yes, one group per variable, at least one |
-| `variables/<name>/unit` | `String` | scalar, the boundary keyword the values are in, e.g. `"T_eV"` | no |
+| `variables/<name>/unit` | `String` | scalar, the boundary keyword the values are in, e.g. `"T_eV"`; `"-"` for one given empty (Phase 4.N), read back as `""` | no |
 
 **The values are in the deck variable's own unit**: a variable carries no unit and takes its
 binding's (`conventions.md` 7.6), so `logn`, bound through `ne_cm3 = "10^logn"`, is log₁₀ of n_e in
@@ -676,7 +700,8 @@ leaf bindings only, so the two differ for a variable bound to an effect paramete
 h5py 3.9 cannot read an empty scalar string as JLD2 writes it (`H5Tget_size` fails on its zero-size
 type), so a unit with no name is `"-"`, an empty `deck` text is not written, and the only empty strings
 are elements of a `flags` array (a variable-length string array, which h5py reads). The result file's
-own `variables/<name>/unit = ""` has the same defect and is not changed here.
+own `variables/<name>/unit = ""` had the same defect; since Phase 4.N (Step 4.N.2) it is written `"-"`
+too, as is every empty scalar string of every layout (Section 1).
 
 **The χ² per bin** is computed once, over the problem's fitted pixels, `((model − data)/σ)²` summed
 down each column; `chi2_total` is its sum, the channel's unweighted χ² (the result file's

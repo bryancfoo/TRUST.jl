@@ -758,3 +758,41 @@ end
         @test r_none.fit.gn_decrease === nothing
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# RE16: no scalar string written empty (Phase 4.N spec D20; OQ-65 item 5): "-" in the file, ""
+# from read_result. u_D bound through u_ms, a key already in SI, has no unit name.
+# ------------------------------------------------------------------------------------------
+
+@testset "RE16: an empty source, deck or unit is written as \"-\" and read back as \"\"" begin
+    expt = _re_expt()
+    v_T = FittedVariable("T_D"; bounds=(50.0, 800.0), init=200.0, time_varying=true)
+    v_u = FittedVariable("u_D"; bounds=(-300.0, 300.0), init=0.0, time_varying=true)
+    pspec = ParameterSpec(expt; variables=[v_T, v_u], dependents=["ne_cm3" => "3.0e19 + 0.0*T_D"],
+        bindings=["T_D" => "ions.D.T_eV", "u_D" => "ions.D.u_ms"])
+    working = _re_working(expt, pspec)
+    data = synthesize(unflatten(working, pspec, flatten(pspec)), GaussianNoise(a=1.0, b=0.02);
+        rng=Xoshiro(_RE_SEED))
+    result = solve(FitProblem(working, pspec, data), LBFGS(iterations=2))
+    mktempdir() do dir
+        path = write_result(joinpath(dir, "empty.jld2"), result; source="")
+        jldopen(path, "r") do f
+            @test f["meta/source"] == "-"
+            @test f["deck"] == "-"
+            @test f["variables/u_D/unit"] == "-"
+            @test f["variables/T_D/unit"] == "T_eV"
+        end
+        r = read_result(path)
+        @test r.meta["source"] == "" && r.deck == ""
+        @test r.variables["u_D"].unit == "" && r.variables["T_D"].unit == "T_eV"
+        # a file written before Phase 4.N, holding "" itself, reads the same
+        jldopen(path, "a+") do f
+            for k in ("deck", "variables/u_D/unit")
+                delete!(f, k)
+                f[k] = ""
+            end
+        end
+        old = read_result(path)
+        @test old.deck == "" && old.variables["u_D"].unit == ""
+    end
+end

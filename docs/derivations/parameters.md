@@ -85,6 +85,11 @@ are flagged, and `gn_decrease` leaves flagged entries out, so a few saturated co
 ([OQ-36](../../dev/open_questions.md#oq-36)) and nothing is restarted or refitted. The remedy is the
 deck's, not the fitter's: do not put a bound where the answer may lie.
 
+**A variable started near a bound stays there** (Phase E's finding on real data; Phase 4.N spec D23).
+`dx/dy = (x − a)(b − x)/(b − a)` vanishes at the bounds, so from an `init` close to one, a step in `y`
+barely moves `x` and the fit can end where it started. Start a bounded variable away from its bounds,
+even when the expected answer is on one.
+
 ## 2. The expression grammar
 
 A dependent's text is parsed with `Meta.parse` and lowered into a typed tree

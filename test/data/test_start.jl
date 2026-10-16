@@ -228,3 +228,22 @@ end
         @test start2 != start
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# SF8: Phase 4.N's housekeeping (spec D20; OQ-65 item 5): no scalar string written empty
+# ------------------------------------------------------------------------------------------
+
+@testset "SF8: an empty source or unit is written as \"-\" and read back as \"\"" begin
+    mktempdir() do dir
+        path = write_start(joinpath(dir, "empty.jld2"); axis_ns=[0.0, 1.0],
+            values=Dict("T_e" => [390.0, 410.0], "u" => [3.0]), units=Dict("T_e" => ""))
+        jldopen(path, "r") do f
+            @test f["meta/source"] == "-"
+            @test f["variables/T_e/unit"] == "-"
+            @test !haskey(f, "variables/u/unit")
+        end
+        st = read_start(path)
+        @test st.source == ""
+        @test st.units == Dict("T_e" => "")
+    end
+end

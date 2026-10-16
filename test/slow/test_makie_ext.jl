@@ -81,3 +81,18 @@ end
     plt = lcurveplot!(ax, chi2, R; weights=collect(1:8))
     @test plt !== nothing
 end
+
+@testset "MK6: streakplot blanks masked pixels unless masked = false (Phase 4.N spec D18)" begin
+    image = [1.0 2.0; 3.0 4.0; 5.0 6.0]
+    mask = [true false; true true; false true]
+    sd = StreakData(lambda_nm=[262.0, 263.0, 264.0], t_ns=[0.0, 1.0], image=image, mask=mask)
+    fig = Makie.Figure()
+    ax = Makie.Axis(fig[1, 1])
+    z = streakplot!(ax, sd)[3][]
+    @test isnan.(z) == permutedims(.!mask)
+    @test z[permutedims(mask)] == permutedims(image)[permutedims(mask)]
+    z_all = streakplot!(ax, sd; masked=false)[3][]
+    @test z_all == permutedims(image)
+    @test streakplot(sd) isa Makie.Figure
+    @test streakplot(sd; masked=false) isa Makie.Figure
+end

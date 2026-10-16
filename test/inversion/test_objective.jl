@@ -401,3 +401,23 @@ end
     @test main.npixels == problem.npixels
     @test main.nparams == pspec.ntheta
 end
+
+# ------------------------------------------------------------------------------------------
+# OB10: show names a scalar near a bound without a bin (Phase 4.N spec D21; OQ-65 item 3)
+# ------------------------------------------------------------------------------------------
+
+@testset "OB10: show names a scalar near a bound without a bin" begin
+    problem, theta = _ob_p1_problem()
+    pspec = problem.pspec
+    values = Dict("T_D" => [50.0 + 5e-4 * 750.0], "u_D" => [200.0 - 1e-3 * 400.0])
+    near_bound = Dict("T_D" => BitVector([true]), "u_D" => BitVector([true]))
+    fitted = unflatten(problem.experiment, pspec, theta)
+    result = FitResult(theta, fitted, pspec, values, near_bound, 1.0, 0.0, 1.0,
+        0.0, Float64[], problem.npixels,
+        NamedTuple{(:iteration, :objective, :chi2, :R),NTuple{4,Float64}}[],
+        true, :gradient_norm, :none, 1, 1, 1, 0.1, "test")
+    str = sprint(show, MIME("text/plain"), result)
+    @test occursin("\n  T_D (scalar): near the lower bound\n", str)
+    @test occursin("\n  u_D (scalar): near the upper bound\n", str)
+    @test !occursin("bound at bin", str)
+end

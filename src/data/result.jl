@@ -209,7 +209,12 @@ the one `result` was actually fitted from, and the residual needs the problem's 
 `nothing` for them -- the three `examples/fit_*.jl`, `test_result.jl` and `test_reproduce.jl` all
 called `write_result` this way before chunk 7 and stay legal (D40 item 9).
 
-Spec D34, D35, D40, D47.
+**No scalar string is written empty** (Phase 4.N spec D20): `meta/source`, `deck` (whose default is `""`)
+and a variable's `unit` (`""` for a name bound through a key already in SI, or to no leaf) are written
+as `"-"` when empty, and `read_result` returns `""` for them, so its callers see what they saw. No layout
+bump: a value convention inside existing datasets.
+
+Spec D34, D35, D40, D47; Phase 4.N spec D20.
 """
 function write_result(path::AbstractString, result::FitResult;
     problem::Union{Nothing,AbstractFitProblem}=nothing, deck::AbstractString="",
@@ -247,11 +252,11 @@ function write_result(path::AbstractString, result::FitResult;
 
     jldopen(path, "w") do f
         f["layout_version"] = RESULT_LAYOUT_VERSION
-        f["meta/source"] = String(source)
+        f["meta/source"] = _empty_marker(source)
         f["meta/created"] = _iso8601_utc_now()
         f["meta/created_unix"] = Float64(time())
         f["meta/otis_version"] = string(pkgversion(OTIS))
-        f["deck"] = String(deck)
+        f["deck"] = _empty_marker(deck)
 
         f["axis_name"] = String(pspec.trace.axis_name)
         f["axis"] = Vector{Float64}(pspec.axis)
@@ -261,7 +266,7 @@ function write_result(path::AbstractString, result::FitResult;
         for v in pspec.variables
             prefix = "variables/$(v.name)"
             f["$prefix/values"] = Vector{Float64}(result.values[v.name])
-            f["$prefix/unit"] = get(unit_keys, v.name, "")
+            f["$prefix/unit"] = _empty_marker(get(unit_keys, v.name, ""))
             f["$prefix/bounds"] = Float64[v.lower, v.upper]
             first_bin, last_bin = _variable_bins(v, pspec.intervals, nt)
             f["$prefix/bins"] = Int64[first_bin, last_bin]
@@ -505,10 +510,14 @@ name in the same forms as the file's own top-level ones (`variables[v].values`, 
 `.near_bound`; `dependents[d].values`). Phase 4.I spec D24: `stages.sequence` is the file's
 `stages/sequence` or `nothing`, and each stage's `held` its `held` list or an empty one.
 
+`meta.source`, `deck` and each variable's `unit` read `""` where the file holds `"-"`, the marker
+`write_result` writes for an empty string (Phase 4.N spec D20); a file written before Phase 4.N, with
+`""`, reads the same.
+
 Throws, naming the version found and expected, if `layout_version` does not match
 `RESULT_LAYOUT_VERSION`.
 
-Spec D34, D40, D47.
+Spec D34, D40, D47; Phase 4.N spec D20.
 """
 function read_result(path::AbstractString)
     jldopen(path, "r") do f
@@ -517,7 +526,7 @@ function read_result(path::AbstractString)
             "read_result: \"$path\" has layout_version \"$version\"; expected \"$RESULT_LAYOUT_VERSION\""))
 
         meta = _read_meta(f)
-        deck = _require_dataset(f, "deck", path)
+        deck = _from_empty_marker(_require_dataset(f, "deck", path))
         axis_name = Symbol(_require_dataset(f, "axis_name", path))
         axis = _require_dataset(f, "axis", path)
         axis_unit = _require_dataset(f, "axis_unit", path)
@@ -528,7 +537,7 @@ function read_result(path::AbstractString)
             prefix = "variables/$nm"
             variables[nm] = (
                 values=f["$prefix/values"],
-                unit=f["$prefix/unit"],
+                unit=_from_empty_marker(f["$prefix/unit"]),
                 bounds=f["$prefix/bounds"],
                 bins=f["$prefix/bins"],
                 time_varying=f["$prefix/time_varying"],

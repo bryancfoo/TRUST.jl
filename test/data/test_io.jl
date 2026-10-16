@@ -240,3 +240,44 @@ end
         @test_throws "streak element type must be a plain float" write_streak(path, sd_dual)
     end
 end
+
+# ------------------------------------------------------------------------------------------
+# IO11, IO12: Phase 4.N's housekeeping (spec D19, D20; OQ-65 items 2 and 5)
+# ------------------------------------------------------------------------------------------
+
+@testset "IO11: a Bool in meta writes and reads back as a Bool" begin
+    sd = StreakData(lambda_nm=[262.0, 263.0], t_ns=[0.0, 1.0], image=[1.0 2.0; 3.0 4.0],
+        meta=Dict{String,Any}("flag" => true, "flags" => [true, false]))
+    mktempdir() do dir
+        back = read_streak(write_streak(joinpath(dir, "bool.jld2"), sd; source="io11"))
+        @test back.meta["flag"] === true
+        @test back.meta["flags"] isa Vector{Bool} && back.meta["flags"] == [true, false]
+    end
+end
+
+@testset "IO12: an empty source or meta string is written as \"-\" and read back as \"\"" begin
+    sd = StreakData(lambda_nm=[262.0, 263.0], t_ns=[0.0, 1.0], image=[1.0 2.0; 3.0 4.0],
+        meta=Dict{String,Any}("note" => "", "tag" => "x", "names" => ["", "a"]))
+    trace = PlasmaTrace(Plasma(; n_e_cm3=3e19, electrons=[electrons(T_eV=400.0)],
+        ions=[ion(name="D", mass_amu=2.014, charge=1, T_eV=200.0)]); t_ns=[0.0, 1.0])
+    mktempdir() do dir
+        path = write_streak(joinpath(dir, "empty.jld2"), sd)
+        jldopen(path, "r") do f
+            @test f["meta/source"] == "-"
+            @test f["meta/note"] == "-"
+            @test f["meta/tag"] == "x"
+            @test f["meta/names"] == ["", "a"]
+        end
+        back = read_streak(path)
+        @test back.meta["source"] == "" && back.meta["note"] == ""
+        @test back.meta["tag"] == "x" && back.meta["names"] == ["", "a"]
+        # a file written before Phase 4.N, holding "" itself, reads the same
+        jldopen(path, "a+") do f
+            delete!(f, "meta/note")
+            f["meta/note"] = ""
+        end
+        @test read_streak(path).meta["note"] == ""
+        tpath = write_trace(joinpath(dir, "trace.jld2"), trace)
+        @test jldopen(f -> f["meta/source"], tpath, "r") == "-"
+    end
+end

@@ -202,6 +202,14 @@ at equal fractions). (ii) The number density the package derives for the species
 that of the equivalent single-state ion, below the mixture's true number density `x n_e / Z̄` by
 `Z̄/Z*`. Recovering `Z̄` or the true density needs an ionization model, which the package does not have.
 
+**A fitted charge on held electrons measures `Z·T_eff`** (Phase E's finding on real data; Phase 4.N spec
+D23). In a fit whose electrons are held from another channel, a fitted ion charge measures `Z·T_eff`
+relative to those electrons, not an ionization state: the ion-acoustic feature's static electron
+screening goes as `⟨1/v²⟩`, so for a super-Gaussian of variance temperature `T_e` it sees
+`T_eff = T_e · 3Γ(3/m)² / (Γ(5/m) Γ(1/m))` (1.00 at `m = 2`, 1.24 at 3, 1.45 at 5), and any mismatch
+between the held electrons and the ones the ion feature sees is absorbed by the charge. Report such a
+charge with the electrons' `T_eff`, and say so.
+
 **The floor.** For integer states `Z_i ≥ 0`, `Z_i² ≥ Z_i`, so `⟨Z²⟩/⟨Z⟩ ≥ 1` for any mixture with at
 least one ion (neutrals drop out of both moments), with equality only for pure `Z = 1`. `ion` refuses
 a charge below 1 or not finite; there is no ceiling.

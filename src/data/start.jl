@@ -29,7 +29,9 @@ variable is bound through).
 
 `axis_s` or `axis_ns`, exactly one, is the time axis in s or ns. `values` is an iterable of `name =>
 vector` pairs (a `Dict` or a `Vector` of `Pair`s); each name a valid variable name, each vector of
-finite numbers. Every refusal is an `ArgumentError` naming what failed.
+finite numbers. Every refusal is an `ArgumentError` naming what failed. An empty `source` or unit is
+written as `"-"` (Phase 4.N spec D20: h5py cannot read an empty scalar string), and `read_start` returns
+it as `""`.
 """
 function write_start(path::AbstractString; values, units=Dict{String,String}(), source::AbstractString="",
     kwargs...)
@@ -59,13 +61,13 @@ function write_start(path::AbstractString; values, units=Dict{String,String}(), 
 
     jldopen(path, "w") do f
         f["layout_version"] = START_LAYOUT_VERSION
-        f["meta/source"] = String(source)
+        f["meta/source"] = _empty_marker(source)
         f["axis"] = axis
         for (nm, v) in pairs_list
             f["variables/$nm/values"] = v
         end
         for (nm, u) in unit_pairs
-            f["variables/$nm/unit"] = u
+            f["variables/$nm/unit"] = _empty_marker(u)
         end
     end
     return path
@@ -87,7 +89,8 @@ Reads a file written by `write_start` (or by any writer of the same plain datase
 snippet): `axis` the time axis in s, `values` a `Dict{String,Vector{Float64}}` and `units` a
 `Dict{String,String}` holding only the names the file gives a unit. Throws, naming the path, when
 `layout_version` is not `"otis-start-1"`, when a required dataset is missing, when the axis is not
-strictly increasing, or when a series' length is neither the axis's nor one.
+strictly increasing, or when a series' length is neither the axis's nor one. `source` and a unit read
+`""` where the file holds `"-"`, the marker `write_start` writes for an empty string (Phase 4.N spec D20).
 """
 function read_start(path::AbstractString)
     jldopen(path, "r") do f
@@ -109,10 +112,10 @@ function read_start(path::AbstractString)
             (length(v) == length(axis) || length(v) == 1) || throw(ArgumentError(
                 "read_start: \"$path\": \"$nm\" has $(length(v)) values; the axis has $(length(axis))"))
             values[nm] = v
-            haskey(f, "variables/$nm/unit") && (units[nm] = String(f["variables/$nm/unit"]))
+            haskey(f, "variables/$nm/unit") && (units[nm] = _from_empty_marker(String(f["variables/$nm/unit"])))
         end
         isempty(values) && throw(ArgumentError("read_start: \"$path\" holds no variable"))
-        source = haskey(f, "meta/source") ? String(f["meta/source"]) : ""
+        source = haskey(f, "meta/source") ? _from_empty_marker(String(f["meta/source"])) : ""
         return (; layout_version=version, source, axis, values, units)
     end
 end
