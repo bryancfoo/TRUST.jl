@@ -3,12 +3,14 @@ using OTIS
 
 # Step 4.M.1: the readable fit output (Phase 4.M spec D5 to D16; OQ-63, decided 2026-10-14). RD1 to
 # RD10, gate "readable", every row on synthetic data (Phase E's A29). fit(deck) writes readable.h5
-# (otis-readable-1) beside result.jld2 unless [output] readable = false, and write_readable writes the
+# (otis-readable-2) beside result.jld2 unless [output] readable = false, and write_readable writes the
 # same file from a script, with the Laplace sigma and the scatter's windows when given. These rows fit
 # test_uncertainty.jl's SX deck on noisy streaks (camera b's first two wavelength rows masked), whose
 # problem types the "uncertainty" gate has already compiled; the RD deck's rows (an interval, a held
 # series, dependents, scalars, a frozen variable, a near-bound entry) are test/slow/test_readable.jl's.
 # RD14 is Phase 4.L's (spec D9, OQ-62 item 8): a key-off fit removes an earlier run's readable.h5.
+# Phase 4.N (spec D9) changed RD7's two version literals to otis-readable-2 and RD10's field list to the
+# twenty fields ScatterResult now has; the scatter's new datasets are in the fixture's key set.
 
 include(joinpath(@__DIR__, "..", "fixtures", "readable_fixture.jl"))
 
@@ -169,8 +171,8 @@ end
 
 @testset "RD7: read back: the orientation, the version, the key set and the bin windows" begin
     OTIS.jldopen(joinpath(_RD_ON, "readable.h5"), "r") do f
-        @test f["layout_version"] == "otis-readable-1"
-        @test f["README"] isa String && startswith(f["README"], "otis-readable-1: ")
+        @test f["layout_version"] == "otis-readable-2"
+        @test f["README"] isa String && startswith(f["README"], "otis-readable-2: ")
         @test size(f["channels/a/data"]) == (length(f["channels/a/lambda_nm"]), length(f["t_ns"]))
         @test Set(keys(f)) == Set(["layout_version", "README", "source", "deck", "t_ns", "bin_lo_ns",
             "bin_hi_ns", "channels", "params", "units", "flags", "fit"])
@@ -305,7 +307,8 @@ end
 @testset "RD10: ScatterResult's new fields, its old constructor, and the result file unchanged" begin
     sc, r = _RD_SCATTER, _RD_POL
     @test fieldnames(ScatterResult) == (:theta, :m, :t_fine, :coarse_bin, :counts, :status, :decrease,
-        :values, :near_bound, :s_stat, :n_near_bound, :data, :sigma, :mask, :model, :chi2)
+        :values, :near_bound, :s_stat, :n_near_bound, :data, :sigma, :mask, :model, :chi2, :held, :p16,
+        :median, :p84)
     @test size.(sc.data) == size.(sc.sigma) == size.(sc.mask) == size.(sc.model) == [(24, 12), (16, 12)]
     @test length(sc.chi2) == 12
     old = ScatterResult(sc.theta, sc.m, sc.t_fine, sc.coarse_bin, sc.counts, sc.status, sc.decrease,

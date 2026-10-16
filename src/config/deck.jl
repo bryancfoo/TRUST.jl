@@ -2524,7 +2524,7 @@ order they ran, and then for the final fit: one warning for each that stopped at
 It changes nothing.
 
 **The readable companion** (Phase 4.M spec D6, [OQ-63](../../dev/open_questions.md#oq-63)): after
-`result.jld2` and `effective_deck.toml`, `fit` writes `<dir>/readable.h5` (`otis-readable-1`, the file
+`result.jld2` and `effective_deck.toml`, `fit` writes `<dir>/readable.h5` (`otis-readable-2`, the file
 `write_readable` writes, with `source = "fit"`, the effective deck's text and `fit/gn_decrease`),
 unless the deck gives `[output] readable = false`. `result.jld2` is the same either way. With
 `readable = false`, a `readable.h5` an earlier run left in the directory is removed (Phase 4.L spec D9,

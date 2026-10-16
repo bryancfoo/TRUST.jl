@@ -20,6 +20,7 @@ using Test
     @safetestset "staged fit (slow)" begin include("test_deck_staged.jl") end
     @safetestset "progress (slow)" begin include("test_progress.jl") end
     @safetestset "readable (slow)" begin include("test_readable.jl") end
+    @safetestset "scatter real deck (slow)" begin include("test_scatter_real.jl") end
     @safetestset "pixel integration (slow)" begin include("test_pixel_integration.jl") end
     @safetestset "resonance width (slow)" begin include("test_deck_resonance.jl") end
     @safetestset "tabulated k-smearing (slow)" begin include("test_tabulated_k_smearing.jl") end

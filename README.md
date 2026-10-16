@@ -259,6 +259,17 @@ is a minimum, run as before; the result file's `fit/status` reads `"lm_rtol"`. W
 is exactly what it was. A deck fit with `readable = false` now also removes a `readable.h5` an earlier run
 left in its output directory.
 
+**Phase 4.N (the per-slice scatter on a real deck, and housekeeping): its first step is complete.**
+`slice_scatter(deck, result)` now runs on a deck with `[fit.intervals]` and `[fit.hold]`, as real decks
+have them: a variable with an interval is fitted in the windows of the bins its interval holds and fixed
+at its `init` in the others, and a held variable takes its series at each window's averaged time, or the
+bin's held value where the window lies beyond the file's time range. Beside each bin's detrended spread
+the scatter now reports the median and the 16th and 84th percentiles of the bin's window values (`p16`,
+`median`, `p84`, numpy's default definition), and the value each window held a held variable at
+(`held`); `write_readable(…; scatter = sc)` writes them as `scatter/p16/<name>`, `scatter/median/<name>`,
+`scatter/p84/<name>` and `scatter/held/<name>`, and the readable file is now `otis-readable-2`. On a deck
+without intervals or held series the scatter is exactly what it was, and `result.jld2` is unchanged.
+
 ## Installing and testing
 
 ```

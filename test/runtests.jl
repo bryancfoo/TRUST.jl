@@ -212,6 +212,9 @@ _wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
     if _wanted("lm_rtol")
         @safetestset "lm_rtol" begin include("inversion/test_optimizers_lm_rtol.jl") end
     end
+    if _wanted("scatter real deck")
+        @safetestset "scatter real deck" begin include("config/test_scatter_real.jl") end
+    end
     if _wanted("noise")
         @safetestset "noise" begin include("instrument/test_noise.jl") end
     end

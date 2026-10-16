@@ -258,7 +258,8 @@ function _rd_deck_text(pa, pb, hold, outdir)
 end
 
 # The leaf datasets a readable file holds for `result` (channel names `names`), with the optional
-# datasets and groups as written: the layout's key set, pinned (OQ-63 (f)).
+# datasets and groups as written: the layout's key set, pinned (OQ-63 (f); otis-readable-2's quantiles
+# and held values from Phase 4.N spec D7).
 function _rd_expected_keys(result, names; deck::Bool, gn::Bool, laplace=nothing, scatter=nothing)
     want = Set(["layout_version", "README", "source", "t_ns", "bin_lo_ns", "bin_hi_ns",
         "fit/chi2", "fit/chi2_per_n", "fit/R", "fit/objective", "fit/status", "fit/converged",
@@ -281,8 +282,11 @@ function _rd_expected_keys(result, names; deck::Bool, gn::Bool, laplace=nothing,
         for k in ("t_ns", "bin", "status", "decrease", "chi2")
             push!(want, "scatter/$k")
         end
-        for nm in keys(scatter.values), g in ("params", "near_bound", "sigma_stat")
+        for nm in keys(scatter.values), g in ("params", "near_bound", "sigma_stat", "p16", "median", "p84")
             push!(want, "scatter/$g/$nm")
+        end
+        for nm in keys(scatter.held)
+            push!(want, "scatter/held/$nm")
         end
         for nm in names, k in ("data", "sigma", "mask", "model")
             push!(want, "scatter/channels/$nm/$k")

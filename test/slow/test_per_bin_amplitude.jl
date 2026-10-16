@@ -211,9 +211,11 @@ end
         deck_s = read_deck(_st_write(dir, "s.toml", _sh_tables(text; start=(sp, ["T_D"]))))
         sc = slice_scatter(deck_s, result)
         @test length(sc.s_stat["a_epw"]) == 16 && length(sc.s_stat["a_iaw"]) == 16
-        # T_e, not T_D: the deck's start_from names T_D, and read_deck refuses a held name there
+        # T_e, not T_D: the deck's start_from names T_D, and read_deck refuses a held name there.
+        # Phase 4.N spec D9: a held series is no longer refused (OQ-64 item 2), but this deck holds T_e,
+        # which result fitted, so result is not this deck's fit
         deck_h = read_deck(_st_write(dir, "h.toml", _sh_tables(text; hold=(sp, ["T_e"]))))
-        @test_throws "slice_scatter: held series ([fit.hold]) are not supported" slice_scatter(deck_h, result)
+        @test_throws "slice_scatter: result was not fitted from this deck" slice_scatter(deck_h, result)
     end
     @info "PA9: laplace's sigma for a_epw relative to the value, smallest and largest" rel = extrema(filter(isfinite, lap.sigma_samp["a_epw"] ./ result.values["a_epw"]))
 end

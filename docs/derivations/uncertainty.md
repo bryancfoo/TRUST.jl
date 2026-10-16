@@ -308,3 +308,53 @@ switched off at synthesis (`sigma_px = 0`): the factor of about 3 is the average
 under the spread's correlation ([OQ-43](../../dev/open_questions.md#oq-43), deferred), not a misfit.
 (The scatter ratio of about half quoted above is from before Step 4.B.1 made σ the realized one;
 since then it reads 1.5 to 1.8, OQ-40's as-built record.)
+
+### 9.5 Intervals, held series and the quantiles (Phase 4.N, Step 4.N.1, spec D3 to D6)
+
+A real deck carries `[fit.intervals]` and `[fit.hold]`, and `slice_scatter` takes both as they are
+([OQ-64](../../dev/open_questions.md#oq-64) items 1 to 3; before Phase 4.N it refused them).
+
+**Intervals: a window takes its coarse bin's membership.** The coarse intervals are built as
+`build_problem` builds them (the deck's `[fit.intervals]` merged with the ones its regions declare,
+against the coarse averaged axis), and a variable with an interval is **free in every window of a
+coarse bin its interval holds**, started at `result`'s value in that bin, and **frozen at its deck
+`init` in every window of any other bin**: the value the regularized fit's trace carried at that bin,
+where the variable's leaf keeps the template's value. So each window fits the variable set the coarse
+fit fitted at its bin, and its model is the coarse fit's model there with the free variables moved. A
+window in an edge half-bin whose own time falls outside `[lo, hi]` is still fitted with the variable
+free, as its coarse bin was. Where frozen, the record is `NaN` (`values`) and `false` (`near_bound`)
+per window, and `NaN` (`s_stat` and the three quantiles) and `0` (`n_near_bound`) per bin. The
+window's sections carry no interval: every variable lives on the one-bin axis.
+
+**Held series: the file read once, the value per window.** `[fit.hold]`'s file is read once, and each
+window's held value reaches the window problem through `_assemble_problem`'s `held` keyword (Phase 4.I
+spec D23's path) as a one-value row. A time-varying variable held at a series of more than one value
+takes
+
+```
+held[j] = _interpolate_series(file.axis, series, t_fine[j])    when first(file.axis) <= t_fine[j] <= last(file.axis)
+held[j] = result.values[name][k]                               otherwise (k = window j's coarse bin)
+```
+
+the series at the window's **averaged** time (not its centre) inside the file's range, and beyond it
+the value the coarse fit held bin `k` at: a series is never extrapolated, and a one-bin fit held at the
+coarse bin's value is the coarse fit's own model there. A one-value series, or a scalar variable, takes
+its one value. A held variable with an interval is held in its bins' windows and frozen at `init`
+elsewhere (`NaN` in `held`). The values are kept in `ScatterResult.held`, one per window.
+
+**The quantiles.** Per free variable and coarse bin, over the bin's own `m` window values `x[1..m]`,
+sorted, the 16th, 50th and 84th percentiles (`p16`, `median`, `p84`) by Hyndman and Fan's type 7,
+the definition `Statistics.quantile` and numpy share:
+
+```
+h = (m - 1) q + 1
+Q(q) = x[floor(h)] + (h - floor(h)) * (x[floor(h) + 1] - x[floor(h)])      (x[m] when floor(h) = m)
+```
+
+defined for every `m >= 1` (one window gives its value three times), over every window whatever its
+`status` (a reader filters by status afterwards). `_quantile_sorted` evaluates it in
+`Statistics.quantile`'s own order (Statistics 1.11.5: `h = fma(m, q, 1 - q)`, `j = clamp(floor(h), 1,
+m - 1)`, `γ = clamp(h - j, 0, 1)`, then `(1 - γ) x[j] + γ x[j + 1]`, or `x[j] + γ (x[j + 1] - x[j])` when
+the two are finite and `≈`), so the two agree to the bit (the user's choice of 2026-10-15; the formula as
+written above differs from that package's result in the last bit in about one case in six). The
+package takes no `Statistics` dependency.

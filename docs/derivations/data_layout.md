@@ -581,12 +581,16 @@ with h5py.File("start.jld2", "r") as f:
     unit = f["variables/T_e/unit"][()].decode() if "unit" in f["variables/T_e"] else ""
 ```
 
-## 6. The readable layout, `otis-readable-1` (Phase 4.M, Step 4.M.1, spec D5)
+## 6. The readable layout, `otis-readable-2` (Phase 4.M, Step 4.M.1, spec D5; Phase 4.N, Step 4.N.1, spec D7)
 
 One fit, written to be read directly from Python or any HDF5 reader
 ([OQ-63](../../dev/open_questions.md#oq-63)): the time and wavelength axes in ns and nm, per channel
 the data, σ, model and mask the fit was made against with the χ² of each bin, every fitted variable
-and dependent in its deck unit, and, when given, the Laplace σ and the per-slice scatter's windows.
+and dependent in its deck unit, and, when given, the Laplace σ and the per-slice scatter's windows
+with their per-bin quantiles. **`otis-readable-2` since Phase 4.N** ([OQ-64](../../dev/open_questions.md#oq-64)
+item 4): `scatter/p16/<name>`, `scatter/median/<name>`, `scatter/p84/<name>` and `scatter/held/<name>`
+joined the scatter group, and nothing else changed; `otis-readable-1` (Phase 4.M) is the same layout
+without them.
 **`fit(deck)` writes it as `<output.dir>/readable.h5`**, after `result.jld2` and
 `effective_deck.toml`, with `source = "fit"`, the effective deck's text and `fit/gn_decrease`, unless
 the deck switches it off (a new key in an existing table, so not a deck-version bump; the effective
@@ -609,7 +613,7 @@ result = fit(deck)
 problem, _, _ = OTIS.build_problem(deck)
 pol = polish(problem, result)
 lap = laplace(problem, pol.result.theta)
-sc = slice_scatter(deck, pol.result)          # a deck with [[fit.regions]], no intervals, no hold
+sc = slice_scatter(deck, pol.result)          # a deck with [[fit.regions]]; intervals and holds as they are
 dir = deck.sections["output"]["dir"]
 write_readable(joinpath(dir, "readable.h5"), pol.result, problem;
     deck = read(joinpath(dir, "effective_deck.toml"), String), laplace = lap, scatter = sc)
@@ -617,7 +621,7 @@ write_readable(joinpath(dir, "readable.h5"), pol.result, problem;
 
 | Dataset | Type | Shape | Written |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-readable-1"` | always |
+| `layout_version` | `String` | scalar, `"otis-readable-2"` | always |
 | `README` | `String` | scalar: what the file holds, its orientation and its units | always |
 | `source` | `String` | `"fit"` or `"write_readable"` | always |
 | `deck` | `String` | the effective deck's TOML text | when given and not empty (`fit(deck)` always gives it) |
@@ -645,9 +649,11 @@ write_readable(joinpath(dir, "readable.h5"), pol.result, problem;
 | `scatter/bin` | `Int64` | `(N_w)`, the fitted bin each window lies in | yes |
 | `scatter/status` | `String` | `(N_w)` | yes |
 | `scatter/decrease`, `chi2` | `Float64` | `(N_w)`, each window's own | yes |
-| `scatter/params/<name>` | `Float64` | `(N_w)`, the deck unit | one per free time-varying variable |
+| `scatter/params/<name>` | `Float64` | `(N_w)`, the deck unit; `NaN` in a window whose bin the variable's interval leaves out | one per free time-varying variable |
 | `scatter/near_bound/<name>` | `UInt8` | `(N_w)` | yes |
-| `scatter/sigma_stat/<name>` | `Float64` | `(N_t)`, **never divided by `sqrt(m)`** | yes |
+| `scatter/sigma_stat/<name>` | `Float64` | `(N_t)`, **never divided by `sqrt(m)`**; `NaN` for a bin the interval leaves out | yes |
+| `scatter/p16/<name>`, `median/<name>`, `p84/<name>` | `Float64` | `(N_t)`, the 16th, 50th and 84th percentiles of the bin's windows' values (type 7), the deck unit; `NaN` for a bin the interval leaves out | yes (`otis-readable-2`) |
+| `scatter/held/<name>` | `Float64` | `(N_w)`, the value each window held the variable at, the deck unit; `NaN` in a window whose bin the interval leaves out | one per `[fit.hold]` variable (`otis-readable-2`) |
 | `scatter/channels/<name>/data`, `sigma`, `model` | `Float64` | `(N_λ,c, N_w)` | one group per channel |
 | `scatter/channels/<name>/mask` | `UInt8` | `(N_λ,c, N_w)` | yes |
 
@@ -692,7 +698,16 @@ count exactly the fitted bins; otherwise (data never averaged, or a prepared ave
 **The scatter's windows** are `slice_scatter`'s: each fine window's averaged data, σ and mask as its
 one-bin fit saw them, and its model at that fit's polished solution, with no temporal IRF (a one-bin
 window cannot carry one). `scatter/chi2` is each window's weighted χ². `ScatterResult` keeps them
-since Phase 4.M; the result file's `scatter/` group does not write them and is unchanged.
+since Phase 4.M; the result file's `scatter/` group does not write them and is unchanged. **Since
+`otis-readable-2`** the group also holds, per fitted bin and free variable, the median and the 16th and
+84th percentiles of the bin's windows' values (`p16`, `median`, `p84`; Hyndman and Fan's type 7,
+`Statistics.quantile`'s and numpy's default, over every window whatever its `status`, so a reader who
+filters by `scatter/status` recomputes them), and, per window and held variable, the value the window
+held it at (`held`: the `[fit.hold]` series at the window's averaged time, or the bin's held value where
+the window lies beyond the file's time range; `docs/derivations/uncertainty.md` Section 9.5). A variable
+with an interval is fitted only in the windows of its interval's bins and frozen at its `init` in the
+others, where its window values, quantiles and `sigma_stat` are `NaN`. The result file writes none of
+them.
 
 **What it is not.** Not a round trip: nothing in the package reads it, and `result.jld2` stays the
 record of a fit; `leaves/`, `fit/theta`, the trajectory, `effects/*`, the stages, the calibration

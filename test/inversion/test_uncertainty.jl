@@ -600,7 +600,7 @@ end
     @info "SX4 window 5 relative difference against its own one-window deck" rel_TD rel_uD
 end
 
-@testset "SX5: the three refusals" begin
+@testset "SX5: the two refusals; an interval no variable uses scatters as before" begin
     text_noregions = """
     deck_version = "otis-deck-2"
 
@@ -649,7 +649,9 @@ end
     text_intervals = _sx_deck_text(_SX_PATH_A, _SX_PATH_B, joinpath(_SX_DIR, "out_intervals");
         intervals_block="[fit.intervals.foo]\nt_range_ns = [-1.0, 2.0]\n")
     deck_iv, problem_iv, result_iv = _sx_build(_SX_DIR, text_intervals, "intervals_deck.toml")
-    @test_throws r"intervals are not supported" slice_scatter(deck_iv, result_iv)
+    # Phase 4.N spec D9: intervals are no longer refused (OQ-64 item 1); with no variable on it the
+    # deck's scatter is SXA's, bitwise
+    @test isequal(slice_scatter(deck_iv, result_iv).values, _SX_SCATTER_A.values)
 
     @test_throws r"was not fitted from this deck" slice_scatter(_SX_DECK_B, _SX_RESULT_A)
 end

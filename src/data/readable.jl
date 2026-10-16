@@ -1,4 +1,4 @@
-# write_readable: the otis-readable-1 layout, the readable companion fit(deck) writes beside
+# write_readable: the otis-readable-2 layout, the readable companion fit(deck) writes beside
 # result.jld2 (Phase 4.M, Step 4.M.1; OQ-63; docs/derivations/data_layout.md Section 6). One fit as a
 # user reads it: the time and wavelength axes in ns and nm, per channel the data, sigma, model, mask
 # and the chi2 per bin, every parameter in its deck unit, and the Laplace sigma and the scatter's
@@ -10,14 +10,17 @@ using JLD2: jldopen
 """
     READABLE_LAYOUT_VERSION
 
-The `layout_version` string written to every readable file: `"otis-readable-1"` (Phase 4.M spec D5).
-Nothing in the package reads the file back.
+The `layout_version` string written to every readable file: `"otis-readable-2"` since Phase 4.N
+(spec D7, [OQ-64](../../dev/open_questions.md#oq-64) item 4: `scatter/p16`, `median`, `p84` and
+`held` joined the scatter group), `"otis-readable-1"` before (Phase 4.M spec D5). Nothing in the
+package reads the file back.
 """
-const READABLE_LAYOUT_VERSION = "otis-readable-1"
+const READABLE_LAYOUT_VERSION = "otis-readable-2"
 
-# The file's own README dataset (Phase 4.M spec D9), ASCII so that any HDF5 reader decodes it.
+# The file's own README dataset (Phase 4.M spec D9; Phase 4.N spec D7), ASCII so that any HDF5
+# reader decodes it.
 const _READABLE_README = """
-otis-readable-1: one OTIS fit, written to be read directly (h5py or any HDF5 reader).
+otis-readable-2: one OTIS fit, written to be read directly (h5py or any HDF5 reader).
 Orientation: arrays are stored as Julia writes them, (n_lambda, n_t), so h5py reads them as
 (n_t, n_lambda): data[j] is time bin j's spectrum against lambda_nm, one row per time bin.
 Units: times in ns, wavelengths in nm; params/<name> in the unit units/<name> names, the deck key
@@ -38,7 +41,11 @@ variable in its unit (to scale it, multiply by sqrt(fit/chi2_per_n)); sigma_samp
 near_bound/<name>, 1 where the entry was left out; decrease.
 scatter/ (only when written with a scatter result): one entry per fine window: t_ns, bin (the fitted
 bin it lies in), status, decrease, chi2, params/<name>, near_bound/<name>; sigma_stat/<name>, one per
-fitted bin, the detrended spread of its windows' values, never divided by sqrt(m);
+fitted bin, the detrended spread of its windows' values, never divided by sqrt(m); p16/<name>,
+median/<name>, p84/<name>, one per fitted bin, the 16th, 50th and 84th percentiles of its windows'
+values (type 7, numpy's default), over every window whatever its status; held/<name>, one per window,
+the value a [fit.hold] variable was held at; NaN in params, sigma_stat, the percentiles and held where
+the variable's interval leaves the window's bin out (the variable was then frozen at its init);
 channels/<name>/data, sigma, mask, model, (n_lambda, n_w), each window as its one-bin fit saw it.
 deck: the effective deck's text, when given. source: "fit" or "write_readable".
 No string in the file is empty but the elements of a flags array.
@@ -50,7 +57,7 @@ The package's own record of the fit is result.jld2 beside this file.
                    deck = nothing, laplace = nothing, scatter = nothing) -> path
 
 Writes the readable companion of a fit to `path` (`docs/derivations/data_layout.md` Section 6,
-[OQ-63](../../dev/open_questions.md#oq-63); Phase 4.M spec D5 to D12), the layout `otis-readable-1`:
+[OQ-63](../../dev/open_questions.md#oq-63); Phase 4.M spec D5 to D12), the layout `otis-readable-2`:
 `layout_version`, `README` (what the file holds, its orientation and its units), `source`
 (`"write_readable"`; `"fit"` when `fit(deck)` writes it), `deck` when given and not empty (the
 effective deck's text; h5py cannot read an empty scalar string, so no string the file holds is one,
@@ -60,14 +67,16 @@ and a unit it has no name for is written `"-"`); the time axis `t_ns` and each b
 and `weight`; `params/<name>`, `units/<name>` and `flags/<name>` for every variable and dependent, in
 the deck units `FitResult.values` already holds them in; the `fit/` summary; and, only when given,
 `laplace/` (`laplace`'s raw σ) and `scatter/` (`slice_scatter`'s windows, each with its own data and
-model). **The call rewrites the whole file**: opened with `"w"`, no append, no partial update.
+model, the per-bin quantiles and the held values, Phase 4.N spec D7). **The call rewrites the whole
+file**: opened with `"w"`, no append, no partial update.
 
 `problem` is the problem `result` was fitted from, or one rebuilt from the same deck
 (`OTIS.build_problem(read_deck(path))`): the data, σ and mask come from it and the model from
 `result`, so its channel names, its time axis (bitwise), its `ntheta` and each channel's image size
 must match `result`'s, a loud error otherwise. `laplace` and `scatter` must have been computed at
-`result.theta` exactly, and `scatter` must carry its windows' data (a `ScatterResult` from
-`slice_scatter`, not one built with the eleven-field constructor). `fit/gn_decrease` is written when
+`result.theta` exactly, and `scatter` must carry its windows' data and its quantiles (a
+`ScatterResult` from `slice_scatter`, not one built with the eleven- or sixteen-field constructor).
+`fit/gn_decrease` is written when
 `laplace` is given (its `decrease`, the Gauss-Newton decrease at the same θ).
 
 `result.jld2` is untouched: this file is for reading, not a round trip, and nothing in the package
@@ -105,6 +114,12 @@ function _write_readable(path::AbstractString, @nospecialize(result::FitResult),
         length(scatter.data) == length(result.channels) || throw(ArgumentError(
             "write_readable: scatter holds the windows of $(length(scatter.data)) channel(s), but result " *
             "has $(length(result.channels)); pass the ScatterResult slice_scatter returned"))
+        # Phase 4.N spec D7: a ScatterResult built with the sixteen-field constructor has no quantiles
+        missing_q = sort([name for name in keys(scatter.values) if !(haskey(scatter.p16, name) &&
+                                                                       haskey(scatter.median, name) && haskey(scatter.p84, name))])
+        isempty(missing_q) || throw(ArgumentError(
+            "write_readable: scatter holds no quantiles for $missing_q; pass the ScatterResult " *
+            "slice_scatter returned"))
     end
 
     jldopen(path, "w") do f
@@ -346,9 +361,11 @@ end
 
 `scatter/` (Phase 4.M spec D10): per fine window `t_ns` (`t_fine` converted), `bin` (`coarse_bin`),
 `status`, `decrease`, `chi2`, and per free variable `params/<name>` (the window fits' values),
-`near_bound/<name>` (`UInt8`); per fitted bin `sigma_stat/<name>` (`s_stat`); and per channel, under
-`result`'s channel names in order, `channels/<name>/data`, `sigma`, `mask` (`UInt8`) and `model`,
-`(n_λ, n_w)` each, the fine windows' own. `m`, `counts` and `n_near_bound` stay in the result file.
+`near_bound/<name>` (`UInt8`); per fitted bin `sigma_stat/<name>` (`s_stat`) and (Phase 4.N spec D7)
+`p16/<name>`, `median/<name>`, `p84/<name>`; per held variable (Phase 4.N spec D7) `held/<name>`, per
+fine window; and per channel, under `result`'s channel names in order, `channels/<name>/data`,
+`sigma`, `mask` (`UInt8`) and `model`, `(n_λ, n_w)` each, the fine windows' own. `m`, `counts` and
+`n_near_bound` stay in the result file.
 """
 function _readable_scatter!(f, @nospecialize(result::FitResult), scatter::ScatterResult)
     f["scatter/t_ns"] = Vector{Float64}(t_from_si.(scatter.t_fine, :t_ns))
@@ -360,6 +377,12 @@ function _readable_scatter!(f, @nospecialize(result::FitResult), scatter::Scatte
         f["scatter/params/$name"] = Vector{Float64}(v)
         f["scatter/near_bound/$name"] = UInt8.(scatter.near_bound[name])
         f["scatter/sigma_stat/$name"] = Vector{Float64}(scatter.s_stat[name])
+        f["scatter/p16/$name"] = Vector{Float64}(scatter.p16[name])
+        f["scatter/median/$name"] = Vector{Float64}(scatter.median[name])
+        f["scatter/p84/$name"] = Vector{Float64}(scatter.p84[name])
+    end
+    for (name, v) in scatter.held
+        f["scatter/held/$name"] = Vector{Float64}(v)
     end
     for (c, summ) in enumerate(result.channels)
         prefix = "scatter/channels/$(summ.name)"

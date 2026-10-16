@@ -522,6 +522,40 @@ function _detrended_spread(t::AbstractVector, y::AbstractVector)
 end
 
 """
+    _quantile_sorted(x_sorted::AbstractVector, q::Real) -> Float64
+
+The `q` quantile of the values `x_sorted`, already sorted ascending (Phase 4.N spec D6,
+[OQ-64](../../dev/open_questions.md#oq-64) item 3): Hyndman and Fan's type 7, the definition
+`Statistics.quantile` and numpy share. With `m = length(x_sorted)`,
+
+    h = (m - 1) q + 1;   quantile = x[⌊h⌋] + (h - ⌊h⌋) (x[⌊h⌋ + 1] - x[⌊h⌋]),   x[m] when ⌊h⌋ = m
+
+defined for every `m >= 1` (one value gives itself at every `q`). **Evaluated in `Statistics.quantile`'s
+own order** (Statistics 1.11.5, the test environment's; the user's choice of 2026-10-15, Phase 4.N
+summary U1), so that it equals that function bitwise: `h = fma(m, q, 1 - q)`, `j = clamp(⌊h⌋, 1, m - 1)`,
+`γ = clamp(h - j, 0, 1)`, and `(1 - γ) x[j] + γ x[j + 1]`, unless the two values are finite and `≈`, when
+it is `x[j] + γ (x[j + 1] - x[j])`. The same quantile as the formula above, rounded as that package
+rounds it. A private helper, so that the package takes no `Statistics` dependency
+([OQ-1](../../dev/open_questions.md#oq-1)); the caller sorts once for its three quantiles.
+
+Phase 4.N spec D6.
+"""
+function _quantile_sorted(x_sorted::AbstractVector, q::Real)
+    m = length(x_sorted)
+    m >= 1 || throw(ArgumentError("_quantile_sorted: no value to take a quantile of"))
+    p = Float64(q)
+    h = fma(m, p, 1.0 - p)
+    j = clamp(trunc(Int, h), 1, m - 1)
+    γ = clamp(h - j, 0.0, 1.0)
+    a = m == 1 ? Float64(x_sorted[1]) : Float64(x_sorted[j])
+    b = m == 1 ? Float64(x_sorted[1]) : Float64(x_sorted[j+1])
+    if isfinite(a) && isfinite(b) && a ≈ b
+        return a + γ * (b - a)
+    end
+    return (1.0 - γ) * a + γ * b
+end
+
+"""
     ScatterResult
 
 The outcome of `slice_scatter` (D51, `config/scatter.jl`): the per-slice statistical uncertainty
@@ -536,23 +570,32 @@ report, a fine-grid **joint** fit at single-slice resolution.
 - `status`, `decrease`: each fine window's own fit status and final `gn_decrease`, length `N_fine`.
 - Per **free** variable (`vary && time_varying`, Pitfall 42; a scalar or a frozen variable has no
   entry here):
-  - `values`: length `N_fine`, in the variable's own unit;
-  - `near_bound`: length `N_fine`;
+  - `values`: length `N_fine`, in the variable's own unit; `NaN` in a window whose coarse bin lies
+    outside the variable's interval, where it was frozen at its `init` (Phase 4.N spec D3);
+  - `near_bound`: length `N_fine`, `false` where `values` is `NaN`;
   - `s_stat`: length = the number of coarse bins, `_detrended_spread` over each bin's own fine
-    windows, **never divided by `sqrt(m)`** (Pitfall 40);
+    windows, **never divided by `sqrt(m)`** (Pitfall 40); `NaN` for a bin outside the interval;
   - `n_near_bound`: length = the number of coarse bins, the count of `near_bound` over the bin's
-    own fine windows.
+    own fine windows; `0` for a bin outside the interval.
 - Per channel, in channel order (Phase 4.M spec D13, [OQ-63](../../dev/open_questions.md#oq-63) item
   5), each `(N_λ, N_fine)`, column `j` fine window `j` as its one-bin fit saw it: `data`, `sigma` and
   `mask`, the window's averaged image, σ and used-pixel mask; `model`, the model at the window's
   solution.
 - `chi2`: length `N_fine`, each window's χ² at its solution (the weighted total over channels).
+- `held` (Phase 4.N spec D4, [OQ-64](../../dev/open_questions.md#oq-64) item 2): per variable the
+  deck's `[fit.hold]` names, length `N_fine`, the value each window held it at; `NaN` in a window whose
+  coarse bin lies outside the variable's interval. Empty without a `[fit.hold]` table.
+- `p16`, `median`, `p84` (Phase 4.N spec D6, OQ-64 item 3): per free variable, length = the number of
+  coarse bins, the 16th, 50th and 84th percentiles of the bin's own fine windows' `values`
+  (`_quantile_sorted`, type 7), over every window whatever its `status`; `NaN` for a bin outside the
+  variable's interval.
 
-The eleven-argument positional constructor (every field but the last five) stays, as an outer method
-filling those five empty, so a `ScatterResult` built by hand keeps compiling; `write_result` writes
-none of the five (the result file's `scatter/*` is unchanged), `write_readable` writes all of them.
+The eleven-argument positional constructor (every field but the last nine) and the sixteen-argument
+one (every field but the last four) stay, as outer methods filling the later fields empty, so a
+`ScatterResult` built by hand keeps compiling; `write_result` writes none of the nine (the result
+file's `scatter/*` is unchanged), `write_readable` writes all of them.
 
-Spec D51; Phase 4.M spec D13.
+Spec D51; Phase 4.M spec D13; Phase 4.N spec D4, D6.
 """
 struct ScatterResult
     theta::Vector{Float64}
@@ -571,12 +614,22 @@ struct ScatterResult
     mask::Vector{Matrix{Bool}}
     model::Vector{Matrix{Float64}}
     chi2::Vector{Float64}
+    held::Dict{String,Vector{Float64}}
+    p16::Dict{String,Vector{Float64}}
+    median::Dict{String,Vector{Float64}}
+    p84::Dict{String,Vector{Float64}}
 end
 
 ScatterResult(theta, m, t_fine, coarse_bin, counts, status, decrease, values, near_bound, s_stat,
     n_near_bound) = ScatterResult(theta, m, t_fine, coarse_bin, counts, status, decrease, values,
     near_bound, s_stat, n_near_bound, Matrix{Float64}[], Matrix{Float64}[], Matrix{Bool}[],
     Matrix{Float64}[], Float64[])
+
+ScatterResult(theta, m, t_fine, coarse_bin, counts, status, decrease, values, near_bound, s_stat,
+    n_near_bound, data, sigma, mask, model, chi2) = ScatterResult(theta, m, t_fine, coarse_bin, counts,
+    status, decrease, values, near_bound, s_stat, n_near_bound, data, sigma, mask, model, chi2,
+    Dict{String,Vector{Float64}}(), Dict{String,Vector{Float64}}(), Dict{String,Vector{Float64}}(),
+    Dict{String,Vector{Float64}}())
 
 """
     _median_finite(v::AbstractVector) -> Float64
