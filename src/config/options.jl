@@ -18,7 +18,7 @@
 # literal (`coefficients = ["bg", "c1", 0.0]`) has one fixed field type to check element by
 # element, each entry independently a variable reference or a fixed number.
 
-# --- SHAPE_REGISTRY's five option structs ---
+# --- SHAPE_REGISTRY's six option structs ---
 
 """
     MaxwellianOptions
@@ -72,6 +72,21 @@ inside the table.
 """
 Base.@kwdef struct SkewNormalOptions
     alpha::Float64 = 0.0
+end
+
+"""
+    HermiteExpansionOptions
+
+`c3`, `c4`, `c5`, `c6`, the Gram–Charlier coefficients (Phase 5.A spec D9,
+[OQ-66](../../dev/open_questions.md#oq-66) item 5). Each defaults to `0.0`, the Maxwellian, as
+`HermiteExpansion`'s own keyword constructor does; each key independently takes a fixed number or a
+variable reference, so a deck can fit `c3` and fix `c4`. The effective deck writes all four.
+"""
+Base.@kwdef struct HermiteExpansionOptions
+    c3::Float64 = 0.0
+    c4::Float64 = 0.0
+    c5::Float64 = 0.0
+    c6::Float64 = 0.0
 end
 
 # --- EFFECT_REGISTRY's ten option structs ---

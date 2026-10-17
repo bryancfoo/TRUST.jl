@@ -287,6 +287,8 @@ _build_shape(::Type{SuperGaussian}, shape_p::AbstractDict) = SuperGaussian(Float
 _build_shape(::Type{Kappa}, shape_p::AbstractDict) = Kappa(Float64(shape_p["kappa"]))
 _build_shape(::Type{GeneralizedNormal}, shape_p::AbstractDict) = GeneralizedNormal(Float64(shape_p["m"]))
 _build_shape(::Type{SkewNormal}, shape_p::AbstractDict) = SkewNormal(Float64(shape_p["alpha"]))
+_build_shape(::Type{HermiteExpansion}, shape_p::AbstractDict) =
+    HermiteExpansion(Float64(shape_p["c3"]), Float64(shape_p["c4"]), Float64(shape_p["c5"]), Float64(shape_p["c6"]))
 
 """
     _shape_from_dict(d::AbstractDict) -> AbstractVelocityDistribution

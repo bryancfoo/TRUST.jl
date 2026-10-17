@@ -276,6 +276,19 @@ a fit's printed summary names a scalar variable near a bound without a bin; the 
 admits Makie 0.24.13; and the derivation notes gain six rules learned from the first real-data fit. A
 `Bool` in a streak's metadata already wrote and read back as a `Bool`. Every fit is exactly what it was.
 
+**Phase 5.A (the Hermite expansion) is complete.** A sixth velocity-distribution shape,
+`HermiteExpansion`, the Gram–Charlier series around the Maxwellian with four fittable coefficients `c3` to
+`c6`: `shape = { type = "HermiteExpansion", c3 = "c3_e", c4 = "c4_e" }` fits the skew (skewness `12√2 c3`)
+and the kurtosis correction (excess kurtosis `96 c4`) like any shape parameter, time-varying if wanted,
+and the fitted temperature is still the variance temperature exactly. With every coefficient zero it is the
+Maxwellian exactly. Its Cauchy integral and every coefficient derivative are closed form through the
+derivatives of the plasma dispersion function, with no table, accurate at every `ξ` (by recursion below
+`|ξ| = 7` and from the asymptotic series beyond). The series can go negative, and that is reported, not
+refused: printing the shape shows the lobe, and `fit` warns when a fitted bin's shape is negative over more
+than a tenth of a percent of the distribution. `docs/derivations/hermite.md` gives the region in which the
+series stays positive (`c4` between 0 and 1/24, `|c3|` up to about 0.06) as advice for a deck's bounds.
+Every other fit is exactly what it was.
+
 ## Installing and testing
 
 ```

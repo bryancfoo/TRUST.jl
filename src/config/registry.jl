@@ -12,7 +12,7 @@
 
 Deck name -> `AbstractVelocityDistribution` constructor (spec D32). Each entry's option struct
 is in `options.jl` (`MaxwellianOptions`, `SuperGaussianOptions`, `KappaOptions`,
-`GeneralizedNormalOptions`, `SkewNormalOptions`).
+`GeneralizedNormalOptions`, `SkewNormalOptions`, `HermiteExpansionOptions`).
 """
 const SHAPE_REGISTRY = Dict{String,Any}(
     "Maxwellian" => Maxwellian,
@@ -20,6 +20,7 @@ const SHAPE_REGISTRY = Dict{String,Any}(
     "Kappa" => Kappa,
     "GeneralizedNormal" => GeneralizedNormal,
     "SkewNormal" => SkewNormal,
+    "HermiteExpansion" => HermiteExpansion,
 )
 
 """

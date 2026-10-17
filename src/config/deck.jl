@@ -668,7 +668,8 @@ const _ELECTRON_SPECIES_KEYS = ("T_eV", "T_keV", "u_kms", "u_ms", "fraction", "s
 const _ION_SPECIES_KEYS = (_ELECTRON_SPECIES_KEYS..., "mass_amu", "mass_kg", "charge")
 const _SHAPE_OPTIONS = Dict{String,Any}("Maxwellian" => MaxwellianOptions, "SuperGaussian" => SuperGaussianOptions,
                                          "Kappa" => KappaOptions, "GeneralizedNormal" => GeneralizedNormalOptions,
-                                         "SkewNormal" => SkewNormalOptions)
+                                         "SkewNormal" => SkewNormalOptions,
+                                         "HermiteExpansion" => HermiteExpansionOptions)
 
 function _validate_shape_entry(given::AbstractDict, known_names::AbstractSet{String}, section::AbstractString)
     given isa AbstractDict || throw(ArgumentError("read_deck: \"$section\" must be a table"))
@@ -1473,6 +1474,8 @@ _construct_shape(::Type{SuperGaussianOptions}, resolved::AbstractDict) = SuperGa
 _construct_shape(::Type{KappaOptions}, resolved::AbstractDict) = Kappa(resolved["kappa"])
 _construct_shape(::Type{GeneralizedNormalOptions}, resolved::AbstractDict) = GeneralizedNormal(resolved["m"])
 _construct_shape(::Type{SkewNormalOptions}, resolved::AbstractDict) = SkewNormal(resolved["alpha"])
+_construct_shape(::Type{HermiteExpansionOptions}, resolved::AbstractDict) =
+    HermiteExpansion(resolved["c3"], resolved["c4"], resolved["c5"], resolved["c6"])
 
 """
     _build_template(plasma_section, vals) -> (Plasma, Vector{Pair{String,Any}})
@@ -2458,6 +2461,74 @@ function _warn_near_bound(result::FitResult)
 end
 
 """
+    _hermite_lobe_entries(result::FitResult) -> Vector{@NamedTuple{species::String, bin::Int, negative_mass::Float64}}
+
+Every fitted bin at which a species' `HermiteExpansion` is negative over more than
+`HERMITE_NEGATIVE_MASS_WARN` of the distribution (`_hermite_lobe`'s `negative_mass`, Phase 5.A spec D10).
+The shape at bin `j` is rebuilt from the fit as the fit itself rebuilds it: the plasma of bin `j` of the
+first channel's fitted trace, `plasma(trace, j)` (every channel shares the plasma), a bin with a
+non-finite leaf (a variable outside its interval) skipped as `_resonance_widths` skips it. A species whose
+shape is not a `HermiteExpansion` reports nothing (`_hermite_lobe` returns `nothing` for it). Species as
+`"electrons.<name>"` and `"ions.<name>"`, electrons first, each in the plasma's order, then bins ascending.
+"""
+function _hermite_lobe_entries(result::FitResult)
+    entries = @NamedTuple{species::String, bin::Int, negative_mass::Float64}[]
+    tr = first(result.experiments).trace
+    for (kind, set) in (("electrons", tr.template.electrons), ("ions", tr.template.ions))
+        for name in keys(set)
+            _hermite_lobe(set[name].f) === nothing && continue
+            for j in 1:nbins(tr)
+                all(isfinite, view(tr.values, :, j)) || continue
+                p = plasma(tr, j)
+                sp = kind == "electrons" ? p.electrons[name] : p.ions[name]
+                mass = _hermite_lobe(sp.f).negative_mass
+                mass > HERMITE_NEGATIVE_MASS_WARN || continue
+                push!(entries, (species = "$kind.$name", bin = j, negative_mass = mass))
+            end
+        end
+    end
+    return entries
+end
+
+"""
+    _hermite_lobe_message(entries, label::AbstractString) -> String
+
+The text of `_warn_hermite_lobe`'s warning (Phase 5.A spec D10): a first line naming `label`, the threshold
+and the reason, then one line per species with an entry, `"  electrons.e: bins 1, 2 (largest negative mass
+0.00423)"` (`"bin 2"` for one), the mass to three significant figures.
+"""
+function _hermite_lobe_message(entries, label::AbstractString)
+    lines = String["fit: in $label, a HermiteExpansion shape is negative over more than " *
+                   "HERMITE_NEGATIVE_MASS_WARN = $HERMITE_NEGATIVE_MASS_WARN of the distribution at the bins " *
+                   "below, where the expansion has left its region of validity (the result is as fitted; " *
+                   "`converged` does not see this):"]
+    for sp in unique(e.species for e in entries)
+        mine = [e for e in entries if e.species == sp]
+        bins = (length(mine) == 1 ? "bin " : "bins ") * join((e.bin for e in mine), ", ")
+        worst = @sprintf("%.3g", maximum(e.negative_mass for e in mine))
+        push!(lines, "  $sp: $bins (largest negative mass $worst)")
+    end
+    return join(lines, "\n")
+end
+
+"""
+    _warn_hermite_lobe(result::FitResult, label::AbstractString) -> Vector{@NamedTuple{species::String, bin::Int, negative_mass::Float64}}
+
+[OQ-66](../../dev/open_questions.md#oq-66) item 4, the user's option C of 2026-10-16 (Phase 5.A spec D10):
+one `@warn` when a fitted bin's `HermiteExpansion` is negative over more than `HERMITE_NEGATIVE_MASS_WARN`
+of the distribution (`_hermite_lobe_entries`), naming `label` (`the final fit`), the species, the bins and
+the largest mass; silent otherwise; returns the entries either way. A report, in the manner of
+`_warn_near_bound`: the fit, its `converged` and `status` and every dataset `write_result` writes are
+exactly as they would be without it. Called by `fit(deck)` after the near-bound warning.
+"""
+function _warn_hermite_lobe(result::FitResult, label::AbstractString)
+    entries = _hermite_lobe_entries(result)
+    isempty(entries) && return entries
+    @warn _hermite_lobe_message(entries, label) threshold = HERMITE_NEGATIVE_MASS_WARN status = result.status converged = result.converged
+    return entries
+end
+
+"""
     _warn_iteration_cap(result::FitResult, label::AbstractString) -> Bool
 
 [OQ-59](../../dev/open_questions.md#oq-59) item 5 (Phase 4.I spec D25): one `@warn` when
@@ -2502,6 +2573,11 @@ fitted entry within `BOUND_PROXIMITY_TOL` of a bound (a variable and its bins, o
 when there is none, and `write_result` lists the same entries in `fit/near_bound_entries/*`. Neither
 changes the fit: its `theta`, `converged` and `status` are `solve`'s.
 
+**The Hermite expansion's lobe** (Phase 5.A spec D10, [OQ-66](../../dev/open_questions.md#oq-66) item 4):
+after the saturation warning, `fit` calls `_warn_hermite_lobe(result, "the final fit")`, one warning when a
+fitted bin's `HermiteExpansion` is negative over more than `HERMITE_NEGATIVE_MASS_WARN` of the
+distribution, naming the species, the bins and the largest mass; silent otherwise. It changes nothing.
+
 **The staged procedure** (Phase 4.F spec D3 to D7, [OQ-54](../../dev/open_questions.md#oq-54)):
 with `procedure = "staged"`, `fit` pins BLAS and runs `_staged_fit` in place of `build_problem`
 and `solve`: each channel fitted alone, the joint fit started from those fits, then `polish`. Every
@@ -2509,7 +2585,7 @@ check, warning and file this docstring describes is the final fit's, and `write_
 writes the stages' results (`stages/*`).
 
 **The resonance-width check** (Phase 4.F spec D13 to D16, [OQ-53](../../dev/open_questions.md#oq-53)):
-after the saturation warning, `fit` calls `_warn_narrow_resonance(result)`, one warning when a
+after the lobe warning, `fit` calls `_warn_narrow_resonance(result)`, one warning when a
 fitted bin's EPW resonance is narrower than `RESONANCE_WIDTH_WARN` wavelength pixels and its
 channel does not yet sample each pixel finely enough, naming the bins and the
 `pixel_integration` count to refit with; silent otherwise. It changes nothing.
@@ -2549,6 +2625,7 @@ function fit(deck::Deck)
     decrease = _fit_gn_decrease(problem, result)
     _warn_fit_minimum(result, decrease, _near_bound_fraction(result))
     _warn_near_bound(result)
+    _warn_hermite_lobe(result, "the final fit")
     _warn_narrow_resonance(result)
     if staged !== nothing
         for st in staged.stages

@@ -109,6 +109,20 @@ renamed — a general `ChebyshevTable` type, per-table degree caps and a signed 
 Phase 4.B Step 4.B.2a, 2026-09-26, spec D13; `SG_TABLE` and `SG_DM_TABLE` are bitwise unchanged
 and keep their names.)*
 
+## 5a. `HermiteExpansion`, the first shape with several parameters
+
+`HermiteExpansion` (Phase 5.A, Step 5.A.1) is derived in `docs/derivations/hermite.md`: the
+Gram–Charlier A series `φ = (e^{−x²}/√π)(1 + Σ_{n=3}^{6} cₙHₙ)`, which meets the three normalizations of
+Section 1 for every coefficient, so a fitted temperature is the variance temperature, and is the
+Maxwellian at zero coefficients **bitwise**. It needs **no table and no quadrature**: since
+`∫ (e^{−x²})^{(k)}/(x − ξ) dx = √π Z^{(k)}(ξ)`, its Cauchy integral is Section 2's `Z'` plus one derivative
+of `Z` per coefficient, `𝒞φ = Z' + Σₙ cₙ (−1)ⁿ Z^{(n+1)}`, the derivatives by the recursion from
+`Z' = −2(1 + ξZ)` and, on the real axis at `|ξ| ≥ 7`, where that recursion loses accuracy, from the
+asymptotic series (`hermite.md` Section 3). The generic quadrature fallback of Section 4 stays its test
+oracle. It is the first shape the package lets go negative: the constructor refuses only a non-finite
+coefficient, and a negative lobe is reported (`_hermite_lobe`, `show`, and a warning from `fit`), not
+refused (`hermite.md` Section 5).
+
 ## 6. A shape's derivative in its own parameters
 
 `conventions.md` Section 4's `AbstractVelocityDistribution` entry carries the contract every
@@ -155,8 +169,11 @@ integral from `SN_TABLE` (α ∈ [−3, 3] × ξ ∈ [−20, 20], **signed**, si
 even), the quadrature beyond it, and **no series branch** (`_cauchy_series` assumes a symmetric
 shape); φ's α-partial is closed form through `erfc`.
 
-**`HermiteExpansion` is not
-built** (the user, 2026-09-26). **The guard checks each
+**`HermiteExpansion`** (Phase 5.A, Step 5.A.1), derived in `docs/derivations/hermite.md`: **closed form
+throughout**. Its Cauchy integral is `Z'` plus one derivative of `Z` per coefficient, and each coefficient
+enters by one multiplication, so `∂𝒞φ/∂cₙ = (−1)ⁿ Z^{(n+1)}(ξ)` exactly; φ's coefficient partials are the
+polynomials themselves. No table, no series, no quadrature; the guard measures each of its four
+coefficients. **The guard checks each
 shape's route rather than assuming it**: `test_shape_cost.jl`'s SC1 fails the instant a shape is
 registered in `SHAPE_REGISTRY` without a matching entry in `_SC_SHAPES`, and SC5 the instant one is
 registered in one of the two name tables and not the other, so a slow or allocating parameter

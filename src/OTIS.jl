@@ -10,6 +10,7 @@ include("distributions/supergaussian_table.jl")   # new (1.SG.2): builds SG_TABL
 include("distributions/kappa.jl")                 # new (4.B.2b): Kappa and KAPPA_TABLE, built at include time
 include("distributions/generalized_normal.jl")     # new (4.B.3): GeneralizedNormal and GN_TABLE, built at include time
 include("distributions/skew_normal.jl")            # new (4.B.4): SkewNormal and SN_TABLE, built at include time
+include("distributions/hermite.jl")                # new (5.A.1): HermiteExpansion, closed form through Z's derivatives
 include("plasma/species.jl")
 include("plasma/parameters.jl")     # methods on Species and SpeciesSpec
 include("plasma/plasma.jl")         # Plasma constructor uses Species and the unit table
@@ -47,7 +48,8 @@ include("config/deck.jl")                 # new (3.6b): read_deck, build_problem
 include("config/scatter.jl")              # new (4.A.4b): slice_scatter; needs Deck and D50's stages
 
 # types
-export AbstractVelocityDistribution, Maxwellian, SuperGaussian, Kappa, GeneralizedNormal, SkewNormal, SpeciesSpec, Species, SpeciesSet, Plasma
+export AbstractVelocityDistribution, Maxwellian, SuperGaussian, Kappa, GeneralizedNormal, SkewNormal, HermiteExpansion,
+       SpeciesSpec, Species, SpeciesSet, Plasma
 
 # shape interface
 export dfdx, cauchy_dfdv, moment, skewness, excess_kurtosis, parameters, reconstruct
