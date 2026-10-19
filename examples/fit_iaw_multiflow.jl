@@ -17,8 +17,8 @@
 # one). Writes runs/iaw_multiflow/result.jld2 (the Lambda = 5e-3 fit "shown" by D38, with the
 # whole scan attached) and runs/iaw_multiflow/effective_deck.toml.
 
-using OTIS
-using OTIS: _with_weight, _leaf_si_path
+using TRUST
+using TRUST: _with_weight, _leaf_si_path
 using Random: Xoshiro
 
 include(joinpath(@__DIR__, "problems.jl"))
@@ -27,10 +27,10 @@ include(joinpath(@__DIR__, "iaw_multiflow.jl")) # writes runs/iaw_multiflow_stre
 const LAMBDA_SCAN = [1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1]
 const LAMBDA_SHOWN = 5.0e-3
 
-# D34 item 3: refuse to write a result carrying a non-converged fit. `OTIS_ALLOW_UNCONVERGED=1`
+# D34 item 3: refuse to write a result carrying a non-converged fit. `TRUST_ALLOW_UNCONVERGED=1`
 # downgrades the refusal to a loud warning for a diagnostic run; it defaults off, and a file
 # written under it is a diagnostic, never a reproduction.
-const ALLOW_UNCONVERGED = get(ENV, "OTIS_ALLOW_UNCONVERGED", "0") == "1"
+const ALLOW_UNCONVERGED = get(ENV, "TRUST_ALLOW_UNCONVERGED", "0") == "1"
 
 function _check_converged(scan::WeightScanResult,
     extra::AbstractVector{<:Pair{<:AbstractString,<:FitResult}})
@@ -45,7 +45,7 @@ function _check_converged(scan::WeightScanResult,
     end
     isempty(offenders) && return nothing
     msg = "not converged, refusing to write a result: " * join(offenders, "; ")
-    ALLOW_UNCONVERGED ? (@warn "$msg (OTIS_ALLOW_UNCONVERGED=1: writing anyway)") : error(msg)
+    ALLOW_UNCONVERGED ? (@warn "$msg (TRUST_ALLOW_UNCONVERGED=1: writing anyway)") : error(msg)
     return nothing
 end
 
@@ -74,7 +74,7 @@ function run_reproduction()
     t_start = time()
 
     deck = read_deck(joinpath(@__DIR__, "iaw_multiflow.toml"))
-    problem, optimizer, start = OTIS.build_problem(deck)
+    problem, optimizer, start = TRUST.build_problem(deck)
 
     problem_nt = iaw_multiflow_problem()
     nt = nbins(problem.pspec.trace)

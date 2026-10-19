@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _with_weight
+using TRUST
+using TRUST: _with_weight
 using Random: Xoshiro
 
 # WS1 to WS10 against dev/phase3_instructions.md Section 8 (spec D31), gated "weight scan". P2

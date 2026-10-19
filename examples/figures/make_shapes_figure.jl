@@ -10,7 +10,7 @@
 # `outdir` defaults to this directory (the committed location).
 
 using CairoMakie
-using OTIS
+using TRUST
 
 Makie.set_theme!(fontsize=14)
 

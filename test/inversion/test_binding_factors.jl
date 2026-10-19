@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: jvp!, jtvp!
+using TRUST
+using TRUST: jvp!, jtvp!
 import ForwardDiff
 
 # BF1 to BF9 against dev/phase4A_instructions.md Section 6 (spec D9-D12), gated "binding
@@ -33,7 +33,7 @@ end
 # `instrument_line`/`variable_line` are substituted in.
 function _bf_deck(datafile::AbstractString, instrument_line::AbstractString, variable_line::AbstractString)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -89,8 +89,8 @@ const _BF_SAMPLE_EFFECT = Dict{String,Function}(
 # ------------------------------------------------------------------------------------------
 
 @testset "BF1: the table is consistent with the code" begin
-    for (regname, table) in OTIS._INSTRUMENT_BINDING
-        OptT = OTIS._INSTRUMENT_OPTIONS[regname]
+    for (regname, table) in TRUST._INSTRUMENT_BINDING
+        OptT = TRUST._INSTRUMENT_OPTIONS[regname]
         optfields = Set(String.(fieldnames(OptT)))
         effect = _BF_SAMPLE_EFFECT[regname]()
         pnt = parameters(effect)
@@ -108,11 +108,11 @@ end
 # ------------------------------------------------------------------------------------------
 
 @testset "BF2: the three non-unit factors are the right numbers" begin
-    @test OTIS._INSTRUMENT_BINDING["WavelengthCalibration"]["lambda_offset_nm"][2] == 1e-9
-    @test OTIS._INSTRUMENT_BINDING["KSmearing"]["half_angle_deg"][2] == pi / 180
-    @test OTIS._INSTRUMENT_BINDING["SpectralIRF"]["fwhm_nm"][2] == 1e-9 / (2 * sqrt(2 * log(2)))
-    @test OTIS._INSTRUMENT_BINDING["TemporalIRF"]["fwhm_ns"][2] == 1e-9 / (2 * sqrt(2 * log(2)))
-    @test OTIS._INSTRUMENT_BINDING["SpectralIRF"]["fwhm_nm"][2] == 1e-9 * OTIS._SIGMA_PER_FWHM
+    @test TRUST._INSTRUMENT_BINDING["WavelengthCalibration"]["lambda_offset_nm"][2] == 1e-9
+    @test TRUST._INSTRUMENT_BINDING["KSmearing"]["half_angle_deg"][2] == pi / 180
+    @test TRUST._INSTRUMENT_BINDING["SpectralIRF"]["fwhm_nm"][2] == 1e-9 / (2 * sqrt(2 * log(2)))
+    @test TRUST._INSTRUMENT_BINDING["TemporalIRF"]["fwhm_ns"][2] == 1e-9 / (2 * sqrt(2 * log(2)))
+    @test TRUST._INSTRUMENT_BINDING["SpectralIRF"]["fwhm_nm"][2] == 1e-9 * TRUST._SIGMA_PER_FWHM
 end
 
 # ------------------------------------------------------------------------------------------
@@ -125,9 +125,9 @@ end
     # logit round-trip's own few-ULP roundoff (PM3/PM4's own documented slack) -- rtol = 1e-15 is
     # a statement about the multiplication, not about flatten/unflatten's round trip.
     calib = WavelengthCalibration(lambda_offset_nm=0.5)   # any valid effect; only :offset is read
-    b = OTIS.Binding("dlam", 1, :effect, OTIS._DUMMY_LEAF_PATH, 0, 1, :offset, 0, 1e-9, "lambda_offset_nm")
+    b = TRUST.Binding("dlam", 1, :effect, TRUST._DUMMY_LEAF_PATH, 0, 1, :offset, 0, 1e-9, "lambda_offset_nm")
     vals = [0.02]
-    rebuilt = OTIS._rebuild_effect(calib, [b], vals)
+    rebuilt = TRUST._rebuild_effect(calib, [b], vals)
     @test isapprox(rebuilt.offset, 0.02e-9; rtol=1e-15)
 end
 
@@ -143,7 +143,7 @@ end
         write(deckpath, _bf_deck(datafile, "wavelength_calibration = { lambda_offset_nm = \"dlam\" }",
             "dlam = { bounds = [-0.2, 0.2], init = 0.02 }"))
         deck = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         b = only(b for b in problem.pspec.bindings if b.name == "dlam")
         @test b.factor == 1e-9
         @test b.unit_key == "lambda_offset_nm"
@@ -162,14 +162,14 @@ end
         write(deckpath, _bf_deck(datafile, "wavelength_calibration = { lambda_offset_nm = \"dlam\" }",
             "dlam = { bounds = [-0.2, 0.2], init = 0.02 }"))
         deck = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         eff = effective_deck(deck, problem, optimizer)
         @test occursin("unit_key=lambda_offset_nm", eff)
 
         effpath = joinpath(dir, "bf5_eff.toml")
         write(effpath, eff)
         deck2 = read_deck(effpath)
-        problem2, optimizer2, start2 = OTIS.build_problem(deck2)
+        problem2, optimizer2, start2 = TRUST.build_problem(deck2)
         b2 = only(b for b in problem2.pspec.bindings if b.name == "dlam")
         @test b2.factor == 1e-9
         @test b2.unit_key == "lambda_offset_nm"
@@ -190,10 +190,10 @@ end
              expected_factor=pi / 180, expected_unit_key="half_angle_deg", init=2.0,
              bounds="[0.001, 10.0]", field=:half_angle, regname="KSmearing"),
             (instrument_line="spectral_irf = { fwhm_nm = \"x\" }", varname="x",
-             expected_factor=1e-9 * OTIS._SIGMA_PER_FWHM, expected_unit_key="fwhm_nm", init=0.08,
+             expected_factor=1e-9 * TRUST._SIGMA_PER_FWHM, expected_unit_key="fwhm_nm", init=0.08,
              bounds="[0.02, 0.5]", field=:sigma, regname="SpectralIRF"),
             (instrument_line="temporal_irf = { fwhm_ns = \"x\" }", varname="x",
-             expected_factor=1e-9 * OTIS._SIGMA_PER_FWHM, expected_unit_key="fwhm_ns", init=0.08,
+             expected_factor=1e-9 * TRUST._SIGMA_PER_FWHM, expected_unit_key="fwhm_ns", init=0.08,
              bounds="[0.02, 0.5]", field=:sigma, regname="TemporalIRF"),
         )
         for (i, row) in enumerate(rows)
@@ -201,14 +201,14 @@ end
             write(deckpath, _bf_deck(datafile, row.instrument_line,
                 "$(row.varname) = { bounds = $(row.bounds), init = $(row.init) }"))
             deck = read_deck(deckpath)
-            problem, optimizer, start = OTIS.build_problem(deck)
+            problem, optimizer, start = TRUST.build_problem(deck)
             b = only(b for b in problem.pspec.bindings if b.name == row.varname)
             @test b.factor == row.expected_factor
             @test b.unit_key == row.expected_unit_key
 
             theta = flatten(problem.pspec)
             result = unflatten(problem.experiment, problem.pspec, theta)
-            eidx = findfirst(e -> e isa OTIS._EFFECT_CTOR[row.regname], result.effects)
+            eidx = findfirst(e -> e isa TRUST._EFFECT_CTOR[row.regname], result.effects)
             @test eidx !== nothing
             got = parameters(result.effects[eidx])[row.field]
             reldiff = abs(got - row.init * row.expected_factor) / abs(row.init * row.expected_factor)
@@ -228,7 +228,7 @@ end
         _bf_write_streak(datafile)
         deckpath = joinpath(dir, "bf7.toml")
         write(deckpath, """
-        deck_version = "otis-deck-2"
+        deck_version = "trust-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -263,7 +263,7 @@ end
         deck = read_deck(deckpath)
         err = nothing
         try
-            OTIS.build_problem(deck)
+            TRUST.build_problem(deck)
         catch e
             err = e
         end
@@ -286,7 +286,7 @@ end
         write(deckpath, _bf_deck(datafile, "spectral_irf = { fwhm_nm = \"sig\" }",
             "sig = { bounds = [0.02, 0.5], init = 0.08 }"))
         deck = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         theta = start .+ 0.01 .* (1:length(start))
 
         Jac = jacobian(problem, theta)

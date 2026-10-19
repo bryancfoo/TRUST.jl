@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _build_cheb_table, _cheb_table_eval, _cheb_slice, _cheb_panel_index, ChebyshevTable,
+using TRUST
+using TRUST: _build_cheb_table, _cheb_table_eval, _cheb_slice, _cheb_panel_index, ChebyshevTable,
             _sg_principal_value, SG_PANEL_EDGES, SG_FIT_TOL, SG_M_LO, SG_M_HI, SG_DEGREE_START,
             SG_DEGREE_CAP_XI, SG_DEGREE_CAP_M, SG_BISECT_MAX, SG_TABLE
 using Random

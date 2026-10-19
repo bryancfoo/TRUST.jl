@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: JACOBIAN_CHUNK, _convective_gain, _spectrum_at, _widen_plasma, _epw_resonance_widths,
+using TRUST
+using TRUST: JACOBIAN_CHUNK, _convective_gain, _spectrum_at, _widen_plasma, _epw_resonance_widths,
     _resonance_widths
 import ForwardDiff
 
@@ -109,7 +109,7 @@ end
 # ------------------------------------------------------------------------------------------
 
 @testset "GF5: the gain's branch is concrete under a dual" begin
-    DFT = ForwardDiff.Dual{OTIS._JacobianTag,Float64,JACOBIAN_CHUNK}
+    DFT = ForwardDiff.Dual{TRUST._JacobianTag,Float64,JACOBIAN_CHUNK}
     pd = _widen_plasma(_gf_template(), DFT)
     cd = Collection{DFT}(DFT(_TK_COLL.theta), :exact, DFT(0.0), DFT(0.0), 0, DFT(0.0))
     lam = 263.0e-9
@@ -141,13 +141,13 @@ end
         # the shorthand: read, built, round-tripped through the effective deck and the result file
         deck = read_deck(w("d.toml", _gf_deck_text(dir; geometry=on)))
         @test deck.sections["geometry"]["gain"] == "convective"
-        problem, opt, start = OTIS.build_problem(deck)
+        problem, opt, start = TRUST.build_problem(deck)
         @test problem.experiment.gain === :convective
         eff = effective_deck(deck, problem, opt)
         @test occursin("gain = \"convective\"", eff)
         @test read_deck(w("eff.toml", eff)) == deck
         o = objective(problem, start)
-        result = OTIS._build_result(problem, start, o, [(iteration=0.0, objective=o, chi2=o, R=0.0)], true,
+        result = TRUST._build_result(problem, start, o, [(iteration=0.0, objective=o, chi2=o, R=0.0)], true,
             :f_tolerance, 0, 1, 0, 0.0, "none")
         @test result.experiments[1].gain === :convective
         write_result(joinpath(dir, "r.jld2"), result; problem=problem, deck=eff)
@@ -158,7 +158,7 @@ end
         # the default is filled when the key is omitted, and carried by the effective deck
         plain = read_deck(w("p.toml", _gf_deck_text(dir)))
         @test plain.sections["geometry"]["gain"] == "none"
-        pproblem, popt, _ = OTIS.build_problem(plain)
+        pproblem, popt, _ = TRUST.build_problem(plain)
         @test pproblem.experiment.gain === :none
         @test occursin("gain = \"none\"", effective_deck(plain, pproblem, popt))
         @test read_deck(w("n.toml", _gf_deck_text(dir; geometry="gain = \"none\""))) == plain
@@ -166,8 +166,8 @@ end
         # the channel form: its own geometry carries the key; :weak
         cdeck = read_deck(w("c.toml", _gf_deck_text(dir; form=:channel, geometry=_GF_ENERGETICS * "\ngain = \"weak\"")))
         @test cdeck.sections["channels"][1]["geometry"]["gain"] == "weak"
-        cproblem, copt, _ = OTIS.build_problem(cdeck)
-        @test OTIS._channel_problem(cproblem, 1).experiment.gain === :weak
+        cproblem, copt, _ = TRUST.build_problem(cdeck)
+        @test TRUST._channel_problem(cproblem, 1).experiment.gain === :weak
         @test read_deck(w("ceff.toml", effective_deck(cdeck, cproblem, copt))) == cdeck
 
         # refused at read_deck, each naming the section and the key
@@ -194,9 +194,9 @@ end
         text = replace(_rw_deck_text(dir), "theta_deg = 60.0" => "theta_deg = 60.0\n" * _GF_ENERGETICS * "\ngain = \"convective\"")
         path = joinpath(dir, "g.toml")
         write(path, text)
-        problem, _, start = OTIS.build_problem(read_deck(path))
+        problem, _, start = TRUST.build_problem(read_deck(path))
         o = objective(problem, start)
-        r = OTIS._build_result(problem, start, o, [(iteration=0.0, objective=o, chi2=o, R=0.0)], true,
+        r = TRUST._build_result(problem, start, o, [(iteration=0.0, objective=o, chi2=o, R=0.0)], true,
             :f_tolerance, 0, 1, 0, 0.0, "none")
         expt = r.experiments[1]
         @test expt.gain === :convective

@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: SG_TABLE, _cheb_slice, _cheb_table_eval,
+using TRUST
+using TRUST: SG_TABLE, _cheb_slice, _cheb_table_eval,
             _sg_principal_value, _cheb_nodes, _cheb_coeffs, _cheb_eval, _cheb_map
 using Random
 import ForwardDiff
@@ -192,7 +192,7 @@ end
     for m in (1.5, 2.0, 5.0, 8.0)
         f = SuperGaussian(m)
         tv = _cheb_table_eval(SG_TABLE, f.slice, SG_TABLE.xi_max)
-        series_val, converged = OTIS._cauchy_series(f, SG_TABLE.xi_max)
+        series_val, converged = TRUST._cauchy_series(f, SG_TABLE.xi_max)
         @test converged
         @test isapprox(tv, series_val; rtol = 1e-8, atol = 1e-8)
     end

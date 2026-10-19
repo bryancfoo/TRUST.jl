@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _stage_deck, _build_problem
+using TRUST
+using TRUST: _stage_deck, _build_problem
 
 # Step 4.I.3's slow rows (Phase 4.I spec D22 to D26), gated "sequential staging (slow)": SQ3 to SQ5
 # fit the staged fixture's two-channel deck (test/fixtures/staged_fixture.jl, ST3's) with a sequence.
@@ -64,7 +64,7 @@ end
         sdeck = _stage_deck(deck, 2, "lbfgs", String[])
         p, opt, st = _build_problem(sdeck; start=warm)
         @test st == flatten(p.pspec, collect(warm))
-        @test st != OTIS.build_problem(sdeck)[3]
+        @test st != TRUST.build_problem(sdeck)[3]
         @test solve(p, opt; start=st).theta == iaw.theta
         # every variable both stages fit takes its joint start from the last of them, the IAW stage
         @test r.stages.sources == Dict("logn" => "iaw", "T_e" => "iaw", "m_e" => "iaw", "T_D" => "iaw")

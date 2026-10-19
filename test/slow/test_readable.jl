@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 
 # Step 4.M.1's slow rows (Phase 4.M spec D16), gated "readable (slow)": RD11 to RD13 fit the RD deck
 # through fit(deck), two cameras with an interval, a held series, two dependents, two scalars (one ending
@@ -22,7 +22,7 @@ const _RDS_HOLD = write_start(joinpath(_RDS_DIR, "hold.jld2"); axis_ns=[0.0, 1.2
 const _RDS_OUT = joinpath(_RDS_DIR, "out")
 const _RDS_DECK = read_deck(_rd_write(_RDS_DIR, "rd.toml", _rd_deck_text(_RDS_PA, _RDS_PB, _RDS_HOLD, _RDS_OUT)))
 const _RDS_RESULT = _rd_fit(_RDS_DECK)
-const _RDS_PROBLEM = first(OTIS.build_problem(_RDS_DECK))
+const _RDS_PROBLEM = first(TRUST.build_problem(_RDS_DECK))
 
 # ------------------------------------------------------------------------------------------
 # RD11: the RD deck's arrays and chi2 (OQ-63 (a), (b)): an interval, a held series, masked pixels
@@ -32,14 +32,14 @@ const _RDS_PROBLEM = first(OTIS.build_problem(_RDS_DECK))
     rd = _rd_dict(joinpath(_RDS_OUT, "readable.h5"))
     re = _rd_dict(joinpath(_RDS_OUT, "result.jld2"))
     for (c, name) in enumerate(("a", "b"))
-        ch = OTIS._channel_problem(_RDS_PROBLEM, c)
+        ch = TRUST._channel_problem(_RDS_PROBLEM, c)
         @test isequal(rd["channels/$name/data"], ch.data.image)
         @test isequal(rd["channels/$name/sigma"], ch.sigma)
         @test rd["channels/$name/mask"] == UInt8.(ch.mask)
         @test isequal(rd["channels/$name/model"], re["channels/$name/model"])
     end
     @test count(iszero, rd["channels/b/mask"]) == 6
-    OTIS.jldopen(joinpath(_RDS_OUT, "readable.h5"), "r") do f
+    TRUST.jldopen(joinpath(_RDS_OUT, "readable.h5"), "r") do f
         for name in ("a", "b")
             chi2, n = _rd_chi2_bins(f, "channels/$name")
             @test isapprox(f["channels/$name/chi2"], chi2; rtol=1e-12)
@@ -60,7 +60,7 @@ end
         "w_b" => "fwhm_nm", "ne" => "n_e_cm3", "ratio" => "-")
     flags = Dict{String,Any}("T_D" => ["F", "F", "F"], "u_D" => ["", "F", "F"], "T_e" => ["H", "H", "H"],
         "s_b" => "F", "bg" => "B", "w_b" => "H", "ne" => ["D", "D", "D"], "ratio" => ["D", "D", "D"])
-    @test OTIS._near_bound_entries(r) == [(variable="bg", bin=0, bound=:lower)]
+    @test TRUST._near_bound_entries(r) == [(variable="bg", bin=0, bound=:lower)]
     rd = _rd_dict(joinpath(_RDS_OUT, "readable.h5"))
     @test Set(n for n in keys(units)) == Set(keys(r.values))
     for (name, unit) in units

@@ -1,5 +1,5 @@
 # The GeneralizedNormal shape: the plain one-dimensional super-Gaussian C exp(-|x/x0|^m) of other
-# fitting codes (Subbotin's generalized normal distribution), NOT OTIS's own SuperGaussian (which
+# fitting codes (Subbotin's generalized normal distribution), NOT TRUST's own SuperGaussian (which
 # is the projection of a 3-D super-Gaussian). See docs/derivations/generalized_normal.md.
 # Phase 4.B Step 4.B.3, spec D31-D34, D42.
 
@@ -9,7 +9,7 @@ using SpecialFunctions: loggamma
     GeneralizedNormal{FT<:Real,L} <: AbstractVelocityDistribution
 
 The plain one-dimensional super-Gaussian `C exp(−|x/x₀|^m)` of other fitting codes (Subbotin's
-generalized normal distribution); **not** OTIS's `SuperGaussian`, which is the one-dimensional
+generalized normal distribution); **not** TRUST's `SuperGaussian`, which is the one-dimensional
 marginal of an isotropic three-dimensional super-Gaussian. `m ∈ [1.5, 2)` is accepted but
 unphysical for an isotropic plasma (the 3-D density would diverge at zero speed, `F(v) ∝
 v^(m−2)`); it exists so that a fit's lower bound can sit below the Maxwellian (`m = 2`), and is

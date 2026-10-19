@@ -1,6 +1,6 @@
-# OTIS.jl
+# TRUST.jl
 
-OTIS, the **O**ptical **T**homson **I**nversion **S**uite, is a Julia package for forward
+TRUST, the **T**unable **R**egularized **U**nfolding of **S**cattered **T**homson, is a Julia package for forward
 modelling and inverting optical Thomson scattering (OTS) spectra from plasmas, including
 streaked (time-resolved) data inverted by regularizing across the whole streak at once. Its
 central design choice is that the velocity distribution of each species is an **input, not an
@@ -235,7 +235,7 @@ at least 1, and a fitted variable: write `charge = 4.6` in a `[plasma.ions.<name
 lower bound must be at least 1. A non-integer charge stands for a mixture of charge states of one
 element at one temperature and flow and is that mixture's ⟨Z²⟩/⟨Z⟩, which the spectrum reproduces
 exactly; it is not the number-average charge, and the density the package derives for the species is
-the equivalent single-state ion's. Trace files are now written as `otis-trace-2`, the charge a real
+the equivalent single-state ion's. Trace files are now written as `trust-trace-2`, the charge a real
 number, and an older trace file is refused. For every integer charge the model and every fit are
 exactly what they were.
 
@@ -267,7 +267,7 @@ bin's held value where the window lies beyond the file's time range. Beside each
 the scatter now reports the median and the 16th and 84th percentiles of the bin's window values (`p16`,
 `median`, `p84`, numpy's default definition), and the value each window held a held variable at
 (`held`); `write_readable(…; scatter = sc)` writes them as `scatter/p16/<name>`, `scatter/median/<name>`,
-`scatter/p84/<name>` and `scatter/held/<name>`, and the readable file is now `otis-readable-2`. On a deck
+`scatter/p84/<name>` and `scatter/held/<name>`, and the readable file is now `trust-readable-2`. On a deck
 without intervals or held series the scatter is exactly what it was, and `result.jld2` is unchanged.
 Its second step is housekeeping: `streakplot` draws masked-out pixels blank (`masked = false` draws them
 all); no file the package writes holds an empty text value any more, which h5py could not read, so an
@@ -289,6 +289,12 @@ than a tenth of a percent of the distribution. `docs/derivations/hermite.md` giv
 series stays positive (`c4` between 0 and 1/24, `|c3|` up to about 0.06) as advice for a deck's bounds.
 Every other fit is exactly what it was.
 
+The package was named OTIS until 2026-10-18. Files it wrote under that name carry layout
+versions spelled `otis-…`; every reader accepts that spelling for the same layout number and
+reports the canonical `trust-…` string, and every writer emits only `trust-…`. Decks that say
+`deck_version = "otis-deck-2"` read the same way, and their effective deck is written as
+`trust-deck-2`.
+
 ## Installing and testing
 
 ```
@@ -296,7 +302,7 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
-Set `OTIS_TESTS` to a comma-separated, case-insensitive list of substrings to run only the
+Set `TRUST_TESTS` to a comma-separated, case-insensitive list of substrings to run only the
 `@safetestset`s whose name matches one of them (unset or empty runs everything). The slow tier
 (sweeps and anything needing CairoMakie) is not part of `Pkg.test()`; run it by hand with
 `julia --project=test/slow test/slow/runslow.jl`, which uses its own environment and includes
@@ -310,12 +316,12 @@ julia --project -t auto
 ```
 
 launches Julia with all available threads. Call `pin_blas_threads()` before a large evaluation:
-OTIS threads over time bins itself, and BLAS on many threads oversubscribes the machine against
+TRUST threads over time bins itself, and BLAS on many threads oversubscribes the machine against
 it. **Thread a real fit**: the Jacobian's cost is the per-bin dual pass, which `foreach_bin!`
 parallelizes, measured at 3.4× from `-t 8` (`docs/real_data.md`); start one with
 
 ```
-julia --project=. -t 8 -e 'using OTIS; fit("shot12345.toml")'
+julia --project=. -t 8 -e 'using TRUST; fit("shot12345.toml")'
 ```
 
 not a bare `julia --project=.`.

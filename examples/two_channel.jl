@@ -1,7 +1,7 @@
 # Phase 4.A Step 4.A.3c: the synthetic two-channel problem, full resolution. Spec D41.
 # Run: julia --project=. examples/two_channel.jl
 
-using OTIS
+using TRUST
 
 include(joinpath(@__DIR__, "problems.jl"))
 

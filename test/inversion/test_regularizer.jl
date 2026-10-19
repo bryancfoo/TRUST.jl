@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _full_residuals, _regularizer_closed_form, _regularizer_value, _regularizer_raw_rows,
+using TRUST
+using TRUST: _full_residuals, _regularizer_closed_form, _regularizer_value, _regularizer_raw_rows,
     _regularizer_gradient!, _operator_rows
 import ForwardDiff
 

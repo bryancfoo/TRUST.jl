@@ -4,8 +4,8 @@
 # dev/phase3C_instructions.md Section 7's Test table specifies them.
 
 using Test
-using OTIS
-using OTIS: SG_TABLE, SG_DM_TABLE, _cheb_slice, _cheb_table_eval, _sg_dphi_dm_reference,
+using TRUST
+using TRUST: SG_TABLE, SG_DM_TABLE, _cheb_slice, _cheb_table_eval, _sg_dphi_dm_reference,
             _sg_x0, _sg_C, _sg_uncached, _widen_shape, _spectrum_eltype
 using Random
 import ForwardDiff

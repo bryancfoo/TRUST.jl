@@ -4,8 +4,8 @@
 # form, Zprime, ForwardDiff or a finite difference, never the function itself.
 
 using Test
-using OTIS
-using OTIS: KAPPA_TABLE, KAPPA_DEGREE_START, KAPPA_DEGREE_CAP_XI, KAPPA_DEGREE_CAP_S,
+using TRUST
+using TRUST: KAPPA_TABLE, KAPPA_DEGREE_START, KAPPA_DEGREE_CAP_XI, KAPPA_DEGREE_CAP_S,
             KAPPA_BISECT_MAX, _kappa_uncached, _kappa_cauchy_reference, _kappa_principal_value,
             _cheb_slice, _cheb_table_eval, _basefloat, _cauchy_upper, _widen_shape, SHAPE_REGISTRY
 using SpecialFunctions: loggamma, digamma, gamma
@@ -534,7 +534,7 @@ end
 
 function _kp21_deck(datafile, outdir)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -590,7 +590,7 @@ end
         deck = read_deck(deckpath)
         @test deck.sections["plasma"]["electrons"]["e"]["shape"]["type"] == "Kappa"
 
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         b = only(b for b in problem.pspec.bindings if b.name == "kappa_e")
         @test b.kind === :leaf
         @test string(b.path) == "electrons.e.f.kappa"

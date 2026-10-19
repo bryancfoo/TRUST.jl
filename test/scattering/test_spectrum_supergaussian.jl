@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _sg_cauchy_reference
+using TRUST
+using TRUST: _sg_cauchy_reference
 import ForwardDiff
 
 # D22's regression geometry and plasma (foo2026 Section III.A, the EPW problem).
@@ -57,15 +57,15 @@ end
 # quadrature path unconditionally, so SS4 can check the shape and the geometry are right
 # *before* SS5 blames the table for anything (spec Section 9's pitfall 5). Every other part of
 # the shape interface delegates to the wrapped SuperGaussian unchanged.
-struct _ReferencePathSG{FT,L,LM} <: OTIS.AbstractVelocityDistribution
+struct _ReferencePathSG{FT,L,LM} <: TRUST.AbstractVelocityDistribution
     inner::SuperGaussian{FT,L,LM}
 end
 (w::_ReferencePathSG)(x) = w.inner(x)
-OTIS.dfdx(w::_ReferencePathSG, x) = OTIS.dfdx(w.inner, x)
-OTIS.moment(w::_ReferencePathSG, n::Integer) = OTIS.moment(w.inner, n)
-OTIS.cauchy_dfdv(w::_ReferencePathSG, xi::Number) = _sg_cauchy_reference(w.inner, xi)
-OTIS.parameters(w::_ReferencePathSG) = OTIS.parameters(w.inner)
-OTIS.reconstruct(w::_ReferencePathSG, v::NamedTuple) = _ReferencePathSG(OTIS.reconstruct(w.inner, v))
+TRUST.dfdx(w::_ReferencePathSG, x) = TRUST.dfdx(w.inner, x)
+TRUST.moment(w::_ReferencePathSG, n::Integer) = TRUST.moment(w.inner, n)
+TRUST.cauchy_dfdv(w::_ReferencePathSG, xi::Number) = _sg_cauchy_reference(w.inner, xi)
+TRUST.parameters(w::_ReferencePathSG) = TRUST.parameters(w.inner)
+TRUST.reconstruct(w::_ReferencePathSG, v::NamedTuple) = _ReferencePathSG(TRUST.reconstruct(w.inner, v))
 
 # D22's nine printed numbers, through the reference (quadrature) path, this document's ground
 # truth for the regression case.

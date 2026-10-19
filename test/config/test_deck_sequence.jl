@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _staged_fit
+using TRUST
+using TRUST: _staged_fit
 
 # Step 4.I.3: the sequential stage (Phase 4.I spec D22 to D24, D26; OQ-59 item 4), gated "sequential
 # staging". SQ1 and SQ2: the grammar, its round trip, and every refusal, none of which fits; SQ3 to
@@ -27,7 +27,7 @@ _sq_text(dir, extra::AbstractDict) = _sh_edit(raw -> merge!(raw["optimizer"]["st
         st = deck.sections["optimizer"]["staged"]
         @test st["sequence"] == Any["epw", "iaw"]
         @test st["hold"] == Dict{String,Any}("iaw" => Any["logn", "T_e", "m_e"])
-        problem, optimizer, _ = OTIS.build_problem(deck)
+        problem, optimizer, _ = TRUST.build_problem(deck)
         eff = effective_deck(deck, problem, optimizer)
         @test occursin("sequence = [\"epw\", \"iaw\"]", eff)
         @test read_deck(_st_write(dir, "eff.toml", eff)) == deck

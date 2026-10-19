@@ -4,8 +4,8 @@
 # difference, never the function itself.
 
 using Test
-using OTIS
-using OTIS: SN_TABLE, SN_DEGREE_START, SN_DEGREE_CAP_XI, SN_DEGREE_CAP_ALPHA, SN_BISECT_MAX,
+using TRUST
+using TRUST: SN_TABLE, SN_DEGREE_START, SN_DEGREE_CAP_XI, SN_DEGREE_CAP_ALPHA, SN_BISECT_MAX,
             _sn_uncached, _sn_cauchy_reference, _sn_principal_value, _cheb_slice, _cheb_table_eval,
             _basefloat, _cauchy_upper, _widen_shape, SHAPE_REGISTRY, _std_normal_pdf, _std_normal_cdf
 using SpecialFunctions: erfc
@@ -531,7 +531,7 @@ end
 
 function _sk21_deck(datafile, outdir)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -599,7 +599,7 @@ end
         deck = read_deck(deckpath)
         @test deck.sections["plasma"]["electrons"]["e"]["shape"]["type"] == "SkewNormal"
 
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         b = only(b for b in problem.pspec.bindings if b.name == "alpha_e")
         @test b.kind === :leaf
         @test string(b.path) == "electrons.e.f.alpha"

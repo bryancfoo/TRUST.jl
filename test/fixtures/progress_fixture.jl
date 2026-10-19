@@ -5,9 +5,9 @@
 # wavelengths, T_D and u_D per bin, one D2 term on T_D) with a flat start from which LevenbergMarquardt
 # rejects its first four trial steps.
 
-# Printf's @sprintf through OTIS's own import (src/inversion/optimizers.jl): neither test environment
+# Printf's @sprintf through TRUST's own import (src/inversion/optimizers.jl): neither test environment
 # declares Printf, so `using Printf` fails in Pkg.test()'s sandbox, and the environments are not edited.
-using OTIS: @sprintf
+using TRUST: @sprintf
 
 # Every FitResult field OQ-61 (a) names, compared bitwise (=== on every Float64); `elapsed` excepted.
 function _pg_test_bitwise(a::FitResult, b::FitResult)

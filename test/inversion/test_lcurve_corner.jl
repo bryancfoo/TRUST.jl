@@ -4,7 +4,7 @@
 # different formula on a different grid from the estimator's three-point curvature (8.2).
 
 using Test
-using OTIS
+using TRUST
 using Random: Xoshiro
 
 # ------------------------------------------------------------------------------------------

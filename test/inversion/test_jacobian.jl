@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: FitJacobian, jvp!, jtvp!, Binding, _kernel_effects, _widen_trace, _make_cache,
+using TRUST
+using TRUST: FitJacobian, jvp!, jtvp!, Binding, _kernel_effects, _widen_trace, _make_cache,
     _jacobian_bin!, _chain_order, JACOBIAN_CHUNK, _dx_dy, _from_unconstrained, _collect_kernel_bindings
 import ForwardDiff
 import Random
@@ -456,14 +456,14 @@ end
     kernel_global_of_var = zeros(Int, nvar)
     G = 0
 
-    DFT = ForwardDiff.Dual{OTIS._JacobianTag,Float64,JACOBIAN_CHUNK}
+    DFT = ForwardDiff.Dual{TRUST._JacobianTag,Float64,JACOBIAN_CHUNK}
     work_trace = _widen_trace(pspec.trace, DFT)
     vals = Vector{DFT}(undef, pspec.nslots)
     col_cache = _make_cache(DFT, nlambda)
     block = Matrix{Float64}(undef, nlambda, length(pspec.bin_entries[1]))
     kernel_globals = Array{Float64,3}(undef, nlambda, length(pspec.trace.axis), 0)
     probe0, collection0, lambda0 = expt.probe, expt.collection, expt.lambda
-    prefactor_flag = OTIS._prefactor_flag(expt.prefactor)
+    prefactor_flag = TRUST._prefactor_flag(expt.prefactor)
 
     _jb!() = _jacobian_bin!(block, kernel_globals, 1, work_trace, vals, col_cache, pspec, nvar, G,
         kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings,
@@ -616,7 +616,7 @@ function _jt_kb_pspec17(expt::Experiment)
             "gw" => (gradsmear_idx, :width),
             "dlam" => (calib_idx, :offset, 0, 1e-9, "lambda_offset_nm"),
             "eps" => (calib_idx, :dispersion_scale),
-            "sig" => (spectral_idx, :sigma, 0, 1e-9 * OTIS._SIGMA_PER_FWHM, "fwhm_nm")])
+            "sig" => (spectral_idx, :sigma, 0, 1e-9 * TRUST._SIGMA_PER_FWHM, "fwhm_nm")])
 end
 
 function _jt_kb_problem(pspec_builder)
@@ -668,14 +668,14 @@ end
         kernel_global_of_var[i] = gk
     end
 
-    DFT = ForwardDiff.Dual{OTIS._JacobianTag,Float64,JACOBIAN_CHUNK}
+    DFT = ForwardDiff.Dual{TRUST._JacobianTag,Float64,JACOBIAN_CHUNK}
     work_trace = _widen_trace(pspec.trace, DFT)
     vals = Vector{DFT}(undef, pspec.nslots)
     col_cache = _make_cache(DFT, nlambda)
     block = Matrix{Float64}(undef, nlambda, length(pspec.bin_entries[1]))
     kernel_globals = Array{Float64,3}(undef, nlambda, length(pspec.trace.axis), G)
     probe0, collection0, lambda0 = expt.probe, expt.collection, expt.lambda
-    prefactor_flag = OTIS._prefactor_flag(expt.prefactor)
+    prefactor_flag = TRUST._prefactor_flag(expt.prefactor)
 
     _jb!() = _jacobian_bin!(block, kernel_globals, 1, work_trace, vals, col_cache, pspec, nvar, G,
         kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings,

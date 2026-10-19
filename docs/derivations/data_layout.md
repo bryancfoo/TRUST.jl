@@ -11,11 +11,11 @@ written. There is no Python on this machine, so h5py-readability is a property o
 checked by IO3 (every value in the file `isa Union{AbstractArray{<:Real}, AbstractString,
 Real}`), not by an actual h5py read.
 
-## 1. The streak layout, `otis-streak-1`
+## 1. The streak layout, `trust-streak-1`
 
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-streak-1"` | yes |
+| `layout_version` | `String` | scalar, `"trust-streak-1"` | yes |
 | `lambda_nm` | `Float64` | `(N_λ)` | yes |
 | `t_ns` | `Float64` | `(N_t)` | yes |
 | `image` | `Float64` | `(N_λ, N_t)` | yes |
@@ -23,7 +23,7 @@ Real}`), not by an actual h5py read.
 | `mask` | `UInt8` | `(N_λ, N_t)`, `1` = use the pixel | no |
 | `meta/source` | `String` | free text, `"-"` when empty (Phase 4.N) | yes |
 | `meta/created_unix` | `Float64` | seconds since the Unix epoch | yes |
-| `meta/otis_version` | `String` | `string(pkgversion(OTIS))` | yes |
+| `meta/trust_version` | `String` | `string(pkgversion(TRUST))` | yes |
 | `meta/lambda_probe_nm` | `Float64` | | when a probe is given |
 | `meta/theta_deg` | `Float64` | | when a collection is given |
 | `meta/polarization_deg` | `Float64` | | when a probe is given |
@@ -39,7 +39,7 @@ Real}`), not by an actual h5py read.
 | `meta/regions_usable_counts` | `Int` | `(N_λ, N_t)`, `\|U_k,l\|` | when `average_regions` produced this streak |
 | `meta/<user key>` | as given | | every entry of `sd.meta` |
 
-**No scalar string is written empty, in this or any OTIS layout** (Phase 4.N, Step 4.N.2, spec D20;
+**No scalar string is written empty, in this or any TRUST layout** (Phase 4.N, Step 4.N.2, spec D20;
 `conventions.md` Section 4's rule): JLD2 writes `""` as a string type of size zero, which h5py 3.9 cannot
 read (`H5Tget_size` fails), while an array holding `""` reads. So `write_streak` writes an empty
 `meta/source`, or an empty string value of `sd.meta`, as **`"-"`**, and `read_streak` returns every
@@ -112,19 +112,19 @@ with h5py.File("streak.jld2", "r") as f:
     source = f["meta/source"][()].decode()
 ```
 
-## 2. The trace layout, `otis-trace-2`
+## 2. The trace layout, `trust-trace-2`
 
-**Bumped from `otis-trace-1` at Step 4.J.1** (2026-10-10; Phase 4.J spec D9,
+**Bumped from `trust-trace-1` at Step 4.J.1** (2026-10-10; Phase 4.J spec D9,
 [OQ-60](../../dev/open_questions.md#oq-60) item 6), one bump carrying one change:
-`template/<set>/<name>/charge` is `Float64`, where `otis-trace-1` wrote `Int64`, since a species'
+`template/<set>/<name>/charge` is `Float64`, where `trust-trace-1` wrote `Int64`, since a species'
 charge is a real number (an ion's at least 1, an electron's `-1.0`). `read_trace` refuses an
-`otis-trace-1` file, naming both versions; there is no reader for the old layout, and no committed
+`trust-trace-1` file, naming both versions; there is no reader for the old layout, and no committed
 file was written in it (the local `runs/*_trace.jld2` are the example scripts' outputs, regenerated
 by them).
 
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-trace-2"` | yes |
+| `layout_version` | `String` | scalar, `"trust-trace-2"` | yes |
 | `axis_name` | `String` | scalar, e.g. `"t"` | yes |
 | `axis` | `Float64` | `(N_t)`, **SI** | yes |
 | `axis_unit` | `String` | scalar, `"s"` for `:t`, else `"SI"` | yes |
@@ -133,14 +133,14 @@ by them).
 | `template/n_e_m3` | `Float64` | | yes |
 | `template/electrons/names` | `String` | `(N_e)` | yes |
 | `template/electrons/<name>/mass_kg` | `Float64` | | yes |
-| `template/electrons/<name>/charge` | `Float64` | (`Int64` in `otis-trace-1`) | yes |
+| `template/electrons/<name>/charge` | `Float64` | (`Int64` in `trust-trace-1`) | yes |
 | `template/electrons/<name>/u_ms` | `Float64` | | yes |
 | `template/electrons/<name>/T_J` | `Float64` | | yes |
 | `template/electrons/<name>/fraction` | `Float64` | | yes |
 | `template/electrons/<name>/shape` | `String` | e.g. `"SuperGaussian"` | yes |
 | `template/electrons/<name>/shape_p/<p>` | `Float64` | one per `parameters(f)` entry | when non-empty |
 | `template/ions/…` | | the same, for ion species | yes |
-| `meta/source`, `meta/created_unix`, `meta/otis_version` | | as the streak layout (`meta/source` `"-"` when empty) | yes |
+| `meta/source`, `meta/created_unix`, `meta/trust_version` | | as the streak layout (`meta/source` `"-"` when empty) | yes |
 
 **The axis is SI here, not `t_ns` as the streak layout uses.** A `PlasmaTrace`'s axis need not
 be time ([OQ-26](../../dev/open_questions.md#oq-26)) — `axis_name` need not be `:t` — so there
@@ -158,14 +158,14 @@ plain `Dict`/array data (spec D20's `NamedTuple`), and IO6's round-trip test com
 **Only the ground-truth trace is written in Phase 2** (`examples/`, Step 2.5); Step 3.6 built the
 result writer below (roadmap Step 2.4, amended; `dev/phase2_overall_summary.md` A7).
 
-## 3. The result layout, `otis-result-3`
+## 3. The result layout, `trust-result-3`
 
-**Bumped from `otis-result-1` at Step 3.C.2 (D35)**, one bump carrying `fit/termination`,
+**Bumped from `trust-result-1` at Step 3.C.2 (D35)**, one bump carrying `fit/termination`,
 `fit/near_bound_fraction` and (with a scan) `scan/status` together, and joined within the same
 version by `scan/termination` at Step 3.C.3 (carried item 2) -- adding a dataset inside a version
 introduced by this same phase, before the phase closes, is not the second bump D35 forbade.
 
-**Bumped from `otis-result-2` to `otis-result-3` at Step 4.A.3b (D40, chunk 7)**, one bump adding
+**Bumped from `trust-result-2` to `trust-result-3` at Step 4.A.3b (D40, chunk 7)**, one bump adding
 a `channels/` group: `channels/names`, a `Vector{String}` in channel order, and, per channel,
 `channels/<name>/weight`, `chi2` (unweighted), `npixels`, `nparams`, `reduced_chi2`,
 `reduced_chi2_simple`, `lambda`, `model` (`measure` of the fitted `experiments[c]`),
@@ -173,9 +173,9 @@ a `channels/` group: `channels/names`, a `Vector{String}` in channel order, and,
 `k`-th effect, in SI), and, only when `write_result` is given the problem, `residual`
 (`(M_c - D_c)/sigma_c`, `NaN` where the mask is false) and `mask` (`UInt8`). `fit/chi2` and
 `fit/npixels` at the top level are now the **weighted total** and the **sum over channels**
-(`Sigma_c w_c chi2_c` and `Sigma_c n_c`) for a joint fit -- this is what `otis-result-2`'s own
+(`Sigma_c w_c chi2_c` and `Sigma_c n_c`) for a joint fit -- this is what `trust-result-2`'s own
 comment below anticipated ("a later joint EPW/IAW fit ... turns this into a version bump"), with
-the group named `channels/`, not `datasets/`. **Every `otis-result-3` file has `channels/`**,
+the group named `channels/`, not `datasets/`. **Every `trust-result-3` file has `channels/`**,
 since every `FitResult` carries at least one `ChannelSummary` (D36): a single-channel fit (the
 shorthand deck, or a one-channel channel-form deck) writes `channels/main`.
 
@@ -187,11 +187,11 @@ existing datasets, so no layout bump.
 
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-result-3"` | yes |
+| `layout_version` | `String` | scalar, `"trust-result-3"` | yes |
 | `meta/source` | `String` | free text, `"-"` when empty (Phase 4.N) | yes |
 | `meta/created` | `String` | ISO-8601 UTC, e.g. `"2026-09-15T12:00:00.000Z"` | yes |
 | `meta/created_unix` | `Float64` | seconds since the Unix epoch | yes |
-| `meta/otis_version` | `String` | `string(pkgversion(OTIS))` | yes |
+| `meta/trust_version` | `String` | `string(pkgversion(TRUST))` | yes |
 | `deck` | `String` | the effective TOML deck (spec D33), `"-"` when none was given (Phase 4.N) | yes |
 | `axis_name` | `String` | scalar, e.g. `"t"` | yes |
 | `axis` | `Float64` | `(N_t)`, SI | yes |
@@ -247,14 +247,14 @@ r.scan.R)` (`r = read_result(path)`), bitwise the estimate the script that wrote
 member fits' convergence flags apart (the file carries each member's `scan/status`, not its
 `converged`).
 
-**`fit/near_bound_entries/*` is optional inside `otis-result-3`** (Phase 4.D spec D7): written, by
+**`fit/near_bound_entries/*` is optional inside `trust-result-3`** (Phase 4.D spec D7): written, by
 every caller of `write_result`, only when some fitted (`vary`) variable has an entry within
 `BOUND_PROXIMITY_TOL` of a bound, one element per entry, the same entries `fit(deck)`'s saturation
 warning names; a file without it reads back `fit.near_bound_entries === nothing`. It is the list
 form of the `variables/<name>/near_bound` flags over the fitted variables (a frozen variable's
 flags are written there and never listed here), so the two always agree (NB4).
 
-**`fit/start` and `variables/<name>/held` are optional inside `otis-result-3`** (Phase 4.I, Step
+**`fit/start` and `variables/<name>/held` are optional inside `trust-result-3`** (Phase 4.I, Step
 4.I.1, spec D9, D10), no bump. `fit/start` is the θ the final fit started from: `build_problem`'s
 start (from the deck's `[fit.start]` when it has one, Section 4), or, for a staged deck, the joint
 start that `stages/start` also holds. `variables/<name>/held` is written only for a variable held
@@ -264,16 +264,16 @@ them reads back `fit.start === nothing` and each variable's `held == 0`.
 
 **`fit/chi2` and `fit/npixels` are the weighted total and the channel sum** (Step 4.A.3b, D40):
 `fit/chi2 = Sigma_c w_c chi2_c` (what the optimizer minimized) and `fit/npixels = Sigma_c n_c`,
-`1` and `1` for a single-channel fit. This is the version bump the `otis-result-2` text above
+`1` and `1` for a single-channel fit. This is the version bump the `trust-result-2` text above
 anticipated ("a later joint EPW/IAW fit ... turns this into a version bump"); the group is named
 `channels/`, not `datasets/`, and carries the per-channel `chi2`/`npixels` that text foresaw,
 alongside the fitted model, the effect parameters and, when the problem is given, the residual and
 mask.
 
-**`laplace/` and `calibration_scan/` groups, inside the same `otis-result-3` (Step 4.A.4a, D47).**
+**`laplace/` and `calibration_scan/` groups, inside the same `trust-result-3` (Step 4.A.4a, D47).**
 Neither is a version bump: D17 forbids a *second* bump within the phase, not a dataset added
 inside the one bump already made, and both groups are written only when `write_result` is given
-the matching keyword, so an old `otis-result-3` file (chunk 7's, with neither group) still reads
+the matching keyword, so an old `trust-result-3` file (chunk 7's, with neither group) still reads
 back exactly as before -- `read_result`'s `laplace`/`calibration_scan` fields are `nothing` when
 the file carries no such group. **`laplace` must satisfy `laplace.theta == result.theta` exactly**
 (a loud error otherwise, naming the mismatch): `write_result` has no other way to know the
@@ -293,7 +293,7 @@ are never written (13 MB at `p = 1280`); only the per-variable σ and the near-b
 | `calibration_scan/variables/<name>/delta` | `Float64` | `(N_t or 1, N_shifts)` | yes, one group per variable |
 | `calibration_scan/variables/<name>/s_sys` | `Float64` | `(N_t)` or `(1)` | yes |
 
-**`scatter/` group, inside the same `otis-result-3` (Step 4.A.4b, D52).** Not a version bump, the
+**`scatter/` group, inside the same `trust-result-3` (Step 4.A.4b, D52).** Not a version bump, the
 same style as `laplace/` and `calibration_scan/` above: written only when `write_result` is given
 the `scatter` keyword, and `scatter.theta == result.theta` is required exactly (a loud error
 otherwise, `"scatter was computed at a different θ than result.theta"`) -- `write_result` has no
@@ -316,10 +316,10 @@ unchanged by them; the readable file carries them (Section 6).
 | `scatter/variables/<name>/s_stat` | `Float64` | `(N_coarse)`, **never divided by `sqrt(m)`** | yes |
 | `scatter/variables/<name>/n_near_bound` | `Int64` | `(N_coarse)` | yes |
 
-**`stages/` group, inside the same `otis-result-3` (Phase 4.F, Step 4.F.1, spec D7).** Not a version
+**`stages/` group, inside the same `trust-result-3` (Phase 4.F, Step 4.F.1, spec D7).** Not a version
 bump, in the style of `scan/` and `scatter/` above: written only when `write_result` is given the
 `stages` keyword, which `fit(deck)` passes for a deck with `procedure = "staged"` (Section 4), so an
-older `otis-result-3` file reads back exactly as before and `read_result`'s `stages` field is
+older `trust-result-3` file reads back exactly as before and `read_result`'s `stages` field is
 `nothing` for it. The stages' own records sit under `stages/channels/<name>/`, never directly under
 `stages/`, since a channel may be called `names` or `start`. A stage record carries `axis`,
 `variables` and `dependents` in the same form as the file's own, so a reader of the top level reads a
@@ -351,7 +351,7 @@ untouched.
 
 ## 4. The deck's channel form, and the pooled axis (Step 4.A.3b, D40)
 
-**`otis-deck-2`, no further bump.** `read_deck` accepts two mutually exclusive forms of a deck.
+**`trust-deck-2`, no further bump.** `read_deck` accepts two mutually exclusive forms of a deck.
 **The shorthand** has a bare `[data]`, `[geometry]` and optional `[instrument]`, exactly as every
 deck before chunk 7 -- the single-channel path is bitwise unchanged. **The channel form** has a
 root-level `channels = ["epw", "iaw"]` array (the channel order) and a `[channel.<name>]` table
@@ -417,7 +417,7 @@ under `stages/` (Section 3); the warnings and the result are the final fit's. `s
 `[optimizer.lbfgs]`, `[optimizer.levenberg_marquardt]` and `[optimizer.noisy_descent]` apply to
 whichever stage runs that optimizer. `"staged"` on a shorthand deck or a one-channel deck is
 refused by `read_deck`, as is an `[optimizer.staged]` table under any other procedure. A new key
-inside `[optimizer]` is not a deck-version bump: `otis-deck-2` stays.
+inside `[optimizer]` is not a deck-version bump: `trust-deck-2` stays.
 
 **`sequence` and `hold`** (Phase 4.I, Step 4.I.3, spec D22 to D24; [OQ-59](../../dev/open_questions.md#oq-59)
 item 4): two more keys of `[optimizer.staged]`,
@@ -537,7 +537,7 @@ items 2 and 3): two tables of one form under `[fit]`,
 
 ```toml
 [fit.start]
-file = "runs/start/epw_old.jld2"          # an otis-result-3 result, or an otis-start-1 file (Section 5)
+file = "runs/start/epw_old.jld2"          # a trust-result-3 result, or a trust-start-1 file (Section 5)
 variables = ["logn", "T_e", "m_e"]
 
 [fit.hold]
@@ -561,17 +561,17 @@ clamped). Both tables are kept in the effective deck; the stage decks of a stage
 `slice_scatter` ignores `[fit.start]` and refuses `[fit.hold]`. New keys in `[fit]`, so not a
 deck-version bump.
 
-## 5. The start layout, `otis-start-1` (Phase 4.I, Step 4.I.1, spec D5)
+## 5. The start layout, `trust-start-1` (Phase 4.I, Step 4.I.1, spec D5)
 
 A time axis and one series per variable name, the file a deck's `[fit.start]` or `[fit.hold]` may
-name beside an `otis-result-3` result (Section 4). Written by `write_start(path; axis_s | axis_ns,
+name beside an `trust-result-3` result (Section 4). Written by `write_start(path; axis_s | axis_ns,
 values, units = Dict{String,String}(), source = "")` and read by `read_start(path)`, so that a fit
 made elsewhere reaches a deck through a script that calls the package, and the package reads no
 foreign format.
 
 | Dataset | Type | Shape | Required |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-start-1"` | yes |
+| `layout_version` | `String` | scalar, `"trust-start-1"` | yes |
 | `meta/source` | `String` | free text | yes (`write_start` writes `"-"` when not given, `""` before Phase 4.N; `read_start` reads `"-"`, `""` or a missing one as `""`) |
 | `axis` | `Float64` | `(N)`, **s**, strictly increasing | yes |
 | `variables/<name>/values` | `Float64` | `(N)`, or `(1)` for a value that holds at every time | yes, one group per variable, at least one |
@@ -599,21 +599,21 @@ another code is a Julia script that reads the other format and calls `write_star
 ```python
 import h5py
 with h5py.File("start.jld2", "r") as f:
-    assert f["layout_version"][()].decode() == "otis-start-1"
+    assert f["layout_version"][()].decode() == "trust-start-1"
     axis_s = f["axis"][:]                          # shape (N,), s
     Te = f["variables/T_e/values"][:]              # shape (N,) or (1,)
     unit = f["variables/T_e/unit"][()].decode() if "unit" in f["variables/T_e"] else ""
 ```
 
-## 6. The readable layout, `otis-readable-2` (Phase 4.M, Step 4.M.1, spec D5; Phase 4.N, Step 4.N.1, spec D7)
+## 6. The readable layout, `trust-readable-2` (Phase 4.M, Step 4.M.1, spec D5; Phase 4.N, Step 4.N.1, spec D7)
 
 One fit, written to be read directly from Python or any HDF5 reader
 ([OQ-63](../../dev/open_questions.md#oq-63)): the time and wavelength axes in ns and nm, per channel
 the data, σ, model and mask the fit was made against with the χ² of each bin, every fitted variable
 and dependent in its deck unit, and, when given, the Laplace σ and the per-slice scatter's windows
-with their per-bin quantiles. **`otis-readable-2` since Phase 4.N** ([OQ-64](../../dev/open_questions.md#oq-64)
+with their per-bin quantiles. **`trust-readable-2` since Phase 4.N** ([OQ-64](../../dev/open_questions.md#oq-64)
 item 4): `scatter/p16/<name>`, `scatter/median/<name>`, `scatter/p84/<name>` and `scatter/held/<name>`
-joined the scatter group, and nothing else changed; `otis-readable-1` (Phase 4.M) is the same layout
+joined the scatter group, and nothing else changed; `trust-readable-1` (Phase 4.M) is the same layout
 without them.
 **`fit(deck)` writes it as `<output.dir>/readable.h5`**, after `result.jld2` and
 `effective_deck.toml`, with `source = "fit"`, the effective deck's text and `fit/gn_decrease`, unless
@@ -634,7 +634,7 @@ rewrites the whole file**. After a deck fit, the call that adds the Laplace σ a
 ```julia
 deck = read_deck("my_fit.toml")
 result = fit(deck)
-problem, _, _ = OTIS.build_problem(deck)
+problem, _, _ = TRUST.build_problem(deck)
 pol = polish(problem, result)
 lap = laplace(problem, pol.result.theta)
 sc = slice_scatter(deck, pol.result)          # a deck with [[fit.regions]]; intervals and holds as they are
@@ -645,7 +645,7 @@ write_readable(joinpath(dir, "readable.h5"), pol.result, problem;
 
 | Dataset | Type | Shape | Written |
 |---|---|---|---|
-| `layout_version` | `String` | scalar, `"otis-readable-2"` | always |
+| `layout_version` | `String` | scalar, `"trust-readable-2"` | always |
 | `README` | `String` | scalar: what the file holds, its orientation and its units | always |
 | `source` | `String` | `"fit"` or `"write_readable"` | always |
 | `deck` | `String` | the effective deck's TOML text | when given and not empty (`fit(deck)` always gives it) |
@@ -676,8 +676,8 @@ write_readable(joinpath(dir, "readable.h5"), pol.result, problem;
 | `scatter/params/<name>` | `Float64` | `(N_w)`, the deck unit; `NaN` in a window whose bin the variable's interval leaves out | one per free time-varying variable |
 | `scatter/near_bound/<name>` | `UInt8` | `(N_w)` | yes |
 | `scatter/sigma_stat/<name>` | `Float64` | `(N_t)`, **never divided by `sqrt(m)`**; `NaN` for a bin the interval leaves out | yes |
-| `scatter/p16/<name>`, `median/<name>`, `p84/<name>` | `Float64` | `(N_t)`, the 16th, 50th and 84th percentiles of the bin's windows' values (type 7), the deck unit; `NaN` for a bin the interval leaves out | yes (`otis-readable-2`) |
-| `scatter/held/<name>` | `Float64` | `(N_w)`, the value each window held the variable at, the deck unit; `NaN` in a window whose bin the interval leaves out | one per `[fit.hold]` variable (`otis-readable-2`) |
+| `scatter/p16/<name>`, `median/<name>`, `p84/<name>` | `Float64` | `(N_t)`, the 16th, 50th and 84th percentiles of the bin's windows' values (type 7), the deck unit; `NaN` for a bin the interval leaves out | yes (`trust-readable-2`) |
+| `scatter/held/<name>` | `Float64` | `(N_w)`, the value each window held the variable at, the deck unit; `NaN` in a window whose bin the interval leaves out | one per `[fit.hold]` variable (`trust-readable-2`) |
 | `scatter/channels/<name>/data`, `sigma`, `model` | `Float64` | `(N_λ,c, N_w)` | one group per channel |
 | `scatter/channels/<name>/mask` | `UInt8` | `(N_λ,c, N_w)` | yes |
 
@@ -724,7 +724,7 @@ count exactly the fitted bins; otherwise (data never averaged, or a prepared ave
 one-bin fit saw them, and its model at that fit's polished solution, with no temporal IRF (a one-bin
 window cannot carry one). `scatter/chi2` is each window's weighted χ². `ScatterResult` keeps them
 since Phase 4.M; the result file's `scatter/` group does not write them and is unchanged. **Since
-`otis-readable-2`** the group also holds, per fitted bin and free variable, the median and the 16th and
+`trust-readable-2`** the group also holds, per fitted bin and free variable, the median and the 16th and
 84th percentiles of the bin's windows' values (`p16`, `median`, `p84`; Hyndman and Fan's type 7,
 `Statistics.quantile`'s and numpy's default, over every window whatever its `status`, so a reader who
 filters by `scatter/status` recomputes them), and, per window and held variable, the value the window
@@ -737,7 +737,7 @@ them.
 **What it is not.** Not a round trip: nothing in the package reads it, and `result.jld2` stays the
 record of a fit; `leaves/`, `fit/theta`, the trajectory, `effects/*`, the stages, the calibration
 scan and the covariance matrices are only there. Its own family: a change to it bumps
-`otis-readable-<n>`, never `otis-result-3`. `[output] readable = false` writes nothing, and removes a
+`trust-readable-<n>`, never `trust-result-3`. `[output] readable = false` writes nothing, and removes a
 `readable.h5` an earlier run left in the directory (Phase 4.L spec D9, [OQ-62](../../dev/open_questions.md#oq-62)
 item 8), so the directory never holds a companion older than its `result.jld2`.
 
@@ -754,3 +754,31 @@ with h5py.File("readable.h5", "r") as f:
     spectrum = f["channels/main/data"][5]   # time bin 5's spectrum, against lam
     Te = f["params/T_e"][:]                 # (N_t,), in the unit f["units/T_e"][()].decode()
 ```
+
+## 7. The rename of 2026-10-18 and the `otis-` alias
+
+The package was named OTIS until 2026-10-18 (Level 1 rename decisions D1 to D4). Three things follow
+for the layouts.
+
+**The strings are renamed in every spelling (D2).** The six current layouts read `trust-streak-1`,
+`trust-trace-2`, `trust-result-3`, `trust-deck-2`, `trust-start-1` and `trust-readable-2`; no number
+changed, and the historical layouts mentioned in this note (`trust-trace-1`, `trust-result-2` and so
+on) are spelled the same way, because the history is of the layouts and not of the name.
+
+**Readers accept the old spelling for the same number (D3).** One helper, `_canonical_version(v)` in
+`src/data/io.jl` (not exported), returns a string that begins `"otis-"` with that prefix replaced by
+`"trust-"`, and anything else, `nothing` included, unchanged. It is applied as soon as the value is read,
+before the comparison, the error message and any returned `layout_version`, at exactly six sites:
+`read_streak`, `read_trace`, `read_result`, `read_start`, the `[fit.start]` file dispatch
+(`_read_series_file`) and `read_deck` (for `deck_version`). So an `otis-streak-1` file reads, its
+`layout_version` is reported as `trust-streak-1`, and an `otis-streak-0` file is refused naming
+`trust-streak-0`. An old deck reads back with `deck_version == "trust-deck-2"`. No file stores a Julia
+struct, so no old file names an `OTIS.` type and none needs more than the string.
+
+**Writers emit only the new spelling (D4).** `write_streak`, `write_trace`, `write_result`,
+`write_start`, `write_readable` and `effective_deck` never write `otis-`.
+
+**The metadata key.** `meta/otis_version` in an old file is simply an unrecognized key (a streak file's
+`meta/*` entries all read back as ordinary `StreakData.meta` entries, so it appears there as
+`"otis_version"`): the files now write `meta/trust_version`, no reader looks for either, and
+`_RESERVED_META_KEYS` only governs what a *writer* may not overwrite from a `StreakData.meta` entry.

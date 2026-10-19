@@ -104,7 +104,7 @@ end
 """
     pin_blas_threads(n::Integer = 1) -> Int
 
-Sets BLAS to `n` threads and returns the count it had before. OTIS threads over time bins
+Sets BLAS to `n` threads and returns the count it had before. TRUST threads over time bins
 itself (`foreach_bin!`); BLAS on many threads oversubscribes the machine against that, and
 `conventions.md` 6.6 asks for BLAS on one thread "in the driver" — `measure` has no driver of
 its own in this phase and never calls this implicitly, so call it yourself before a large

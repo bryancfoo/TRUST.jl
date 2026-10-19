@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _epw_resonance_widths, _recommended_subsamples, _resonance_widths,
+using TRUST
+using TRUST: _epw_resonance_widths, _recommended_subsamples, _resonance_widths,
     _narrow_resonance_entries, _warn_narrow_resonance, RESONANCE_WIDTH_WARN
 
 # Step 4.F.2: the resonance-width check (Phase 4.F spec D13-D16, OQ-53, the user's decision of
@@ -75,10 +75,10 @@ end
 function _rw_result(dir::AbstractString, name::AbstractString, text::AbstractString)
     path = joinpath(dir, name)
     write(path, text)
-    problem, _, start = OTIS.build_problem(read_deck(path))
+    problem, _, start = TRUST.build_problem(read_deck(path))
     o = objective(problem, start)
     row = (iteration=0.0, objective=o, chi2=o, R=0.0)
-    return OTIS._build_result(problem, start, o, [row], true, :f_tolerance, 0, 1, 0, 0.0, "none")
+    return TRUST._build_result(problem, start, o, [row], true, :f_tolerance, 0, 1, 0, 0.0, "none")
 end
 
 @testset "RW4: the warning's text, shorthand and channel form" begin

@@ -188,9 +188,9 @@ time axis in ns, one entry per column; and `lambda_nm`, the destination waveleng
 
 **JLD2's ability to open a file the collaborator's own Python pipeline wrote (plain HDF5 via
 h5py, not JLD2) is not guaranteed** ([OQ-15](../../dev/open_questions.md#oq-15)):
-`read_warpmap` is therefore tested only against a file OTIS itself wrote in this same layout
+`read_warpmap` is therefore tested only against a file TRUST itself wrote in this same layout
 (DW6), and whether it opens a real `*_dewarp_data.h5` is a **reported**, not tested, outcome of
-Step 3.8. If it does not, this loader stays as OTIS's own facility loader regardless (D36) --
+Step 3.8. If it does not, this loader stays as TRUST's own facility loader regardless (D36) --
 the raw comb-grid HDF4 files behind it are out of scope forever
 ([OQ-15](../../dev/open_questions.md#oq-15)).
 
@@ -206,7 +206,7 @@ time axis from it; neither that conversion nor an equivalent wavelength calibrat
 implemented here (out of this step's scope: the dot-finding and calibration fit belongs to
 whoever owns the camera calibration, [OQ-15](../../dev/open_questions.md#oq-15)). This function
 therefore reads `time_indices` **directly** as `t_ns`, correct only for a file already carrying
-a physical axis under that name -- true of a file OTIS wrote for its own DW6 round trip, not of
+a physical axis under that name -- true of a file TRUST wrote for its own DW6 round trip, not of
 the collaborator's own file, which also has no `lambda_nm` dataset at all. Reported to Level 2
 as a [propagate] candidate: a future `read_warpmap` revision may need the dot-spacing fit above
 to open a real file's `time_indices` correctly.

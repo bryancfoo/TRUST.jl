@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _hermite_lobe, _warn_hermite_lobe, HERMITE_NEGATIVE_MASS_WARN
+using TRUST
+using TRUST: _hermite_lobe, _warn_hermite_lobe, HERMITE_NEGATIVE_MASS_WARN
 import Random
 
 # Step 5.A.1's slow rows (Phase 5.A spec D12), gated "Hermite (slow)": HE12 fits the recovery's EPW streak from

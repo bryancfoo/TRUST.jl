@@ -1,6 +1,6 @@
 # Phase 5.A's shared fixtures (spec D12): the recovery's single-channel EPW problem and HE11's deck, used by
 # test/distributions/test_hermite.jl (HE8, HE11) and test/slow/test_hermite.jl (HE12, HE15). The including
-# file loads Test, OTIS and Random.
+# file loads Test, TRUST and Random.
 
 const _HE_LAMBDA_NM = collect(range(238.0, 292.0; length = 48))
 const _HE_MASK = reshape([abs(l - 263.25) >= 5.0 for l in _HE_LAMBDA_NM], :, 1)
@@ -41,7 +41,7 @@ end
 # with c3_e time-varying and c4_e scalar, on an IAW streak of two bins.
 function _he11_deck(datafile, outdir)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"

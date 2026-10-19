@@ -10,7 +10,7 @@
 > fit of a real streak has been run. This is Step 3.8's own carried-forward outcome
 > (`dev/reports/phase3_report.md`, Chunk 14), not a defect in this document.
 
-## 1. What OTIS builds, and what it does not
+## 1. What TRUST builds, and what it does not
 
 A raw OMEGA streak image has a geometric distortion the collaborator's own comb-grid calibration
 corrects: a rectangular lattice of dots imaged through the instrument lands displaced, and the
@@ -20,9 +20,9 @@ where in the raw image to sample
 ([OQ-15](../dev/open_questions.md#oq-15), decided 2026-09-10, unchanged at 2026-09-11 except for
 its timing, A27).
 
-**OTIS never builds this map.** The dot-finding and lattice-fitting pipeline is hand-tuned per
+**TRUST never builds this map.** The dot-finding and lattice-fitting pipeline is hand-tuned per
 file and belongs to whoever owns the camera calibration; the raw comb-grid files are HDF4, which
-nothing maintained in Julia reads. What OTIS consumes is the collaborator's own output, and what
+nothing maintained in Julia reads. What TRUST consumes is the collaborator's own output, and what
 it provides is two things: `WarpMap`, holding that backward map as plain arrays, and
 `dewarp(streak, warpmap) -> StreakData`, which applies it. Both are built and tested
 (`src/data/warp.jl`, `test/data/test_warp.jl`, DW1-DW7) without any real data at all — a
@@ -31,7 +31,7 @@ synthetic warp with a known, invertible form is the oracle (DW2).
 ## 2. The synthetic walkthrough (tried and tested)
 
 ```julia
-using OTIS
+using TRUST
 
 # A raw (still-warped) streak, however it was measured or synthesized.
 sd = StreakData(lambda_m = lambda, t_s = t, image = raw_image, sigma = raw_sigma)
@@ -74,7 +74,7 @@ wm = read_warpmap("shot12345_dewarp_data.h5")
 test here, both worth knowing before pointing `read_warpmap` at a real file:**
 
 1. **JLD2 opening a file `h5py` wrote is not guaranteed**
-   ([OQ-15](../dev/open_questions.md#oq-15)). `read_warpmap` is tested only against a file OTIS
+   ([OQ-15](../dev/open_questions.md#oq-15)). `read_warpmap` is tested only against a file TRUST
    itself wrote in this same layout (DW6); whether it opens a real `*_dewarp_data.h5` is a
    **reported**, not tested, outcome, and this chunk has nothing to report it against.
 2. **`read_warpmap` also requires a `lambda_nm` dataset, which the collaborator's own file does
@@ -138,7 +138,7 @@ per-bin Jacobian, 39.8 ms → 11.8 ms single call, `dev/phase3_overall_summary.m
 run from the command line, should be started as
 
 ```
-julia --project=. -t 8 -e 'using OTIS; fit("shot12345.toml")'
+julia --project=. -t 8 -e 'using TRUST; fit("shot12345.toml")'
 ```
 
 not a bare `julia --project=.` — the README and this document both say so for exactly this

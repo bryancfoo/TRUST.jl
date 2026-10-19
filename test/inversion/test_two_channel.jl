@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using Random: Xoshiro
 
 # TC1 to TC3 against dev/phase4A_instructions.md Section 9.3 (spec D41, chunk 8), gated
@@ -168,9 +168,9 @@ end
         write(deck_path, text)
         deck = read_deck(deck_path)
 
-        problem, _, _ = OTIS.build_problem(deck)
+        problem, _, _ = TRUST.build_problem(deck)
         @test problem isa JointFitProblem
-        @test OTIS.channel_names(problem) == ["epw", "iaw"]
+        @test TRUST.channel_names(problem) == ["epw", "iaw"]
         @test problem.weights == [1.0, 1.0]
 
         avg_epw = average_regions(sd_epw, P.regions)
@@ -189,14 +189,14 @@ end
         text_epw = single_channel_deck_text(text, "epw")
         deck_epw_path = joinpath(dir, "epw_only.toml")
         write(deck_epw_path, text_epw)
-        problem_epw, _, _ = OTIS.build_problem(read_deck(deck_epw_path))
+        problem_epw, _, _ = TRUST.build_problem(read_deck(deck_epw_path))
         @test problem_epw isa FitProblem
         @test problem_epw.name == "epw"
 
         text_iaw = single_channel_deck_text(text, "iaw")
         deck_iaw_path = joinpath(dir, "iaw_only.toml")
         write(deck_iaw_path, text_iaw)
-        problem_iaw, _, _ = OTIS.build_problem(read_deck(deck_iaw_path))
+        problem_iaw, _, _ = TRUST.build_problem(read_deck(deck_iaw_path))
         @test problem_iaw isa FitProblem
         @test problem_iaw.name == "iaw"
     end

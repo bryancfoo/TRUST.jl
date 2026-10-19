@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using Random: Xoshiro
 
 # RP1, RP2 against dev/phase3_instructions.md Section 10 (spec D38, D46), gated "reproduce".
@@ -206,11 +206,11 @@ end
 # takes depends on it, and this row's assertions require the `error` branch deterministically.
 function _rp4_load_check_converged(script_path::AbstractString)
     found = _rp4_extract(script_path)
-    withenv("OTIS_ALLOW_UNCONVERGED" => nothing) do
+    withenv("TRUST_ALLOW_UNCONVERGED" => nothing) do
         eval(found[:ALLOW_UNCONVERGED])
     end
     eval(found[:_check_converged])
-    # Julia 1.12's stricter world-age rules for global bindings (OTIS_TESTS="reproduce" surfaced
+    # Julia 1.12's stricter world-age rules for global bindings (TRUST_TESTS="reproduce" surfaced
     # this as a warning: "access to binding ... in a world prior to its definition world") apply
     # to reading the binding, not only to calling it -- `getfield` itself is ancient and safe to
     # invokelatest, and doing so makes the read, not just the later call, see the new definition.

@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using QuadGK: quadgk
 
 const P_PLASMA = Plasma(n_e_cm3 = 1e19, electrons = [electrons(T_eV = 500)])

@@ -5,7 +5,7 @@
 # two_channel_problem, synthesize_channel and single_channel_deck_text (spec D41, Step 4.A.3c,
 # chunk 8): the synthetic two-channel problem, added beside the three above.
 
-using OTIS
+using TRUST
 using Random: Xoshiro
 import TOML
 
@@ -217,7 +217,7 @@ Spec D48 item 1, D53. `shape_variable` (Phase 4.B spec D39) names the deck's ele
 variable in place of the literal `"m_e"`; its default reproduces every existing caller bitwise.
 
 **Reduced to a call at Step 4.F.1** (Phase 4.F spec D8): the procedure is the package's own
-`procedure = "staged"` (`OTIS._staged_fit`), called with the deck's own `procedure` for the two
+`procedure = "staged"` (`TRUST._staged_fit`), called with the deck's own `procedure` for the two
 stages, `optimizer` for the joint fit, `tol` for `polish` and `T_D` taken from the IAW stage;
 every other fitted variable comes from the EPW stage, the first-listed channel, which for these
 decks is exactly `logn`, `T_e` and `shape_variable` (checked). Bitwise the procedure above.
@@ -225,7 +225,7 @@ decks is exactly `logn`, `T_e` and `shape_variable` (checked). Bitwise the proce
 function staged_joint_fit(joint_deck_path::AbstractString; optimizer=LevenbergMarquardt(), tol::Real=1e-6,
     shape_variable::AbstractString="m_e")
     deck = read_deck(joint_deck_path)
-    st = OTIS._staged_fit(deck; stage_procedure=deck.sections["optimizer"]["procedure"],
+    st = TRUST._staged_fit(deck; stage_procedure=deck.sections["optimizer"]["procedure"],
         joint_optimizer=optimizer, polish_tol=tol, start_from=Dict{String,Any}("T_D" => "iaw"))
     [s.name for s in st.stages] == ["epw", "iaw"] || error(
         "staged_joint_fit: the deck's channels must be [\"epw\", \"iaw\"]")

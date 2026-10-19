@@ -14,7 +14,7 @@
 # `outdir` defaults to this directory (the committed location).
 
 using CairoMakie
-using OTIS
+using TRUST
 
 include(joinpath(@__DIR__, "..", "problems.jl"))
 

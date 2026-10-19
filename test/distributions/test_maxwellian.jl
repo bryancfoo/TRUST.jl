@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _cauchy_real, _cauchy_upper, _cauchy_lower
+using TRUST
+using TRUST: _cauchy_real, _cauchy_upper, _cauchy_lower
 using ForwardDiff: derivative
 
 include(joinpath(@__DIR__, "..", "shape_contract.jl"))

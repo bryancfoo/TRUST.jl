@@ -2,7 +2,7 @@
 # test/inversion/test_held_series.jl (HD) and test/config/test_deck_staged.jl's ST5. It is written
 # against test/fixtures/staged_fixture.jl, which the including file includes first: the two-channel
 # deck and its four-bin streaks (bins at 2.633, 3.52, 4.28 and 5.167 ns). Added here: an
-# otis-start-1 series on a coarser axis that spans those bins (_SH_*), the deck's EPW channel alone as
+# trust-start-1 series on a coarser axis that spans those bins (_SH_*), the deck's EPW channel alone as
 # a one-channel deck, the TOML edit that adds the two tables to a deck's text, and the linear
 # interpolation written out as the oracle for build_problem's.
 

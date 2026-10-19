@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _frozen_value, _slot_defined_at, _value_table, _regularizer_raw_rows, _regularizer_closed_form
+using TRUST
+using TRUST: _frozen_value, _slot_defined_at, _value_table, _regularizer_raw_rows, _regularizer_closed_form
 
 # Step 4.I.1: held series (Phase 4.I spec D7, D10, D11, D13; OQ-59 item 3), gated "held series". HD1,
 # HD2 and HD5: the mechanism, on test_jacobian.jl's P2 chain (test/fixtures/held_series_fixture.jl);
@@ -50,8 +50,8 @@ end
 
     expt = unflatten(problem.experiment, pspec, theta)
     row = findfirst(p -> string(p) == "ions.D.T", expt.trace.paths)
-    @test all(expt.trace.values[row, 3:8] .=== _HD_HELD .* OTIS.EV)
-    @test all(expt.trace.values[row, [1, 2, 9, 10]] .=== 200.0 * OTIS.EV)   # outside its interval: not written
+    @test all(expt.trace.values[row, 3:8] .=== _HD_HELD .* TRUST.EV)
+    @test all(expt.trace.values[row, [1, 2, 9, 10]] .=== 200.0 * TRUST.EV)   # outside its interval: not written
     @test expt.effects[3].scale === 2.0e-6
     vt = _value_table(pspec, theta)
     @test all(vt[1, 3:8] .=== _HD_HELD) && all(isnan, vt[1, [1, 2, 9, 10]])
@@ -60,7 +60,7 @@ end
     whole = collect(range(150.0, 330.0; length=10))
     pw, tw = _hd_problem(; T_held=whole, T_interval=0)
     ew = unflatten(pw.experiment, pw.pspec, tw)
-    @test all(ew.trace.values[row, :] .=== whole .* OTIS.EV)
+    @test all(ew.trace.values[row, :] .=== whole .* TRUST.EV)
     @test pw.pspec.ntheta == 10
 end
 
@@ -94,10 +94,10 @@ end
     mktempdir() do dir
         _st_streaks(dir)
         text = _sh_epw_text(dir)
-        p0, _, _ = OTIS.build_problem(read_deck(_st_write(dir, "plain.toml", text)))
+        p0, _, _ = TRUST.build_problem(read_deck(_st_write(dir, "plain.toml", text)))
         sp = _sh_start_file(dir)
         deck = read_deck(_st_write(dir, "hold.toml", _sh_tables(text; hold=(sp, ["T_e", "m_e"]))))
-        problem, _, start = OTIS.build_problem(deck)
+        problem, _, start = TRUST.build_problem(deck)
         pspec = problem.pspec
         @test pspec.ntheta == p0.pspec.ntheta - 8      # T_e's and m_e's four bins each
         @test length(start) == pspec.ntheta
@@ -106,7 +106,7 @@ end
         @test !T.vary && T.held == [_sh_interp(ax, _SH_SERIES["T_e"], t) for t in pspec.axis]
         expt = unflatten(problem.experiment, pspec, start)
         row = findfirst(p -> string(p) == "electrons.e.T", expt.trace.paths)
-        @test all(expt.trace.values[row, :] .=== T.held .* OTIS.EV)
+        @test all(expt.trace.values[row, :] .=== T.held .* TRUST.EV)
         mrow = findfirst(p -> string(p) == "electrons.e.f.m", expt.trace.paths)
         @test all(expt.trace.values[mrow, :] .=== 3.5)   # a one-value entry, held at every bin
         eff = effective_deck(deck, problem, LBFGS())

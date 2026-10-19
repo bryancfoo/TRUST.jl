@@ -30,7 +30,7 @@ import TOML
 using LinearAlgebra: PosDefException
 using Printf: @sprintf
 
-const DECK_VERSION = "otis-deck-2"
+const DECK_VERSION = "trust-deck-2"
 
 # ------------------------------------------------------------------------------------------
 # _VarRef: a numeric-key string that names a declared variable or dependent
@@ -544,7 +544,7 @@ function _validate_series_table(given, key::AbstractString, variables_section::A
     _check_known_keys(given, _FIT_SERIES_KEYS, where)
     file = get(given, "file", nothing)
     file isa AbstractString || throw(ArgumentError(
-        "read_deck: \"$where\" needs \"file\", the path of an otis-result-3 or otis-start-1 file"))
+        "read_deck: \"$where\" needs \"file\", the path of a trust-result-3 or trust-start-1 file"))
     names = get(given, "variables", nothing)
     (names isa AbstractVector && !isempty(names) && all(x -> x isa AbstractString, names)) ||
         throw(ArgumentError("read_deck: \"$where.variables\" must be a non-empty list of variable names"))
@@ -564,14 +564,14 @@ end
     _read_series_file(path, key) -> (; axis, values, units)
 
 The file a `[fit.start]` or `[fit.hold]` table names (Phase 4.I spec D8), told apart by its
-`layout_version`: an `otis-result-3` result through `read_result` (`axis` in s, each variable's
-`values` in its own unit and its recorded `unit`), an `otis-start-1` series file through
+`layout_version`: an `trust-result-3` result through `read_result` (`axis` in s, each variable's
+`values` in its own unit and its recorded `unit`), an `trust-start-1` series file through
 `read_start`; anything else refused, naming both accepted layouts. `axis` in s, `values` a
 `Dict{String,Vector{Float64}}`, `units` a `Dict{String,String}`.
 """
 function _read_series_file(path::AbstractString, key::AbstractString)
     version = jldopen(path, "r") do f
-        haskey(f, "layout_version") ? f["layout_version"] : nothing
+        _canonical_version(haskey(f, "layout_version") ? f["layout_version"] : nothing)
     end
     if version == RESULT_LAYOUT_VERSION
         r = read_result(path)
@@ -1184,11 +1184,11 @@ Spec D33, D40.
 """
 function read_deck(path::AbstractString)
     raw = TOML.parsefile(path)
-    version = get(raw, "deck_version", nothing)
+    version = _canonical_version(get(raw, "deck_version", nothing))
     version == DECK_VERSION || throw(ArgumentError(
         "read_deck: \"$path\" has deck_version " *
         (version === nothing ? "<missing>" : "\"$version\"") *
-        "; this version of OTIS reads \"$DECK_VERSION\""))
+        "; this version of TRUST reads \"$DECK_VERSION\""))
 
     _check_top_level_keys(raw)
 
@@ -2600,7 +2600,7 @@ order they ran, and then for the final fit: one warning for each that stopped at
 It changes nothing.
 
 **The readable companion** (Phase 4.M spec D6, [OQ-63](../../dev/open_questions.md#oq-63)): after
-`result.jld2` and `effective_deck.toml`, `fit` writes `<dir>/readable.h5` (`otis-readable-2`, the file
+`result.jld2` and `effective_deck.toml`, `fit` writes `<dir>/readable.h5` (`trust-readable-2`, the file
 `write_readable` writes, with `source = "fit"`, the effective deck's text and `fit/gn_decrease`),
 unless the deck gives `[output] readable = false`. `result.jld2` is the same either way. With
 `readable = false`, a `readable.h5` an earlier run left in the directory is removed (Phase 4.L spec D9,

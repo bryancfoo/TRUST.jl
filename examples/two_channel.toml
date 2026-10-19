@@ -8,7 +8,7 @@
 # 350, m_e 2.5) stalls the optimizer at chi2/n of about 65-144 while it still reports "converged"
 # (:f_tolerance) -- D41 amendment 3, dev/phase4A_instructions.md.
 
-deck_version = "otis-deck-2"
+deck_version = "trust-deck-2"
 channels = ["epw", "iaw"]
 
 [[fit.regions]]

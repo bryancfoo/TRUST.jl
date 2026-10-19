@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _operator_rows, _operator_anchor
+using TRUST
+using TRUST: _operator_rows, _operator_anchor
 using Random: Xoshiro
 using Statistics: median
 
@@ -464,7 +464,7 @@ end
 function _av_deck_text(outdir::AbstractString, data_block::AbstractString;
     fit_extra::AbstractString="")
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     $data_block
 
@@ -530,7 +530,7 @@ end
         deck = read_deck(deckpath)
         before = deepcopy(deck.sections)
 
-        problem, optimizer, _ = OTIS.build_problem(deck)
+        problem, optimizer, _ = TRUST.build_problem(deck)
         @test length(problem.experiment.t) == 7
         @test issorted(problem.experiment.t)
         # isequal, not ==: the optimizer section carries LBFGS's time_limit = NaN, and NaN == NaN
@@ -562,7 +562,7 @@ end
         eff_path = joinpath(dir, "eff.toml")
         write(eff_path, eff)
         deck2 = read_deck(eff_path)
-        problem2, _, _ = OTIS.build_problem(deck2)
+        problem2, _, _ = TRUST.build_problem(deck2)
         @test problem2.experiment.t == problem.experiment.t
         pre_idx2 = findfirst(iv -> iv.name == "pre", problem2.pspec.intervals)
         @test problem2.pspec.intervals[pre_idx2].bins == problem.pspec.intervals[pre_idx].bins

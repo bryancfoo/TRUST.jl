@@ -1,3 +1,3 @@
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-OTIS = "9a288518-95a0-434c-aa8d-fc74e0293225"
+TRUST = "9a288518-95a0-434c-aa8d-fc74e0293225"

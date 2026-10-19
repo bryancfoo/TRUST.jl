@@ -30,7 +30,7 @@
 # result file or a figure, and nothing is run at full resolution (spec D25): at 512 x 256 each gap
 # bin is a third of the 0.05 ns temporal IRF and the comparison is not well determined.
 
-using OTIS
+using TRUST
 using Random: Xoshiro
 using Printf
 using LinearAlgebra: BLAS
@@ -62,7 +62,7 @@ function deck_on(path::AbstractString, sd_path::AbstractString)
     deck = read_deck(path)
     sections = deepcopy(deck.sections)
     sections["data"] = merge(sections["data"], Dict{String,Any}("file" => sd_path))
-    return OTIS.Deck(deck.deck_version, sections)
+    return TRUST.Deck(deck.deck_version, sections)
 end
 
 # The committed piecewise deck's text with its two regularizer-interval lines rewritten to
@@ -114,7 +114,7 @@ function run_seed(seed::Integer, deltas)
     mktempdir() do dir
         sd_path = joinpath(dir, "iaw_shock_128x32_seed$(seed)_streak.jld2")
         write_streak(sd_path, sd; source="iaw_shock_128x32_seed$seed")
-        whole_problem, optimizer, start = OTIS.build_problem(
+        whole_problem, optimizer, start = TRUST.build_problem(
             deck_on(joinpath(_EXAMPLES_DIR, "iaw_shock.toml"), sd_path))
         nt = nbins(whole_problem.pspec.trace)
 
@@ -140,7 +140,7 @@ function run_seed(seed::Integer, deltas)
             whole_problem.regularizer.nrows, " regularizer rows")
 
         for delta in deltas
-            problem, opt, _ = OTIS.build_problem(deck_on(piecewise_deck_path(dir, delta), sd_path))
+            problem, opt, _ = TRUST.build_problem(deck_on(piecewise_deck_path(dir, delta), sd_path))
             layout = same_layout(problem.pspec, whole_problem.pspec)
             covered = union((problem.pspec.intervals[t.interval].bins for t in problem.regularizer.terms)...)
             gap = setdiff(1:nt, covered)

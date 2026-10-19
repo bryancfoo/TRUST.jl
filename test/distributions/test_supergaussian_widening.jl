@@ -4,8 +4,8 @@
 # so it gets its own file.
 
 using Test
-using OTIS
-using OTIS: _widen_shape, _sg_uncached, SG_TABLE
+using TRUST
+using TRUST: _widen_shape, _sg_uncached, SG_TABLE
 import ForwardDiff
 using ForwardDiff: Dual
 

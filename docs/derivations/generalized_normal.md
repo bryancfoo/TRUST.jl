@@ -26,7 +26,7 @@ gives
 So **`m = 2` is the only exponent with a finite, nonzero `F(0)`**: `m > 2` makes `F` a shell
 (`F(0) = 0`, the density of particles vanishing at zero speed) and `m < 2` makes `F` diverge at
 `v = 0`. This is why `m ∈ [1.5, 2)` is accepted as a shape (D30 item 3) — it is a valid
-one-dimensional projection along **k̂**, the only object OTIS ever evaluates — but is **not** the
+one-dimensional projection along **k̂**, the only object TRUST ever evaluates — but is **not** the
 marginal of any physically sensible isotropic 3-D plasma; it exists only so that a fit's lower
 bound on `m` can sit below the Maxwellian, avoiding the saturation trap of a bound placed exactly
 at it (summary A14).

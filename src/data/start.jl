@@ -1,18 +1,18 @@
-# write_start/read_start: the otis-start-1 layout, a time axis and one series per variable name
+# write_start/read_start: the trust-start-1 layout, a time axis and one series per variable name
 # (Phase 4.I, Step 4.I.1; OQ-59 item 2; docs/derivations/data_layout.md Section 5). The file a deck's
-# [fit.start] and [fit.hold] tables may name beside an otis-result-3 result: written by the package's
+# [fit.start] and [fit.hold] tables may name beside a trust-result-3 result: written by the package's
 # own write_start, so that converting a fit made elsewhere is a script calling the package and the
-# package reads no foreign format. Plain arrays and strings only, as every OTIS layout.
+# package reads no foreign format. Plain arrays and strings only, as every TRUST layout.
 
 using JLD2: jldopen
 
 """
     START_LAYOUT_VERSION
 
-The `layout_version` string written to every start file and checked on read: `"otis-start-1"`
+The `layout_version` string written to every start file and checked on read: `"trust-start-1"`
 (Phase 4.I spec D5).
 """
-const START_LAYOUT_VERSION = "otis-start-1"
+const START_LAYOUT_VERSION = "trust-start-1"
 
 const _START_AXIS_KEYS = (axis_s=1.0, axis_ns=1e-9)
 
@@ -20,7 +20,7 @@ const _START_AXIS_KEYS = (axis_s=1.0, axis_ns=1e-9)
     write_start(path::AbstractString; axis_s | axis_ns, values, units = Dict{String,String}(),
                 source::AbstractString = "") -> path
 
-Writes the `otis-start-1` layout (`docs/derivations/data_layout.md` Section 5; Phase 4.I spec D5):
+Writes the `trust-start-1` layout (`docs/derivations/data_layout.md` Section 5; Phase 4.I spec D5):
 `layout_version`, `meta/source`, `axis` (`Float64`, s, strictly increasing), and, per name of
 `values`, `variables/<name>/values` (`Float64`, `length(axis)` entries, or one for a value that
 holds at every time) and, when `units` names it, `variables/<name>/unit` (`String`, the boundary
@@ -88,7 +88,7 @@ end
 Reads a file written by `write_start` (or by any writer of the same plain datasets, Section 5's h5py
 snippet): `axis` the time axis in s, `values` a `Dict{String,Vector{Float64}}` and `units` a
 `Dict{String,String}` holding only the names the file gives a unit. Throws, naming the path, when
-`layout_version` is not `"otis-start-1"`, when a required dataset is missing, when the axis is not
+`layout_version` is not `"trust-start-1"`, when a required dataset is missing, when the axis is not
 strictly increasing, or when a series' length is neither the axis's nor one. `source` and a unit read
 `""` where the file holds `"-"`, the marker `write_start` writes for an empty string (Phase 4.N spec D20).
 """
@@ -96,7 +96,7 @@ function read_start(path::AbstractString)
     jldopen(path, "r") do f
         haskey(f, "layout_version") || throw(ArgumentError(
             "read_start: \"$path\" is missing the required dataset \"layout_version\""))
-        version = f["layout_version"]
+        version = _canonical_version(f["layout_version"])
         version == START_LAYOUT_VERSION || throw(ArgumentError(
             "read_start: \"$path\" has layout_version \"$version\"; expected \"$START_LAYOUT_VERSION\""))
         for name in ("axis", "variables")

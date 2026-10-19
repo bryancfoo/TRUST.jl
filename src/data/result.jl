@@ -1,9 +1,9 @@
 # write_result/read_result (JLD2, plain arrays and strings, exactly the streak and trace
-# layouts' own rule): the otis-result-1 layout, bumped to otis-result-2 at Step 3.C.2 (D35), which
-# also added scan/termination at Step 3.C.3 (carried item 2, inside the same otis-result-2 version
+# layouts' own rule): the trust-result-1 layout, bumped to trust-result-2 at Step 3.C.2 (D35), which
+# also added scan/termination at Step 3.C.3 (carried item 2, inside the same trust-result-2 version
 # -- D35 forbids a *second* layout bump, not a dataset added within one before the phase closes).
 # Step 3.6a, chunk 11 of Phase 3; spec D34, extending the file family of
-# docs/derivations/data_layout.md (Section 3), which now describes otis-result-2 in full.
+# docs/derivations/data_layout.md (Section 3), which now describes trust-result-2 in full.
 
 using Dates: Dates, DateTime, UTC, now
 using JLD2: jldopen
@@ -13,22 +13,22 @@ using JLD2: jldopen
 
 The `layout_version` string written to every result JLD2 file and checked on read.
 
-**Bumped to `"otis-result-2"` at Step 3.C.2 (D35, D17)**, one bump, carrying `fit/termination`,
+**Bumped to `"trust-result-2"` at Step 3.C.2 (D35, D17)**, one bump, carrying `fit/termination`,
 `fit/near_bound_fraction` and (when a scan is written) `scan/status` together, and **later joined,
-within the same `"otis-result-2"`, by `scan/termination`** (Step 3.C.3 carried item 2, D17-vs-D35):
+within the same `"trust-result-2"`, by `scan/termination`** (Step 3.C.3 carried item 2, D17-vs-D35):
 `read_result` rejects a version mismatch before it reads anything, so one bump covering every new
 dataset introduced before the phase closes is all Phase 3.C needs -- D35 forbids a *second* bump,
 not a dataset added inside the one it already made.
 
-**Bumped to `"otis-result-3"` at Step 4.A.3b (D40, chunk 7)**, one bump, carrying a `channels/`
+**Bumped to `"trust-result-3"` at Step 4.A.3b (D40, chunk 7)**, one bump, carrying a `channels/`
 group: `channels/names` and, per channel, `weight`, `chi2`, `npixels`, `nparams`, `reduced_chi2`,
 `reduced_chi2_simple`, `lambda`, `model`, `effects/*`, and, only when `write_result` is given the
-problem, `residual` and `mask`. Every `otis-result-3` file has `channels/`, since every `FitResult`
+problem, `residual` and `mask`. Every `trust-result-3` file has `channels/`, since every `FitResult`
 carries at least one `ChannelSummary` (D36); a shorthand fit writes `channels/main`.
 
 Spec D34, D45, D35, D40.
 """
-const RESULT_LAYOUT_VERSION = "otis-result-3"
+const RESULT_LAYOUT_VERSION = "trust-result-3"
 
 """
     _channel_problem(problem::FitProblem, c::Int) -> FitProblem
@@ -147,7 +147,7 @@ Writes `result` (and, if given, `scan`, `laplace` and `calibration_scan`) to `pa
 of plain numeric arrays and strings (`docs/derivations/data_layout.md` Section 3, spec D34, D40,
 D47): `layout_version`, a `meta` group, the effective `deck` text, the axis, one group per fitted
 variable and per dependent, one group per leaf of the fitted trace, the `fit/*` scalars and
-vectors (including, since `otis-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`;
+vectors (including, since `trust-result-2`, D35, `fit/termination` and `fit/near_bound_fraction`;
 `fit/chi2` and `fit/npixels` are the **weighted total** and the **sum over channels** for a
 `JointFitProblem` result, D40), and, only when given `gn_decrease` (which `fit(deck)` always
 passes), `fit/gn_decrease`, a `Float64` that may be `NaN` (Phase 4.B spec D5), the `trajectory/*`
@@ -172,7 +172,7 @@ know `laplace` was computed at the θ `result` reports).
 (`UInt8`), `s_stat` and `n_near_bound`. Must satisfy `scatter.theta == result.theta` exactly, else
 a loud error (`"scatter was computed at a different θ than result.theta"`).
 
-All three groups are written inside `otis-result-3` (D17 forbids a *second* bump within the phase,
+All three groups are written inside `trust-result-3` (D17 forbids a *second* bump within the phase,
 not a dataset added inside the one bump already made); **RE1's exact key set is unchanged**, since
 none is written without its keyword.
 
@@ -180,7 +180,7 @@ none is written without its keyword.
 `variable` (`String`), `bin` (`Int64`, the bin on the fitted axis, `0` for a scalar variable) and
 `bound` (`"lower"` or `"upper"`), one element per entry of `_near_bound_entries(result)`, in its
 order. Written for every caller, with no keyword, since it is read off `result` alone, as
-`fit/near_bound_fraction` is; inside `otis-result-3`, and RE1's fixture has no such entry.
+`fit/near_bound_fraction` is; inside `trust-result-3`, and RE1's fixture has no such entry.
 
 **`stages` (Phase 4.F spec D7), only when given** (`fit(deck)` passes `_staged_fit`'s return for a
 deck with `procedure = "staged"`): `stages/names`, `stages/start` (the joint fit's start, in `y`),
@@ -188,19 +188,19 @@ deck with `procedure = "staged"`): `stages/names`, `stages/start` (the joint fit
 `stages/channels/<name>/` with `axis`, `theta`, `frozen` (the variables the stage froze), `chi2`,
 `objective`, `npixels`, `iterations`, `converged` (`UInt8`), `status`, `termination`, `optimizer`,
 `elapsed`, `near_bound_fraction`, `variables/<v>/values`, `vary`, `near_bound`, and
-`dependents/<d>/values`. Inside `otis-result-3`, no bump; RE1's exact key set is unchanged.
+`dependents/<d>/values`. Inside `trust-result-3`, no bump; RE1's exact key set is unchanged.
 
 **`fit/start` (Phase 4.I spec D9), only when given** (`fit(deck)` always passes it): the θ the
 final fit started from, in `y`, `(ntheta)` -- `build_problem`'s start, or for a staged deck the
 joint start (`stages/start`). Its length must be `result.pspec.ntheta`, else a loud error.
 **`variables/<name>/held` (Phase 4.I spec D10), only for a held variable**: `UInt8` `1`, beside
 `vary = 0` and the held series in `variables/<name>/values`, so that a reader can tell a series
-held from a file or a stage from a scalar frozen at its `init`. Both inside `otis-result-3`, no
+held from a file or a stage from a scalar frozen at its `init`. Both inside `trust-result-3`, no
 bump; RE1's exact key set is unchanged, since neither is written for its fixture.
 **`stages/sequence` and `stages/channels/<name>/held` (Phase 4.I spec D24), only when present**: the
 order a deck's `sequence` gave the stages, and the variables a stage held (`[fit.hold]`'s, or an
 earlier stage's series), each written only when there is one; the held values are in that stage's own
-`variables/<name>/values`. Inside `otis-result-3`, no bump.
+`variables/<name>/values`. Inside `trust-result-3`, no bump.
 
 When `problem` is given, `problem.pspec === result.pspec` is required (a loud error otherwise,
 naming what to pass instead): `write_result` has no other way to know the problem it is given is
@@ -255,7 +255,7 @@ function write_result(path::AbstractString, result::FitResult;
         f["meta/source"] = _empty_marker(source)
         f["meta/created"] = _iso8601_utc_now()
         f["meta/created_unix"] = Float64(time())
-        f["meta/otis_version"] = string(pkgversion(OTIS))
+        f["meta/trust_version"] = string(pkgversion(TRUST))
         f["deck"] = _empty_marker(deck)
 
         f["axis_name"] = String(pspec.trace.axis_name)
@@ -521,7 +521,7 @@ Spec D34, D40, D47; Phase 4.N spec D20.
 """
 function read_result(path::AbstractString)
     jldopen(path, "r") do f
-        version = _require_dataset(f, "layout_version", path)
+        version = _canonical_version(_require_dataset(f, "layout_version", path))
         version == RESULT_LAYOUT_VERSION || throw(ArgumentError(
             "read_result: \"$path\" has layout_version \"$version\"; expected \"$RESULT_LAYOUT_VERSION\""))
 

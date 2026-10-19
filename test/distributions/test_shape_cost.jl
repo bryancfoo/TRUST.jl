@@ -5,8 +5,8 @@
 # files it walks. SC1-SC4, exactly as Section 8's Test table specifies them.
 
 using Test
-using OTIS
-using OTIS: SHAPE_REGISTRY, _SHAPE_OPTIONS, _build_shape
+using TRUST
+using TRUST: SHAPE_REGISTRY, _SHAPE_OPTIONS, _build_shape
 import ForwardDiff
 
 # --- The representative-instance table (spec D11's forcing function; corrected 2026-09-18,

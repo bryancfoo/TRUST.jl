@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 
 # Step 4.F.1: the staged fit as a deck option (Phase 4.F spec D3-D9, OQ-54, the user's decision of
 # 2026-09-30). ST1 and ST2, gate "staged fit": the grammar and the refusals. ST3, the staged fit
@@ -28,7 +28,7 @@ include(joinpath(@__DIR__, "..", "fixtures", "staged_fixture.jl"))
             "stage_procedure" => "noisy_descent_lbfgs", "joint_procedure" => "levenberg_marquardt",
             "polish_tol" => 1e-6, "start_from" => Dict{String,Any}())
 
-        problem, optimizer, _ = OTIS.build_problem(deck)
+        problem, optimizer, _ = TRUST.build_problem(deck)
         @test problem isa JointFitProblem
         @test optimizer isa LevenbergMarquardt
         eff = effective_deck(deck, problem, optimizer)
@@ -56,7 +56,7 @@ end
         @test_throws "this deck has one, \"epw\"" rd("one.toml", one)
 
         shorthand = """
-        deck_version = "otis-deck-2"
+        deck_version = "trust-deck-2"
         [data]
         file = "$(_st_path(joinpath(dir, "epw.jld2")))"
         [geometry]
@@ -105,12 +105,12 @@ include(joinpath(@__DIR__, "..", "fixtures", "start_hold_fixture.jl"))
         sp = _sh_start_file(dir)
         text = _sh_tables(_st_text(dir); start=(sp, ["logn"]), hold=(sp, ["T_e"]))
         deck = read_deck(_st_write(dir, "d.toml", text))
-        joint, _, _ = OTIS.build_problem(deck)
+        joint, _, _ = TRUST.build_problem(deck)
         for c in 1:2
-            sdeck = OTIS._stage_deck(deck, c, "lbfgs", String[])
+            sdeck = TRUST._stage_deck(deck, c, "lbfgs", String[])
             @test sdeck.sections["fit_start"] == deck.sections["fit_start"]
             @test sdeck.sections["fit_hold"] == deck.sections["fit_hold"]
-            p, _, st = OTIS.build_problem(sdeck)
+            p, _, st = TRUST.build_problem(sdeck)
             @test !only(v for v in p.pspec.variables if v.name == "T_e").vary
             @test p.pspec.ntheta == joint.pspec.ntheta == 12
         end

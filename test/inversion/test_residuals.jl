@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 import ForwardDiff
 
 # RS1 to RS9 against dev/phase3_instructions.md Section 5's RS table (spec D15, D16), gated

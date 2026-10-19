@@ -23,8 +23,8 @@
 #
 # Nothing here writes a result file or a figure; its printed tables are what goes in the report.
 
-using OTIS
-using OTIS: _with_weight, _leaf_si_path, jacobian, JACOBIAN_CHUNK, _gauss_newton_diagonal,
+using TRUST
+using TRUST: _with_weight, _leaf_si_path, jacobian, JACOBIAN_CHUNK, _gauss_newton_diagonal,
     _gauss_newton_floor, _from_unconstrained, _dx_dy, _count_near_bound
 using Random: Xoshiro
 
@@ -59,7 +59,7 @@ function _cutdown_deck(name::AbstractString, sd_path::AbstractString)
     deck = read_deck(joinpath(_EXAMPLES_DIR, "$name.toml"))
     sections = deepcopy(deck.sections)
     sections["data"] = merge(sections["data"], Dict{String,Any}("file" => sd_path))
-    return OTIS.Deck(deck.deck_version, sections)
+    return TRUST.Deck(deck.deck_version, sections)
 end
 
 """
@@ -79,7 +79,7 @@ function _build_cutdown(name::AbstractString, problem_fn; nlambda::Int=128, nt::
         sd_path = joinpath(dir, "$(source)_streak.jld2")
         write_streak(sd_path, sd; source=source)
         deck = _cutdown_deck(name, sd_path)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         (; problem, optimizer, start, problem_nt)
     end
 end
@@ -93,7 +93,7 @@ start)`.
 """
 function _build_fullres_multiflow()
     deck = read_deck(joinpath(_EXAMPLES_DIR, "iaw_multiflow.toml"))
-    return OTIS.build_problem(deck)
+    return TRUST.build_problem(deck)
 end
 
 # ------------------------------------------------------------------------------------------

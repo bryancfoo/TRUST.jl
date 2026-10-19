@@ -1,7 +1,7 @@
 # foo2026 Section III.A: the EPW ablation problem, full resolution. Spec D25.
 # Run: julia --project=. examples/epw_ablation.jl
 
-using OTIS
+using TRUST
 using Random: Xoshiro
 
 include(joinpath(@__DIR__, "problems.jl"))

@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using JLD2: jldopen
 
 # CD1 to CD12 against dev/phase4A_instructions.md Section 9.2 (spec D40, chunk 7), gated
@@ -78,7 +78,7 @@ function _cd_deck_text(path_a::AbstractString, path_b::AbstractString, outdir::A
     b_extra::AbstractString="",
     regions_block::AbstractString="[[fit.regions]]\nt_range_ns = [0.0, 1.2]\nnbins = 2\n")
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     channels = ["a", "b"]
 
     $regions_block
@@ -128,7 +128,7 @@ end
 # The one-channel shorthand, camera a alone with the same region and content (CD5, CD11).
 function _cd_shorthand_deck_text(path_a::AbstractString, outdir::AbstractString)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(_cd_path(path_a))"
@@ -168,7 +168,7 @@ end
 function _cd_one_channel_deck_text(path_a::AbstractString, outdir::AbstractString;
     weight_line::AbstractString="")
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     channels = ["a"]
 
     [[fit.regions]]
@@ -354,9 +354,9 @@ end
         outdir = joinpath(dir, "out")
         deck = read_deck(_cd_write(dir, "deck.toml", _cd_deck_text(path_a, path_b, outdir)))
 
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         @test problem isa JointFitProblem
-        @test OTIS.channel_names(problem) == ["a", "b"]
+        @test TRUST.channel_names(problem) == ["a", "b"]
         @test problem.weights == [1.0, 2.5]
 
         oracle = _CD_POOLED_AXIS_NS .* 1e-9
@@ -395,8 +395,8 @@ end
         deck_short = read_deck(_cd_write(dir, "shorthand.toml",
             _cd_shorthand_deck_text(path_a, outdir2)))
 
-        problem_c, _, start_c = OTIS.build_problem(deck_channel)
-        problem_s, _, start_s = OTIS.build_problem(deck_short)
+        problem_c, _, start_c = TRUST.build_problem(deck_channel)
+        problem_s, _, start_s = TRUST.build_problem(deck_short)
 
         @test problem_c isa FitProblem
         @test problem_c.name == "a"
@@ -422,21 +422,21 @@ end
         outdir = joinpath(dir, "out")
         deck1 = read_deck(_cd_write(dir, "deck.toml", _cd_deck_text(path_a, path_b, outdir)))
 
-        problem1, optimizer1, start1 = OTIS.build_problem(deck1)
+        problem1, optimizer1, start1 = TRUST.build_problem(deck1)
         eff = effective_deck(deck1, problem1, optimizer1)
         @test occursin("channel.a.", eff)
         @test occursin("channel.b.", eff)
 
         deck2 = read_deck(_cd_write(dir, "eff.toml", eff))
         @test deck2 == deck1
-        problem2, _, start2 = OTIS.build_problem(deck2)
+        problem2, _, start2 = TRUST.build_problem(deck2)
 
-        @test OTIS.channel_names(problem2) == OTIS.channel_names(problem1)
+        @test TRUST.channel_names(problem2) == TRUST.channel_names(problem1)
         @test problem2.weights == problem1.weights
         @test problem2.pspec.trace.axis == problem1.pspec.trace.axis
 
-        names1 = OTIS.channel_names(problem1)
-        names2 = OTIS.channel_names(problem2)
+        names1 = TRUST.channel_names(problem1)
+        names2 = TRUST.channel_names(problem2)
         for (b1, b2) in zip(problem1.pspec.bindings, problem2.pspec.bindings)
             @test b1.name == b2.name
             @test b1.factor == b2.factor
@@ -475,7 +475,7 @@ end
         # the one-conversion-factor rule is checked in ParameterSpec's constructor (_resolve_bindings),
         # reached from build_problem -- read_deck alone does not resolve bindings.
         err = try
-            OTIS.build_problem(deck)
+            TRUST.build_problem(deck)
             nothing
         catch e
             e
@@ -500,7 +500,7 @@ end
         _cd_write_streak_b(path_b)
         outdir = joinpath(dir, "out")
         deck = read_deck(_cd_write(dir, "deck.toml", _cd_deck_text(path_a, path_b, outdir)))
-        @test_throws "channel \"a\" has no usable pixel" OTIS.build_problem(deck)
+        @test_throws "channel \"a\" has no usable pixel" TRUST.build_problem(deck)
     end
 end
 
@@ -519,23 +519,23 @@ end
 
         deck_noshift = read_deck(_cd_write(dir, "noshift.toml",
             _cd_deck_text(path_a, path_b, outdir1)))
-        problem_noshift, _, _ = OTIS.build_problem(deck_noshift)
+        problem_noshift, _, _ = TRUST.build_problem(deck_noshift)
         @test problem_noshift.channels[2].data.meta["regions_window_counts"] == [2, 2]
         @test isapprox(problem_noshift.pspec.trace.axis, _CD_POOLED_AXIS_NS .* 1e-9; rtol=1e-14)
 
         deck_shift = read_deck(_cd_write(dir, "shift.toml",
             _cd_deck_text(path_a, path_b, outdir2; b_extra="t_shift_ns = 0.3\n")))
-        problem_shift, _, _ = OTIS.build_problem(deck_shift)
+        problem_shift, _, _ = TRUST.build_problem(deck_shift)
         @test problem_shift.channels[2].data.meta["regions_window_counts"] == [1, 2]
         @test isapprox(problem_shift.pspec.trace.axis, _CD_POOLED_AXIS_SHIFTED_NS .* 1e-9; rtol=1e-14)
     end
 end
 
 # ------------------------------------------------------------------------------------------
-# CD10: fit(deck) writes otis-result-3 with channel groups
+# CD10: fit(deck) writes trust-result-3 with channel groups
 # ------------------------------------------------------------------------------------------
 
-@testset "CD10: fit(deck) writes otis-result-3 with channel groups" begin
+@testset "CD10: fit(deck) writes trust-result-3 with channel groups" begin
     mktempdir() do dir
         path_a = joinpath(dir, "a.jld2")
         path_b = joinpath(dir, "b.jld2")
@@ -548,10 +548,10 @@ end
         respath = joinpath(outdir, "result.jld2")
         @test isfile(respath)
         r = read_result(respath)
-        @test r.layout_version == "otis-result-3"
+        @test r.layout_version == "trust-result-3"
         @test Set(c.name for c in r.channels) == Set(["a", "b"])
 
-        problem2, _, _ = OTIS.build_problem(deck)
+        problem2, _, _ = TRUST.build_problem(deck)
         for summ in r.channels
             c = summ.name == "a" ? 1 : 2
             ch = problem2.channels[c]
@@ -592,7 +592,7 @@ end
         _cd_write_streak_b(path_b)
         outdir = joinpath(dir, "out")
         deck = read_deck(_cd_write(dir, "deck.toml", _cd_deck_text(path_a, path_b, outdir)))
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         result = solve(problem, optimizer; start=start)
 
         path = joinpath(dir, "no_problem.jld2")
@@ -621,11 +621,11 @@ end
 # CD12: an old result-file version is refused, naming both versions
 # ------------------------------------------------------------------------------------------
 
-@testset "CD12: an otis-result-2 file is refused by version" begin
+@testset "CD12: a trust-result-2 file is refused by version" begin
     mktempdir() do dir
         path = joinpath(dir, "old.jld2")
         jldopen(path, "w") do f
-            f["layout_version"] = "otis-result-2"
+            f["layout_version"] = "trust-result-2"
         end
         err = try
             read_result(path)
@@ -635,7 +635,7 @@ end
         end
         @test err !== nothing
         msg = sprint(showerror, err)
-        @test occursin("otis-result-2", msg)
-        @test occursin("otis-result-3", msg)
+        @test occursin("trust-result-2", msg)
+        @test occursin("trust-result-3", msg)
     end
 end

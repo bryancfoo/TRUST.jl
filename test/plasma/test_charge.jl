@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _divide_by_charge, _widen_trace, LeafRef, _resolve_leaf, _leaf_value, _leaf_si_path,
+using TRUST
+using TRUST: _divide_by_charge, _widen_trace, LeafRef, _resolve_leaf, _leaf_value, _leaf_si_path,
     _leaf_display_unit, _enumerate_leaves, _with_leaf
 import ForwardDiff
 import TOML
@@ -9,7 +9,7 @@ using JLD2: jldopen
 # Phase 4.J (OQ-60): the continuous ion charge, gated "continuous charge". Step 4.J.1, CZ1 to CZ8 (Phase
 # 4.J spec D12): ion's real charge and its floor, today's model bitwise, the guarded division by a
 # charge, the identity with the C4/C6 pair and its contrast at the number average, the trace layout
-# otis-trace-2, the deck's real literal. Step 4.J.2, CZ9 to CZ13 (spec D18): the leaf, a trace whose
+# trust-trace-2, the deck's real literal. Step 4.J.2, CZ9 to CZ13 (spec D18): the leaf, a trace whose
 # charge differs per bin, _with_leaf and GradientSmearing, the binding and its floor, the deck's
 # charge = "ZC". The derivative and the recovery are in test/slow/test_charge.jl.
 
@@ -55,7 +55,7 @@ end
         _cz_streak(dir)
         models = map(("6", "6.0")) do c
             deck = read_deck(_cz_write(dir, "c$(c).toml", _cz_deck_text(dir; charge=c)))
-            problem, _, start = OTIS.build_problem(deck)
+            problem, _, start = TRUST.build_problem(deck)
             measure(unflatten(problem.experiment, problem.pspec, start))
         end
         @test all(models[1] .=== models[2])
@@ -160,17 +160,17 @@ end
 end
 
 # ------------------------------------------------------------------------------------------
-# CZ7: the trace layout otis-trace-2 (OQ-60 (b), (f), item 6; spec D9)
+# CZ7: the trace layout trust-trace-2 (OQ-60 (b), (f), item 6; spec D9)
 # ------------------------------------------------------------------------------------------
 
-@testset "CZ7: otis-trace-2 carries a real charge bitwise; otis-trace-1 is refused" begin
-    @test OTIS.TRACE_LAYOUT_VERSION == "otis-trace-2"
+@testset "CZ7: trust-trace-2 carries a real charge bitwise; trust-trace-1 is refused" begin
+    @test TRUST.TRACE_LAYOUT_VERSION == "trust-trace-2"
     trace = PlasmaTrace(_cz_single(4.6, 0.7); t_ns=[0.0, 1.0, 2.0], leaves=["n_e_cm3" => [5.0e19, 5.5e19, 6.0e19]])
     mktempdir() do dir
         path = joinpath(dir, "trace.jld2")
         write_trace(path, trace; source="CZ7")
         r = read_trace(path)
-        @test r.layout_version == "otis-trace-2"
+        @test r.layout_version == "trust-trace-2"
         @test r.template["ions"]["species"]["C"]["charge"] === 4.6
         @test r.template["ions"]["species"]["D"]["charge"] === 1.0
         @test r.template["electrons"]["species"]["e"]["charge"] === -1.0
@@ -179,9 +179,9 @@ end
         @test all(plasma(rebuilt, j).ions["C"].n === plasma(trace, j).ions["C"].n for j in 1:3)
         old = joinpath(dir, "old.jld2")
         jldopen(old, "w") do f
-            f["layout_version"] = "otis-trace-1"
+            f["layout_version"] = "trust-trace-1"
         end
-        @test_throws "has layout_version \"otis-trace-1\"; expected \"otis-trace-2\"" read_trace(old)
+        @test_throws "has layout_version \"trust-trace-1\"; expected \"trust-trace-2\"" read_trace(old)
     end
 end
 
@@ -194,13 +194,13 @@ end
         _cz_streak(dir)
         deck = read_deck(_cz_write(dir, "real.toml", _cz_deck_text(dir; charge="4.6")))
         @test deck.sections["plasma"]["ions"]["C"]["charge"] === 4.6
-        problem, optimizer, _ = OTIS.build_problem(deck)
+        problem, optimizer, _ = TRUST.build_problem(deck)
         @test problem.pspec.trace.template.ions["C"].charge === 4.6
         @test read_deck(_cz_write(dir, "eff.toml", effective_deck(deck, problem, optimizer))) == deck
         six = read_deck(_cz_write(dir, "six.toml", _cz_deck_text(dir; charge="6")))
         @test six.sections["plasma"]["ions"]["C"]["charge"] === 6.0
         low = read_deck(_cz_write(dir, "low.toml", _cz_deck_text(dir; charge="0.5")))
-        @test_throws "ion \"C\" has charge 0.5; $_CZ_MSG" OTIS.build_problem(low)
+        @test_throws "ion \"C\" has charge 0.5; $_CZ_MSG" TRUST.build_problem(low)
         @test_throws "read_deck: key \"charge\" in section \"plasma.ions.C\" refers to \"nope\", which is not a declared variable or dependent" read_deck(
             _cz_write(dir, "nope.toml", _cz_deck_text(dir; charge="\"nope\"")))
     end
@@ -313,7 +313,7 @@ end
         _cz_streak(dir)
         zc = "ZC = { bounds = [3.0, 7.0], init = 5.0, time_varying = true }"
         deck = read_deck(_cz_write(dir, "zc.toml", _cz_deck_text(dir; charge="\"ZC\"", variables=zc)))
-        problem, optimizer, _ = OTIS.build_problem(deck)
+        problem, optimizer, _ = TRUST.build_problem(deck)
         @test any(b -> b.name == "ZC" && b.kind === :leaf && string(b.path) == "ions.C.charge", problem.pspec.bindings)
         eff = effective_deck(deck, problem, optimizer)
         @test TOML.parse(eff)["fit"]["variables"]["ZC"]["bindings"] == ["ions.C.charge"]
@@ -321,17 +321,48 @@ end
         sp = write_start(joinpath(dir, "start.jld2"); axis_ns=[4.0, 5.0], values=Dict("ZC" => [4.4, 4.8]),
             source="CZ13")
         table(key) = "[fit.$key]\nfile = \"$(replace(sp, "\\" => "/"))\"\nvariables = [\"ZC\"]\n"
-        ps, _, start = OTIS.build_problem(read_deck(_cz_write(dir, "zs.toml",
+        ps, _, start = TRUST.build_problem(read_deck(_cz_write(dir, "zs.toml",
             _cz_deck_text(dir; charge="\"ZC\"", variables=zc, tables=table("start")))))
         z_start = plasma(unflatten(ps.experiment, ps.pspec, start).trace, 1).ions["C"].charge
         @test isapprox(z_start, 4.6; rtol=1e-13)
-        ph, _, start_h = OTIS.build_problem(read_deck(_cz_write(dir, "zh.toml",
+        ph, _, start_h = TRUST.build_problem(read_deck(_cz_write(dir, "zh.toml",
             _cz_deck_text(dir; charge="\"ZC\"", variables=zc, tables=table("hold")))))
         held = only(v for v in ph.pspec.variables if v.name == "ZC").held
         @test length(held) == 1 && isapprox(held[1], 4.6; rtol=1e-14)
         @test plasma(unflatten(ph.experiment, ph.pspec, start_h).trace, 1).ions["C"].charge === held[1]
         low = "ZC = { bounds = [0.9, 7.0], init = 5.0, time_varying = true }"
-        @test_throws "\"ZC\" is bound to \"ions.C.charge\" with lower bound 0.9, below 1" OTIS.build_problem(
+        @test_throws "\"ZC\" is bound to \"ions.C.charge\" with lower bound 0.9, below 1" TRUST.build_problem(
             read_deck(_cz_write(dir, "zlow.toml", _cz_deck_text(dir; charge="\"ZC\"", variables=low))))
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# CZ14: the otis- alias of the trace layout (the 2026-10-18 rename, Level 1 decision D3)
+# ------------------------------------------------------------------------------------------
+
+@testset "CZ14: read_trace accepts the otis- spelling of the current number only" begin
+    trace = PlasmaTrace(_cz_single(4.6, 0.7); t_ns=[0.0, 1.0, 2.0], leaves=["n_e_cm3" => [5.0e19, 5.5e19, 6.0e19]])
+    rewrite(path, version) = jldopen(path, "a+") do f
+        delete!(f, "layout_version")
+        f["layout_version"] = version
+    end
+    mktempdir() do dir
+        path = joinpath(dir, "trace.jld2")
+        write_trace(path, trace; source="CZ14")
+        ref = read_trace(path)
+        @test jldopen(f -> f["layout_version"], path, "r") == "trust-trace-2"   # writers never emit otis-
+
+        # 1: the current number, old spelling: reads, equal to the untouched file's (exact), canonical field
+        rewrite(path, "otis-trace-2")
+        @test jldopen(f -> f["layout_version"], path, "r") == "otis-trace-2"
+        old = read_trace(path)
+        @test old.layout_version == "trust-trace-2"
+        @test isequal(old, ref)
+        rebuilt = read_trace(path; as=:trace)
+        @test all(plasma(rebuilt, j).ions["C"].n === plasma(trace, j).ions["C"].n for j in 1:3)
+
+        # 2: the wrong number in the old spelling is refused, naming the canonical string
+        rewrite(path, "otis-trace-1")
+        @test_throws "has layout_version \"trust-trace-1\"; expected \"trust-trace-2\"" read_trace(path)
     end
 end

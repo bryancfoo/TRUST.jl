@@ -91,7 +91,7 @@ function _rw_deck_text(dir::AbstractString; form::Symbol=:shorthand, line::Abstr
         $line
         """
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     $head
     [fit.variables]
     logn = { bounds = [18.5, 20.5], init = 19.793557 }

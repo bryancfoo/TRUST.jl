@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 
 # Step 4.F.2's slow row (Phase 4.F spec D17, D24), gated "resonance width (slow)": RW6, fit(deck)
 # itself, a fit and so in the slow tier. fit(deck) pins BLAS to one thread for the rest of the
@@ -21,7 +21,7 @@ pin_blas_threads(_RWS_NBLAS)
         write(path, _rw_deck_text(dir))
         deck = read_deck(path)
         result = @test_logs (:warn, _RW_SHORT_MSG) match_mode=:any min_level=Base.CoreLogging.Warn fit(deck)
-        problem, opt, start = OTIS.build_problem(deck)
+        problem, opt, start = TRUST.build_problem(deck)
         @test result.theta == solve(problem, opt; start=start).theta
         @test read_result(joinpath(dir, "out", "result.jld2")).fit.theta == result.theta
     end

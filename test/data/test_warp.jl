@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using REPL: REPL  # gives Base.Docs.doc its methods (empty otherwise); see DW5 below
 using JLD2: jldopen
 

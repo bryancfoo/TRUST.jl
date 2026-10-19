@@ -83,7 +83,7 @@ function _gf_deck_text(dir::AbstractString; form::Symbol=:shorthand, geometry::A
         sensitivity = { scale = 2.0e-4 }
         """
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     $head
     [fit.variables]
     logn = { bounds = [18.5, 20.5], init = 19.7 }

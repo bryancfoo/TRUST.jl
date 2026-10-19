@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _parse_expression, _eval
+using TRUST
+using TRUST: _parse_expression, _eval
 import ForwardDiff
 import SpecialFunctions
 
@@ -223,12 +223,12 @@ end
 
 @testset "XR15: a comparison compares primal values (Phase 4.D spec D15)" begin
     for (op, want) in ((==, true), (!=, false), (<=, true), (>=, true), (<, false), (>, false)), s in (1.0, -1.0)
-        node = OTIS.CompareNode(op, OTIS.SlotNode(1), OTIS.ConstNode(2.0))
+        node = TRUST.CompareNode(op, TRUST.SlotNode(1), TRUST.ConstNode(2.0))
         @test _eval(node, [2.0], 0.0) === want
         @test _eval(node, [ForwardDiff.Dual(2.0, s)], 0.0) === want
     end
     # a conditional on the comparison: at a tie the dual pass takes the plain pass's branch, and keeps its partial
-    jump = OTIS.IfElseNode(OTIS.CompareNode(>=, OTIS.SlotNode(1), OTIS.ConstNode(2.0)), OTIS.SlotNode(1), OTIS.ConstNode(0.0))
+    jump = TRUST.IfElseNode(TRUST.CompareNode(>=, TRUST.SlotNode(1), TRUST.ConstNode(2.0)), TRUST.SlotNode(1), TRUST.ConstNode(0.0))
     @test _eval(jump, [2.0], 0.0) === 2.0
     for s in (1.0, -1.0)
         v = _eval(jump, [ForwardDiff.Dual(2.0, s)], 0.0)

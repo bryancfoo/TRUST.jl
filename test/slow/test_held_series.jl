@@ -1,8 +1,8 @@
 using Test
-using OTIS
-using OTIS: _full_residuals, jvp!, _kernel_effects, _widen_trace, _make_cache, _jacobian_bin!, JACOBIAN_CHUNK,
+using TRUST
+using TRUST: _full_residuals, jvp!, _kernel_effects, _widen_trace, _make_cache, _jacobian_bin!, JACOBIAN_CHUNK,
     _collect_kernel_bindings
-const ForwardDiff = OTIS.ForwardDiff   # test/slow's environment has no ForwardDiff of its own
+const ForwardDiff = TRUST.ForwardDiff   # test/slow's environment has no ForwardDiff of its own
 
 # Step 4.I.1's slow rows (Phase 4.I spec D13), gated "held series (slow)": HD3 and HD4 compile the
 # brute-force Jacobian and the per-bin dual pass of a chain with a held variable, which nothing earlier
@@ -48,7 +48,7 @@ function _hd_dual_pass_bytes(j::Int)
     nlambda = length(expt.lambda)
     kernel_effects0 = _kernel_effects(expt)
     kernel_bindings = _collect_kernel_bindings(pspec, expt, length(kernel_effects0))
-    DFT = ForwardDiff.Dual{OTIS._JacobianTag,Float64,JACOBIAN_CHUNK}
+    DFT = ForwardDiff.Dual{TRUST._JacobianTag,Float64,JACOBIAN_CHUNK}
     work_trace = _widen_trace(pspec.trace, DFT)
     vals = Vector{DFT}(undef, pspec.nslots)
     col_cache = _make_cache(DFT, nlambda)
@@ -56,7 +56,7 @@ function _hd_dual_pass_bytes(j::Int)
     kernel_globals = Array{Float64,3}(undef, nlambda, 10, 0)
     kernel_global_idx = Int[]
     kernel_global_of_var = zeros(Int, nvar)
-    flag = OTIS._prefactor_flag(expt.prefactor)
+    flag = TRUST._prefactor_flag(expt.prefactor)
     _jb!() = _jacobian_bin!(block, kernel_globals, j, work_trace, vals, col_cache, pspec, nvar, 0,
         kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings, expt.probe,
         expt.collection, expt.lambda, flag, theta, expt.gain)

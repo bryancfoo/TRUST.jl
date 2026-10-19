@@ -27,8 +27,8 @@
 # Budget: 60 minutes (hard limit 90); Level 2's run took 17.4 minutes on a quiet machine, 13.1 of
 # them the count-64 fit of (v) (spec D20).
 
-using OTIS
-using OTIS: _with_weight, _leaf_si_path
+using TRUST
+using TRUST: _with_weight, _leaf_si_path
 using Printf
 using Random: Xoshiro
 using LinearAlgebra: BLAS
@@ -48,17 +48,17 @@ end
 # The fitted m in every bin beside its truth, its EPW resonance's width in pixels ("-" for none) and
 # whether it is near a bound; then the width check's entries and the count they ask for.
 function report(label, r, truth_m)
-    w = OTIS._resonance_widths(r)[1]
+    w = TRUST._resonance_widths(r)[1]
     m = r.values["m_e"]
-    upper = [e.bin for e in OTIS._near_bound_entries(r) if e.variable == "m_e" && e.bound === :upper]
+    upper = [e.bin for e in TRUST._near_bound_entries(r) if e.variable == "m_e" && e.bound === :upper]
     say(@sprintf("%s: status %s, %d iterations; EPW chi2/n %.4f; m_e on its upper bound in %d bins %s", label, r.status,
         r.iterations, r.channels[1].chi2 / r.channels[1].npixels, length(upper), string(upper)))
     for j in eachindex(m)
         say(@sprintf("   bin %2d: m %.4f (truth %.4f)  FWHM %s%s", j, m[j], truth_m[j],
             isinf(w[j]) ? "-" : @sprintf("%.3f px", w[j]), r.near_bound["m_e"][j] ? "  [near a bound]" : ""))
     end
-    entries = OTIS._narrow_resonance_entries(r, OTIS._resonance_widths(r))
-    asked = isempty(entries) ? 1 : maximum(OTIS._recommended_subsamples(e.fwhm_px) for e in entries)
+    entries = TRUST._narrow_resonance_entries(r, TRUST._resonance_widths(r))
+    asked = isempty(entries) ? 1 : maximum(TRUST._recommended_subsamples(e.fwhm_px) for e in entries)
     say(@sprintf("   the width check: %d entries %s; it asks for %d", length(entries),
         join((@sprintf("bin %d %.3f px", e.bin, e.fwhm_px) for e in entries), ", "), asked))
     return asked
@@ -79,7 +79,7 @@ function epw_deck(sd_path; count=nothing)
     s = deepcopy(deck.sections)
     s["data"] = merge(s["data"], Dict{String,Any}("file" => sd_path))
     count === nothing || (s["instrument"]["pixel_integration"] = Dict{String,Any}("subsamples" => count))
-    return OTIS.Deck(deck.deck_version, s)
+    return TRUST.Deck(deck.deck_version, s)
 end
 
 function measurement_v(dir)
@@ -90,7 +90,7 @@ function measurement_v(dir)
     write_streak(sd_path, sd; source="epw_ablation_128x32")
     truth = Dict("logn" => log10.(_truth_row(problem_nt.trace, "n_e_cm3")),
         "T_e" => _truth_row(problem_nt.trace, "electrons.e.T_eV"), "m_e" => _truth_row(problem_nt.trace, "electrons.e.f.m"))
-    problem, optimizer, start = OTIS.build_problem(epw_deck(sd_path))
+    problem, optimizer, start = TRUST.build_problem(epw_deck(sd_path))
     say(@sprintf("   pixel pitch %.6f nm", (problem.experiment.lambda[2] - problem.experiment.lambda[1]) * 1e9))
 
     t = @elapsed begin
@@ -106,7 +106,7 @@ function measurement_v(dir)
     expt_t = unflatten(problem.experiment, problem.pspec, th_truth)
     wt = Float64[]
     for j in 1:nbins(expt_t.trace)
-        ws = OTIS._epw_resonance_widths(plasma(expt_t.trace, j), expt_t.probe, expt_t.collection, expt_t.lambda, true)
+        ws = TRUST._epw_resonance_widths(plasma(expt_t.trace, j), expt_t.probe, expt_t.collection, expt_t.lambda, true)
         push!(wt, isempty(ws) ? Inf : minimum(ws))
     end
     say("   the truth's widths: ", join((isinf(x) ? "-" : @sprintf("%.2f", x) for x in wt), " "))
@@ -115,7 +115,7 @@ function measurement_v(dir)
     t = @elapsed r1 = solve(_with_weight(problem, 2.0e-4), optimizer; start=start)
     say(@sprintf("   [time] count 1 from the deck's start: %.1f s", t))
     report("count 1, Lambda 2e-4, from the deck's start", r1, truth["m_e"])
-    pN, oN, sN = OTIS.build_problem(epw_deck(sd_path; count=asked))
+    pN, oN, sN = TRUST.build_problem(epw_deck(sd_path; count=asked))
     t = @elapsed rN = solve(_with_weight(pN, 2.0e-4), oN; start=sN)
     say(@sprintf("   [time] count %d from the deck's start: %.1f s", asked, t))
     report("count $asked, Lambda 2e-4, from the deck's start", rN, truth["m_e"])

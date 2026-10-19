@@ -5,8 +5,8 @@
 # as they would be without the warning (OQ-36, OQ-41).
 
 using Test
-using OTIS
-using OTIS: _near_bound, _near_bound_entries, _near_bound_fraction, _warn_near_bound
+using TRUST
+using TRUST: _near_bound, _near_bound_entries, _near_bound_fraction, _warn_near_bound
 using JLD2: jldopen
 
 # ------------------------------------------------------------------------------------------
@@ -40,7 +40,7 @@ end
 
 function _nb_deck(datafile, outdir; t_bounds="[50.0, 300.0]", t_init=200.0, time_varying="true")
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -96,14 +96,14 @@ const _NB_MSG = _NB_HEAD2 * "\n  T_D: bin 4 (lower bound 50.0); bin 3 (upper bou
         _nb_streak(datafile)
         deckpath = joinpath(dir, "pinned.toml")
         write(deckpath, _nb_deck(datafile, joinpath(dir, "pinned")))
-        problem, optimizer, start = OTIS.build_problem(read_deck(deckpath))
+        problem, optimizer, start = TRUST.build_problem(read_deck(deckpath))
         r = solve(problem, optimizer; start=start)
         @info "NB1 the pinned fit" status = r.status converged = r.converged iterations = r.iterations T_D = string(r.values["T_D"]) u_D = r.values["u_D"][1]
         @test r.converged
         @test r.near_bound["T_D"] == [false, false, true, true]
         @test r.near_bound["u_D"] == [false]
         @test _near_bound_entries(r) == [(variable="T_D", bin=3, bound=:upper), (variable="T_D", bin=4, bound=:lower)]
-        @test _near_bound_fraction(r) == 0.4 < OTIS.SATURATION_FRACTION
+        @test _near_bound_fraction(r) == 0.4 < TRUST.SATURATION_FRACTION
     end
 end
 
@@ -118,7 +118,7 @@ end
         deckpath = joinpath(dir, "pinned.toml")
         write(deckpath, _nb_deck(datafile, joinpath(dir, "pinned")))
         r = @test_logs (:warn, _NB_MSG) min_level=Base.CoreLogging.Warn fit(deckpath)
-        problem, optimizer, start = OTIS.build_problem(read_deck(deckpath))
+        problem, optimizer, start = TRUST.build_problem(read_deck(deckpath))
         s = solve(problem, optimizer; start=start)
         @test all(r.theta .=== s.theta)
         @test r.converged === s.converged && r.status === s.status && r.iterations == s.iterations

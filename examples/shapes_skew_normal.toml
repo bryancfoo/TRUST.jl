@@ -3,7 +3,7 @@
 # Run examples/shapes.jl once first (`julia --project=. examples/shapes.jl`) to write
 # runs/shapes_skew_normal_{epw,iaw}_streak.jld2.
 
-deck_version = "otis-deck-2"
+deck_version = "trust-deck-2"
 channels = ["epw", "iaw"]
 
 [[fit.regions]]

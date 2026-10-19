@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _logistic, _from_unconstrained, _to_unconstrained, _dx_dy, _near_bound
+using TRUST
+using TRUST: _logistic, _from_unconstrained, _to_unconstrained, _dx_dy, _near_bound
 import ForwardDiff
 
 # PM1 to PM26 against dev/phase3_instructions.md Section 4's Step 3.1 table (spec D3-D13),
@@ -392,7 +392,7 @@ end
     try
         ParameterSpec(expt; variables=[vshared],
             bindings=["shared" => "electrons.e.T_eV",
-                "shared" => (sidx, :sigma, 0, 1e-9 * OTIS._SIGMA_PER_FWHM, "fwhm_nm")])
+                "shared" => (sidx, :sigma, 0, 1e-9 * TRUST._SIGMA_PER_FWHM, "fwhm_nm")])
     catch e
         err = e
     end
@@ -461,7 +461,7 @@ end
         bindings=["T_e" => "electrons.e.T_eV"])
 
     # the ten-argument Binding constructor keeps compiling and sets channel = 1 (BF3, D32)
-    old_style = OTIS.Binding("x", 1, :effect, OTIS._DUMMY_LEAF_PATH, 0, 1, :scale, 0, 1.0, "")
+    old_style = TRUST.Binding("x", 1, :effect, TRUST._DUMMY_LEAF_PATH, 0, 1, :scale, 0, 1.0, "")
     @test old_style.channel == 1
 end
 

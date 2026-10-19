@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _full_residuals, _objective_and_gradient!, _regularizer_value, _value_table,
+using TRUST
+using TRUST: _full_residuals, _objective_and_gradient!, _regularizer_value, _value_table,
             _near_bound, jtvp!
 using REPL: REPL  # gives Base.Docs.doc its methods (empty otherwise); see OB7 below
 

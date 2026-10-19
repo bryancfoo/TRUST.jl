@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _scale_bins
+using TRUST
+using TRUST: _scale_bins
 
 # Step 4.I.2: the per-bin amplitude (Phase 4.I spec D14 to D18, D20; OQ-59 item 1), gated "per-bin
 # amplitude". PA1 to PA4: the effect, measure column by column and the refusals; PA5 to PA9, which
@@ -80,7 +80,7 @@ end
     working = Experiment(; trace=pspec.trace, probe=expt.probe, collection=expt.collection,
         lambda_m=expt.lambda, effects=expt.effects)
     e = unflatten(working, pspec, flatten(pspec, ["a" => _PA_A]))
-    @test all(e.effects[si].scale .=== [OTIS._from_unconstrained(OTIS._to_unconstrained(x, 1e-5, 1e-2), 1e-5, 1e-2) for x in _PA_A])
+    @test all(e.effects[si].scale .=== [TRUST._from_unconstrained(TRUST._to_unconstrained(x, 1e-5, 1e-2), 1e-5, 1e-2) for x in _PA_A])
 
     msg = "\"a\" is time-varying and cannot be bound to an instrument parameter other than Sensitivity's scale"
     @test_throws msg ParameterSpec(expt; variables=[a], bindings=["a" => (bi, :level)])

@@ -13,7 +13,7 @@
 # fits (the same streak examples/iaw_shock.toml fits). The two decks are compared at cut-down
 # (128 x 32) by the slow tier's FR9 and by examples/diagnostics/shock_piecewise.jl.
 
-deck_version = "otis-deck-2"
+deck_version = "trust-deck-2"
 
 [data]
 file = "runs/iaw_shock_streak.jld2"

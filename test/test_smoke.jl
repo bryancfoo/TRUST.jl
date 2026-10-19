@@ -1,14 +1,14 @@
 using Test
-using OTIS
+using TRUST
 using REPL: REPL  # gives Base.Docs.doc its methods (empty otherwise); see HS1 below
 
 @testset "smoke" begin
-    @test OTIS isa Module
+    @test TRUST isa Module
 end
 
 @testset "HS1: every exported name has a docstring" begin
-    for nm in names(OTIS)
-        doc_str = string(Base.Docs.doc(getfield(OTIS, nm)))
+    for nm in names(TRUST)
+        doc_str = string(Base.Docs.doc(getfield(TRUST, nm)))
         @test !isempty(doc_str)
         @test !occursin("No documentation found", doc_str)
     end

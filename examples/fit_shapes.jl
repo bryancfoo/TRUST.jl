@@ -13,10 +13,10 @@
 #
 # The staged fit is the deck's own since Phase 4.F (spec D8): the copy is also given procedure =
 # "staged" in code (with_staged_procedure: each stage with the deck's own Levenberg-Marquardt, T_D
-# from the IAW stage), and OTIS._staged_fit runs it -- the function fit(deck) runs, called here
+# from the IAW stage), and TRUST._staged_fit runs it -- the function fit(deck) runs, called here
 # because the uncertainty reports below need its problem, which fit(deck) does not return.
 
-using OTIS
+using TRUST
 using Statistics: median
 
 include(joinpath(@__DIR__, "problems.jl"))
@@ -47,7 +47,7 @@ function _fit_one_shape(spec)
     deckpath = joinpath(outdir, "deck.toml")
     write(deckpath, text)
 
-    t_staged = @elapsed st = OTIS._staged_fit(read_deck(deckpath))
+    t_staged = @elapsed st = TRUST._staged_fit(read_deck(deckpath))
     @info "fit_shapes[$nm]: staged fit done" elapsed_s = t_staged decrease = st.decreases[end] status = st.result.status
     flush(stderr)
     for c in st.result.channels

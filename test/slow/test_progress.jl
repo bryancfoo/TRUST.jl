@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 
 # Step 4.K.1's slow row (Phase 4.K spec D13), gated "progress (slow)": PG9 fits the staged fixture's
 # two-channel deck twice through fit(deck), with the progress lines off and on, so it is kept out of the

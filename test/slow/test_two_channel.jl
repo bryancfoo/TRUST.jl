@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _near_bound_fraction
+using TRUST
+using TRUST: _near_bound_fraction
 using Statistics: median
 
 # TS1 against dev/phase4A_instructions.md Section 9.3 (spec D41, chunk 8), gated "two-channel
@@ -74,7 +74,7 @@ function _ts_two_channel()
         text_joint = replace(text, "runs/two_channel/joint" => replace(joint_dir, "\\" => "/"))
         joint_deck_path = joinpath(dir, "joint_deck.toml")
         write(joint_deck_path, text_joint)
-        joint_problem, joint_opt, joint_start = OTIS.build_problem(read_deck(joint_deck_path))
+        joint_problem, joint_opt, joint_start = TRUST.build_problem(read_deck(joint_deck_path))
         joint = solve(joint_problem, joint_opt; start=joint_start)
         @info "TS1: joint fit done" elapsed_s = joint.elapsed status = joint.status
         flush(stderr)
@@ -85,7 +85,7 @@ function _ts_two_channel()
         text_epw = replace(text_epw, "runs/two_channel/epw" => replace(epw_dir, "\\" => "/"))
         epw_deck_path = joinpath(dir, "epw_deck.toml")
         write(epw_deck_path, text_epw)
-        epw_problem, epw_opt, epw_start = OTIS.build_problem(read_deck(epw_deck_path))
+        epw_problem, epw_opt, epw_start = TRUST.build_problem(read_deck(epw_deck_path))
         epw = solve(epw_problem, epw_opt; start=epw_start)
         @info "TS1: EPW-only fit done" elapsed_s = epw.elapsed status = epw.status
         flush(stderr)
@@ -98,7 +98,7 @@ function _ts_two_channel()
         text_iaw = replace(text_iaw, "runs/two_channel/iaw" => replace(iaw_dir, "\\" => "/"))
         iaw_deck_path = joinpath(dir, "iaw_deck.toml")
         write(iaw_deck_path, text_iaw)
-        iaw_problem, iaw_opt, iaw_start = OTIS.build_problem(read_deck(iaw_deck_path))
+        iaw_problem, iaw_opt, iaw_start = TRUST.build_problem(read_deck(iaw_deck_path))
         iaw = solve(iaw_problem, iaw_opt; start=iaw_start)
         @info "TS1: IAW-only fit done" elapsed_s = iaw.elapsed status = iaw.status
         flush(stderr)

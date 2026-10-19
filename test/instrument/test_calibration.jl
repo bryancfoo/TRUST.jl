@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _CalibratedAxis, _chain_class, _convolution_matrix
+using TRUST
+using TRUST: _CalibratedAxis, _chain_class, _convolution_matrix
 import ForwardDiff
 
 # WC1 to WC12 against dev/phase4A_instructions.md Section 5's Test table (spec D3-D5, D8), gated
@@ -44,7 +44,7 @@ end
 @testset "WC2: the traits" begin
     e = WavelengthCalibration(lambda_offset_nm=0.02, dispersion_scale=0.01)
     @test stage(e) == :kernel
-    @test OTIS._chain_order(e) == 1
+    @test TRUST._chain_order(e) == 1
     @test islinear(e) == false
     @test _chain_class(e) == :WavelengthCalibration
 end

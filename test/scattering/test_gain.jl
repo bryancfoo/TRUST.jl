@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _convective_gain, GAIN_SERIES_CUTOFF, SIN_THETA_MIN
+using TRUST
+using TRUST: _convective_gain, GAIN_SERIES_CUTOFF, SIN_THETA_MIN
 import ForwardDiff
 
 include(joinpath(@__DIR__, "..", "fixtures", "rf1_reference.jl"))
@@ -77,7 +77,7 @@ const CG_LAMBDA_RED = collect(range(264.0e-9, 270e-9; length=64))
     L = diameter / sin(theta)
     target_gl = 0.1
     a0_sq_needed = target_gl / abs(gpa_red * L)
-    intensity_needed = a0_sq_needed / (OTIS.A0_SQ_COEFFICIENT * lam_i^2)
+    intensity_needed = a0_sq_needed / (TRUST.A0_SQ_COEFFICIENT * lam_i^2)
     intensity_wcm2 = intensity_needed / 1e4
 
     probe = _cg_probe(intensity_wcm2=intensity_wcm2, diameter_um=100.0)
@@ -107,7 +107,7 @@ end
     L = diameter / sin(collection.theta)
     target_gl = 0.05
     a0_sq_needed = target_gl / abs(gpa * L)
-    intensity_needed = a0_sq_needed / (OTIS.A0_SQ_COEFFICIENT * lam_i^2)
+    intensity_needed = a0_sq_needed / (TRUST.A0_SQ_COEFFICIENT * lam_i^2)
     probe = _cg_probe(intensity_wcm2=intensity_needed / 1e4, diameter_um=100.0)
 
     P_conv = spectrum(p, probe, collection, lambdas; gain=:convective)
@@ -144,7 +144,7 @@ end
 
     probe_ok = _cg_probe(intensity_wcm2=1e15, diameter_um=100.0)
     collection_0 = Collection(theta_deg=0, k_model=:approximate)
-    @test_throws "sin(theta) is below SIN_THETA_MIN" OTIS._convective_gain(
+    @test_throws "sin(theta) is below SIN_THETA_MIN" TRUST._convective_gain(
         :convective, (epsilon=1.0 + 0im, chi_e=0.1 + 0.01im), 1e7, 1e7, probe_ok, collection_0)
 
     @test_throws "spectrum: gain must be :none, :convective or :weak" spectrum(
@@ -156,7 +156,7 @@ end
     collection = _cg_collection()
     probe = _cg_probe(intensity_wcm2=1e15, diameter_um=100.0)
     lam = lambda_to_si(250.0, :lambda_nm)
-    _sa() = OTIS._spectrum_at(p, probe, collection, lam, true, :convective)
+    _sa() = TRUST._spectrum_at(p, probe, collection, lam, true, :convective)
     _sa()
     @test (@allocated _sa()) == 0
 
@@ -166,7 +166,7 @@ end
     function stokes_peak_of_Te(Te)
         pp = Plasma(n_e_cm3=5e19, electrons=(electrons(T_eV=Te, f=SuperGaussian(3.0)),),
             ions=(ion(mass_amu=2.014, charge=1, T_eV=250),))
-        return OTIS._spectrum_at(pp, probe, collection, lam_red, true, :convective)
+        return TRUST._spectrum_at(pp, probe, collection, lam_red, true, :convective)
     end
     ad = ForwardDiff.derivative(stokes_peak_of_Te, 500.0)
     fd = (stokes_peak_of_Te(500.0 * (1 + h)) - stokes_peak_of_Te(500.0 * (1 - h))) / (2h * 500.0)
@@ -184,8 +184,8 @@ end
     collection = Collection(theta_deg=60, k_model=:exact)
     for s in (1.0, -1.0)
         probe_i = ProbeBeam(lambda_probe_nm=263.25, intensity_wm2=ForwardDiff.Dual(0.0, s), diameter_um=100.0)
-        @test_throws "a0_sq == 0" OTIS._convective_gain(:convective, nothing, 1.0, 1.0, probe_i, collection)
+        @test_throws "a0_sq == 0" TRUST._convective_gain(:convective, nothing, 1.0, 1.0, probe_i, collection)
         probe_d = ProbeBeam(lambda_probe_nm=263.25, intensity_wcm2=1e15, diameter_m=ForwardDiff.Dual(0.0, s))
-        @test_throws "diameter == 0" OTIS._convective_gain(:convective, nothing, 1.0, 1.0, probe_d, collection)
+        @test_throws "diameter == 0" TRUST._convective_gain(:convective, nothing, 1.0, 1.0, probe_d, collection)
     end
 end

@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _bin_kernel!, _make_cache, BinCache, _streak_eltype, _convolution_matrix
+using TRUST
+using TRUST: _bin_kernel!, _make_cache, BinCache, _streak_eltype, _convolution_matrix
 import ForwardDiff
 
 _xp_plasma(; f_electron=Maxwellian()) = Plasma(
@@ -66,7 +66,7 @@ end
     @test length.(axes(expt)) == size(measure(expt))
 end
 
-_chain_order_wrap(e) = OTIS._chain_order(e)
+_chain_order_wrap(e) = TRUST._chain_order(e)
 
 @testset "XP5: canonical order" begin
     template = _xp_plasma()
@@ -131,7 +131,7 @@ end
     end
     Klam = _convolution_matrix(e_spec.kernel, lambda64)
     Kt = _convolution_matrix(e_temp.kernel, t_ns .* 1e-9)
-    B = OTIS._prepare(e_poly, lambda64, t_ns .* 1e-9)
+    B = TRUST._prepare(e_poly, lambda64, t_ns .* 1e-9)
     oracle = B .+ e_gain.scale .* (Klam * Pkernel * transpose(Kt))
     @test isapprox(M, oracle; rtol=1e-12)
 end

@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _leaf_si_path
+using TRUST
+using TRUST: _leaf_si_path
 using Random: Xoshiro
 using Statistics: median
 
@@ -138,7 +138,7 @@ function _uc_deck_text(datafile::AbstractString, outdir::AbstractString; regular
     ]
     """ : ""
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(_uc_path(datafile))"
@@ -200,7 +200,7 @@ function _uc_realization(dir::AbstractString, r::Integer)
     deckpath = joinpath(dir, "uc_deck.toml")
     write(deckpath, _uc_deck_text(datafile, joinpath(dir, "out")))
     deck = read_deck(deckpath)
-    problem, opt, _ = OTIS.build_problem(deck)
+    problem, opt, _ = TRUST.build_problem(deck)
 
     truth_ns = t_from_si.(problem.pspec.axis, :t_ns)
     start = flatten(problem.pspec, ["T_D" => _uc_TD.(truth_ns), "u_D" => _uc_uD.(truth_ns)])
@@ -212,7 +212,7 @@ function _uc_realization(dir::AbstractString, r::Integer)
     deckpath_unreg = joinpath(dir, "uc_deck_unreg.toml")
     write(deckpath_unreg, _uc_deck_text(datafile, joinpath(dir, "out_unreg"); regularizer=false))
     deck_unreg = read_deck(deckpath_unreg)
-    problem_unreg, opt_unreg, _ = OTIS.build_problem(deck_unreg)
+    problem_unreg, opt_unreg, _ = TRUST.build_problem(deck_unreg)
     fit0_unreg = solve(problem_unreg, opt_unreg; start=theta_star)
     pol_unreg = polish(problem_unreg, fit0_unreg)
     lap_unreg = laplace(problem_unreg, pol_unreg.result.theta)

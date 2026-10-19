@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: jvp!, jtvp!, jacobian, _gauss_newton_diagonal, _gauss_newton_floor, PRECOND_FLOOR_REL
+using TRUST
+using TRUST: jvp!, jtvp!, jacobian, _gauss_newton_diagonal, _gauss_newton_floor, PRECOND_FLOOR_REL
 
 # CV1, CV2 against dev/phase3C_instructions.md Section 4's Test table (spec D13, D16), and CV3
 # against Section 6's Test table (spec D37), gated "optimizer diagnostics". CV1/CV2 use P1,

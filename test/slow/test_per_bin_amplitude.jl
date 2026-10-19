@@ -1,10 +1,10 @@
 using Test
-using OTIS
-using OTIS: jvp!, jtvp!, _gauss_newton_diagonal, _kernel_effects, _widen_trace, _make_cache, _jacobian_bin!,
+using TRUST
+using TRUST: jvp!, jtvp!, _gauss_newton_diagonal, _kernel_effects, _widen_trace, _make_cache, _jacobian_bin!,
     JACOBIAN_CHUNK, _collect_kernel_bindings
 using LinearAlgebra: dot
 import Random
-const ForwardDiff = OTIS.ForwardDiff   # test/slow's environment has no ForwardDiff of its own
+const ForwardDiff = TRUST.ForwardDiff   # test/slow's environment has no ForwardDiff of its own
 
 # Step 4.I.2's slow rows (Phase 4.I spec D20, D21), gated "per-bin amplitude (slow)": PA5 builds a
 # deck's problems on a chain nothing earlier builds; PA6 and PA7 compile the brute-force Jacobian and
@@ -30,24 +30,24 @@ pin_blas_threads(_PAS_NBLAS)
         perbin(raw) = (raw["channel"]["epw"]["instrument"]["sensitivity"]["scale"] = "a_epw";
             raw["fit"]["variables"]["a_epw"] = Dict("bounds" => [1.0e-5, 1.0e-2], "init" => 2.0e-4, "time_varying" => true))
         plain = _sh_edit(notirf, _st_text(dir))
-        p0, _, _ = OTIS.build_problem(read_deck(_st_write(dir, "plain.toml", plain)))
+        p0, _, _ = TRUST.build_problem(read_deck(_st_write(dir, "plain.toml", plain)))
         text = _sh_edit(raw -> (notirf(raw); perbin(raw)), _st_text(dir))
         deck = read_deck(_st_write(dir, "pa.toml", text))
-        problem, _, start = OTIS.build_problem(deck)
+        problem, _, start = TRUST.build_problem(deck)
         @test problem.pspec.ntheta == p0.pspec.ntheta + 4
         epw = unflatten(problem.channels[1].experiment, problem.pspec, start; channel=1)
         s = only(e for e in epw.effects if e isa Sensitivity)
         @test s.scale isa Vector{Float64} && length(s.scale) == 4 && all(isapprox.(s.scale, 2.0e-4; rtol=1e-14))
         @test read_deck(_st_write(dir, "eff.toml", effective_deck(deck, problem, LBFGS()))) == deck
 
-        @test_throws "\"a_epw\" is a per-bin Sensitivity scale, which cannot stand beside a TemporalIRF" OTIS.build_problem(
+        @test_throws "\"a_epw\" is a per-bin Sensitivity scale, which cannot stand beside a TemporalIRF" TRUST.build_problem(
             read_deck(_st_write(dir, "tirf.toml", _sh_edit(perbin, _st_text(dir)))))
         width = _sh_edit(_st_text(dir)) do raw
             notirf(raw)
             raw["channel"]["iaw"]["instrument"]["spectral_irf"]["fwhm_nm"] = "w"
             raw["fit"]["variables"]["w"] = Dict("bounds" => [0.01, 0.2], "init" => 0.08, "time_varying" => true)
         end
-        @test_throws "\"w\" is time-varying and cannot be bound to an instrument parameter other than Sensitivity's scale" OTIS.build_problem(
+        @test_throws "\"w\" is time-varying and cannot be bound to an instrument parameter other than Sensitivity's scale" TRUST.build_problem(
             read_deck(_st_write(dir, "w.toml", width)))
     end
 end
@@ -119,13 +119,13 @@ function _pa_dual_pass_bytes(c::Int)
     for (gk, i) in enumerate(kernel_global_var)
         kernel_global_of_var[i] = gk
     end
-    DFT = ForwardDiff.Dual{OTIS._JacobianTag,Float64,JACOBIAN_CHUNK}
+    DFT = ForwardDiff.Dual{TRUST._JacobianTag,Float64,JACOBIAN_CHUNK}
     work_trace = _widen_trace(pspec.trace, DFT)
     vals = Vector{DFT}(undef, pspec.nslots)
     col_cache = _make_cache(DFT, nlambda)
     block = Matrix{Float64}(undef, nlambda, length(pspec.bin_entries[2]))
     kernel_globals = Array{Float64,3}(undef, nlambda, 4, G)
-    flag = OTIS._prefactor_flag(expt.prefactor)
+    flag = TRUST._prefactor_flag(expt.prefactor)
     _jb!() = _jacobian_bin!(block, kernel_globals, 2, work_trace, vals, col_cache, pspec, nvar, G,
         kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings, expt.probe,
         expt.collection, expt.lambda, flag, theta, expt.gain)
@@ -190,7 +190,7 @@ end
 @testset "PA9: gn_decrease, polish, laplace, calibration_scan and slice_scatter with a per-bin amplitude" begin
     result = _PA_RAMP.per_bin
     deck = read_deck(_PA_RAMP.per_bin_path)
-    problem, _, _ = OTIS.build_problem(deck)
+    problem, _, _ = TRUST.build_problem(deck)
     theta = result.theta
     @test gn_decrease(problem, theta) <= 1e-6
     pol = polish(problem, result; tol=1e-6)

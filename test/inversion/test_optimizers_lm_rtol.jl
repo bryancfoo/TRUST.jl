@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _eval_all!, _warn_iteration_cap
+using TRUST
+using TRUST: _eval_all!, _warn_iteration_cap
 using Random: Xoshiro, randn
 import TOML
 
@@ -34,7 +34,7 @@ _ft_path(p::AbstractString) = replace(p, "\\" => "/")
 
 function _ft_deck_text(outdir::AbstractString, optimizer::AbstractString)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(_ft_path(_FT_DATA))"
@@ -91,7 +91,7 @@ function _ft_deck(name::AbstractString, optimizer::AbstractString)
 end
 
 const _FT_LM = "procedure = \"levenberg_marquardt\""
-const _FT_BUILT = OTIS.build_problem(read_deck(_ft_deck("base.toml", _FT_LM)))
+const _FT_BUILT = TRUST.build_problem(read_deck(_ft_deck("base.toml", _FT_LM)))
 const _FT_P = _FT_BUILT[1]
 const _FT_START = _FT_BUILT[3]
 
@@ -252,7 +252,7 @@ end
         "$_FT_LM\nlevenberg_marquardt = { lm_rtol = 1e-6, lm_rtol_window = 20 }"))
     lm = deck.sections["optimizer"]["levenberg_marquardt"]
     @test lm["lm_rtol"] === 1e-6 && lm["lm_rtol_window"] === 20
-    problem, opt, _ = OTIS.build_problem(deck)
+    problem, opt, _ = TRUST.build_problem(deck)
     @test opt isa LevenbergMarquardt && opt.lm_rtol === 1e-6 && opt.lm_rtol_window === 20
     eff = effective_deck(deck, problem, opt)
     efflm = TOML.parse(eff)["optimizer"]["levenberg_marquardt"]
@@ -263,7 +263,7 @@ end
 
     # a table without the keys: the defaults in the validated table and the effective deck
     deck0 = read_deck(_ft_deck("nokeys.toml", "$_FT_LM\nlevenberg_marquardt = { iterations = 3 }"))
-    p0, o0, _ = OTIS.build_problem(deck0)
+    p0, o0, _ = TRUST.build_problem(deck0)
     @test deck0.sections["optimizer"]["levenberg_marquardt"]["lm_rtol"] === 0.0
     @test deck0.sections["optimizer"]["levenberg_marquardt"]["lm_rtol_window"] === 50
     eff0 = TOML.parse(effective_deck(deck0, p0, o0))["optimizer"]["levenberg_marquardt"]
@@ -272,7 +272,7 @@ end
     # a TOML integer reads by the Float64 rule, and the effective deck writes it as a float
     deckz = read_deck(_ft_deck("zero.toml", "$_FT_LM\nlevenberg_marquardt = { lm_rtol = 0 }"))
     @test deckz.sections["optimizer"]["levenberg_marquardt"]["lm_rtol"] === 0.0
-    pz, oz, _ = OTIS.build_problem(deckz)
+    pz, oz, _ = TRUST.build_problem(deckz)
     @test occursin("lm_rtol = 0.0\n", effective_deck(deckz, pz, oz))
 
     # refused at read time, with the section, the key and the value

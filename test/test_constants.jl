@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: ACCEPTED_UNITS, _basefloat
+using TRUST
+using TRUST: ACCEPTED_UNITS, _basefloat
 using ForwardDiff: Dual
 
 @testset "boundary units: round trip" begin
@@ -11,8 +11,8 @@ using ForwardDiff: Dual
     # own -- they reuse lambda_to_si/theta_to_si -- so they are round-tripped separately below.
     for q in quantities
         row = getfield(ACCEPTED_UNITS, q)
-        to_si = getfield(OTIS, Symbol(q, "_to_si"))
-        from_si = getfield(OTIS, Symbol(q, "_from_si"))
+        to_si = getfield(TRUST, Symbol(q, "_to_si"))
+        from_si = getfield(TRUST, Symbol(q, "_from_si"))
         for key in keys(row)
             for mag in (1e-6, 1.0, 1e6)
                 @test isapprox(from_si(to_si(mag, key), key), mag; rtol = 1e-14)

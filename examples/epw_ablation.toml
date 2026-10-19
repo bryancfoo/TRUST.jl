@@ -5,7 +5,7 @@
 # marks "Relative" (logn, T_e), unit for those it gives as 1.0 (m_e); the weight follows Table I
 # too (Step 3.C.6a, D5).
 
-deck_version = "otis-deck-2"
+deck_version = "trust-deck-2"
 
 [data]
 file = "runs/epw_ablation_streak.jld2"

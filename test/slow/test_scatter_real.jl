@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 
 # Step 4.N.1's slow rows (Phase 4.N spec D8; OQ-64 (d) to (f)), gated "scatter real deck (slow)": SI5 to
 # SI7 scatter the readable fixture's RD deck (two cameras, u_D on the interval "late" = coarse bins 2 and
@@ -28,7 +28,7 @@ const _SIS_SHORT = write_start(joinpath(_SIS_DIR, "short.jld2"); axis_ns=[0.19, 
 function _sis_fit(name, hold)
     deck = read_deck(_rd_write(_SIS_DIR, "$name.toml",
         _rd_deck_text(_SIS_PA, _SIS_PB, hold, joinpath(_SIS_DIR, "out_$name"))))
-    problem = first(OTIS.build_problem(deck))
+    problem = first(TRUST.build_problem(deck))
     return deck, problem, polish(problem, _rd_fit(deck)).result
 end
 
@@ -92,7 +92,7 @@ end
     sc = _SIS_SCATTER
     hold = read_start(_SIS_HOLD)
     for j in 1:12
-        @test sc.held["T_e"][j] === OTIS._interpolate_series(hold.axis, hold.values["T_e"], sc.t_fine[j])
+        @test sc.held["T_e"][j] === TRUST._interpolate_series(hold.axis, hold.values["T_e"], sc.t_fine[j])
     end
     sc2, r2 = _SIS_SCATTER_SHORT, _SIS_POL_SHORT
     short = read_start(_SIS_SHORT)
@@ -101,27 +101,27 @@ end
     for j in 1:12
         k = sc2.coarse_bin[j]
         want = j in outside ? r2.values["T_e"][k] :
-               OTIS._interpolate_series(short.axis, short.values["T_e"], sc2.t_fine[j])
+               TRUST._interpolate_series(short.axis, short.values["T_e"], sc2.t_fine[j])
         @test sc2.held["T_e"][j] === want
     end
     @test sc2.held["T_e"][1] === sc2.held["T_e"][2] != sc2.held["T_e"][3]
 end
 
 # ------------------------------------------------------------------------------------------
-# SI7: the readable file of the scatter: data, models, chi2, the new datasets, otis-readable-2 (OQ-64 (f))
+# SI7: the readable file of the scatter: data, models, chi2, the new datasets, trust-readable-2 (OQ-64 (f))
 # ------------------------------------------------------------------------------------------
 
 @testset "SI7: write_readable with the scatter: the windows' data and models, the quantiles, held, the version" begin
     sc, s = _SIS_SCATTER, _SIS_DECK.sections
-    chan_list = OTIS._channel_list(s)
-    raw, _, _ = OTIS._read_channels(s, chan_list, true)
-    regions = OTIS._build_averaging_regions(s["fit_regions"])
+    chan_list = TRUST._channel_list(s)
+    raw, _, _ = TRUST._read_channels(s, chan_list, true)
+    regions = TRUST._build_averaging_regions(s["fit_regions"])
     fine = [AveragingRegion(rg.lo, rg.hi, rg.nbins * sc.m[i], "") for (i, rg) in enumerate(regions)]
-    windows = OTIS._average_channels(raw, chan_list, fine)
+    windows = TRUST._average_channels(raw, chan_list, fine)
     mktempdir() do dir
         path = write_readable(joinpath(dir, "sc.h5"), _SIS_POL, _SIS_PROBLEM; scatter=sc)
-        OTIS.jldopen(path, "r") do f
-            @test f["layout_version"] == "otis-readable-2"
+        TRUST.jldopen(path, "r") do f
+            @test f["layout_version"] == "trust-readable-2"
             @test Set(first.(_rd_leaves(f))) == _rd_expected_keys(_SIS_POL, ("a", "b"); deck=false, gn=false,
                 scatter=sc)
             for (c, name) in enumerate(("a", "b"))
@@ -146,12 +146,12 @@ end
             for (j, lo, hi, uD_free) in ((2, 0.1, 0.2, false), (7, 0.6, 0.7, true))
                 wdir = mkpath(joinpath(dir, "w$j"))
                 text = _sis_window_text(lo, hi, sc.held["T_e"][j], uD_free, wdir)
-                p = first(OTIS.build_problem(read_deck(_rd_write(wdir, "w.toml", text))))
+                p = first(TRUST.build_problem(read_deck(_rd_write(wdir, "w.toml", text))))
                 vals = uD_free ? ["T_D" => sc.values["T_D"][j], "u_D" => sc.values["u_D"][j]] :
                        ["T_D" => sc.values["T_D"][j]]
                 theta = flatten(p.pspec, vals)
                 for (c, name) in enumerate(("a", "b"))
-                    ch = OTIS._channel_problem(p, c)
+                    ch = TRUST._channel_problem(p, c)
                     m = measure(unflatten(ch.experiment, p.pspec, theta; channel=c))
                     @test isapprox(f["scatter/channels/$name/model"][:, j], vec(m); rtol=1e-12)
                 end

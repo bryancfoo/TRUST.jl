@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 import ForwardDiff
 using Random
 
@@ -19,20 +19,20 @@ end
 @testset "BG2: PolynomialBackground's reference and scale" begin
     lambda = collect(range(235e-9, 255e-9; length=17))
     e1 = PolynomialBackground(coefficients=(1.0,))
-    B1 = OTIS._prepare(e1, lambda, [0.0])
+    B1 = TRUST._prepare(e1, lambda, [0.0])
     @test isapprox(B1[1], 1.0; atol=1e-15)
     @test isapprox(B1[end], 1.0; atol=1e-15)
 
     econst = ConstantBackground(level=5.0)
     epoly = PolynomialBackground(coefficients=(5.0,))
-    Bpoly = OTIS._prepare(epoly, lambda, [0.0])
+    Bpoly = TRUST._prepare(epoly, lambda, [0.0])
     P = zeros(length(lambda), 1)
     r1 = apply!(copy(P), P, econst, nothing)
     r2 = apply!(copy(P), P, epoly, Bpoly)
     @test r1 == r2
 
     elin = PolynomialBackground(coefficients=(0.0, 1.0))
-    Blin = OTIS._prepare(elin, lambda, [0.0])
+    Blin = TRUST._prepare(elin, lambda, [0.0])
     lam0 = (lambda[1] + lambda[end]) / 2
     dlam = (lambda[end] - lambda[1]) / 2
     s = (lambda .- lam0) ./ dlam
@@ -72,7 +72,7 @@ end
     @test isapprox(lhs1 .- rhs1, (1 - a - b) .* B1; atol=1e-13)
 
     e2 = PolynomialBackground(coefficients=(1.0, 0.5))
-    op2 = OTIS._prepare(e2, lambda, [0.0])
+    op2 = TRUST._prepare(e2, lambda, [0.0])
     B2 = repeat(op2, 1, size(P, 2))
     lhs2 = apply!(copy(a .* P .+ b .* Q), a .* P .+ b .* Q, e2, op2)
     rhs2 = a .* apply!(copy(P), P, e2, op2) .+ b .* apply!(copy(Q), Q, e2, op2)
@@ -132,12 +132,12 @@ end
     s = (lambda .- lam0) ./ dlam
 
     rat11 = RationalBackground(numerator=(2.0, 0.5), denominator=(0.4,))
-    op11 = OTIS._prepare(rat11, lambda, [0.0])
+    op11 = TRUST._prepare(rat11, lambda, [0.0])
     oracle11 = (2.0 .+ 0.5 .* s) ./ (1 .+ 0.4 .* s)
     @test isapprox(op11, oracle11; rtol=1e-14)
 
     rat21 = RationalBackground(numerator=(2.0, 0.5, -0.3), denominator=(0.4,))
-    op21 = OTIS._prepare(rat21, lambda, [0.0])
+    op21 = TRUST._prepare(rat21, lambda, [0.0])
     oracle21 = (2.0 .+ 0.5 .* s .- 0.3 .* s .^ 2) ./ (1 .+ 0.4 .* s)
     @test isapprox(op21, oracle21; rtol=1e-14)
 end
@@ -146,8 +146,8 @@ end
     lambda = collect(range(235e-9, 255e-9; length=64))
     rat = RationalBackground(numerator=(1.0, 2.0, 3.0), denominator=())
     poly = PolynomialBackground(coefficients=(1.0, 2.0, 3.0))
-    op_rat = OTIS._prepare(rat, lambda, [0.0])
-    op_poly = OTIS._prepare(poly, lambda, [0.0])
+    op_rat = TRUST._prepare(rat, lambda, [0.0])
+    op_poly = TRUST._prepare(poly, lambda, [0.0])
     @test all(op_rat .=== op_poly)
 end
 
@@ -156,7 +156,7 @@ end
     # (lambda[1]-lam0)/dlam is not exactly -1.0 in Float64 at these wavelength magnitudes.
     lambda = collect(range(235e-9, 255e-9; length=129))   # odd length: exact middle bin
     rat = RationalBackground(numerator=(0.0, 1.0), denominator=())   # B = s
-    op = OTIS._prepare(rat, lambda, [0.0])
+    op = TRUST._prepare(rat, lambda, [0.0])
     @test isapprox(op[1], -1.0; atol=1e-14)
     @test isapprox(op[(end+1)÷2], 0.0; atol=1e-14)
     @test isapprox(op[end], 1.0; atol=1e-14)
@@ -165,10 +165,10 @@ end
 @testset "RB4: the pole guard" begin
     lambda = collect(range(235e-9, 255e-9; length=128))
     rat_pole = RationalBackground(numerator=(1.0,), denominator=(1.2,))   # 1+1.2s = 0 at s=-1/1.2, inside [-1,1]
-    @test_throws "pole" OTIS._prepare(rat_pole, lambda, [0.0])
+    @test_throws "pole" TRUST._prepare(rat_pole, lambda, [0.0])
 
     rat_ok = RationalBackground(numerator=(1.0,), denominator=(0.5,))   # min |1+0.5s| = 0.5 at s=-1
-    op = OTIS._prepare(rat_ok, lambda, [0.0])
+    op = TRUST._prepare(rat_ok, lambda, [0.0])
     @test all(isfinite, op)
 end
 
@@ -181,7 +181,7 @@ end
     matlab_form = (p1 .* s .+ p2) ./ (s .+ q1)
 
     rat = RationalBackground(numerator=(p2 / q1, p1 / q1), denominator=(1 / q1,))
-    op = OTIS._prepare(rat, lambda, [0.0])
+    op = TRUST._prepare(rat, lambda, [0.0])
     @test isapprox(op, matlab_form; rtol=1e-14)
 end
 
@@ -193,7 +193,7 @@ end
     a, b = 0.37, -1.9
 
     e = RationalBackground(numerator=(1.0, 0.5), denominator=(0.3,))
-    op = OTIS._prepare(e, lambda, [0.0])
+    op = TRUST._prepare(e, lambda, [0.0])
     B = repeat(op, 1, size(P, 2))
     lhs = apply!(copy(a .* P .+ b .* Q), a .* P .+ b .* Q, e, op)
     rhs = a .* apply!(copy(P), P, e, op) .+ b .* apply!(copy(Q), Q, e, op)

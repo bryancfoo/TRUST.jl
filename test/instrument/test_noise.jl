@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _rand_poisson, _point_spread
+using TRUST
+using TRUST: _rand_poisson, _point_spread
 using Random: Xoshiro
 using Statistics: mean, var
 

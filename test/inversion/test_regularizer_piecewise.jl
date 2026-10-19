@@ -5,8 +5,8 @@
 # examples/diagnostics/shock_piecewise.jl (Phase 4.C spec D25).
 
 using Test
-using OTIS
-using OTIS: _regularizer_value
+using TRUST
+using TRUST: _regularizer_value
 using Random: Xoshiro
 
 const _PW_EXAMPLES = joinpath(@__DIR__, "..", "..", "examples")
@@ -115,14 +115,14 @@ function _pw_deck_on(path, sd_path)
     deck = read_deck(path)
     sections = deepcopy(deck.sections)
     sections["data"] = merge(sections["data"], Dict{String,Any}("file" => sd_path))
-    return OTIS.Deck(deck.deck_version, sections)
+    return TRUST.Deck(deck.deck_version, sections)
 end
 
 @testset "PW4: the piecewise deck builds, its gap at bin 10, theta laid out as the shock deck's" begin
     mktempdir() do dir
         sd_path = _pw_small_streak(dir)
-        pw, _, _ = OTIS.build_problem(_pw_deck_on(_PW_DECK, sd_path))
-        wh, _, _ = OTIS.build_problem(_pw_deck_on(_PW_WHOLE_DECK, sd_path))
+        pw, _, _ = TRUST.build_problem(_pw_deck_on(_PW_DECK, sd_path))
+        wh, _, _ = TRUST.build_problem(_pw_deck_on(_PW_WHOLE_DECK, sd_path))
         ivs = Dict(iv.name => iv.bins for iv in pw.pspec.intervals)
         @test ivs == Dict("pre" => 1:9, "post" => 10:32, "pre_smooth" => 1:9, "post_smooth" => 11:32)
         covered = union((pw.pspec.intervals[t.interval].bins for t in pw.regularizer.terms)...)
@@ -147,6 +147,6 @@ end
         path = joinpath(dir, "pw5.toml")
         write(path, text)
         @test occursin("pre_wide", text) && occursin("interval = \"pre_wide\"", text)
-        @test_throws "the term selecting \"u_pre\" is on interval \"pre_wide\" (bins 1:10), but \"u_pre\" is defined only on its own interval \"pre\" (bins 1:9)" OTIS.build_problem(_pw_deck_on(path, sd_path))
+        @test_throws "the term selecting \"u_pre\" is on interval \"pre_wide\" (bins 1:10), but \"u_pre\" is defined only on its own interval \"pre\" (bins 1:9)" TRUST.build_problem(_pw_deck_on(path, sd_path))
     end
 end

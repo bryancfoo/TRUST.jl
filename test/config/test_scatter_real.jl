@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _quantile_sorted
+using TRUST
+using TRUST: _quantile_sorted
 using Random: Xoshiro
 using Statistics: quantile
 
@@ -21,7 +21,7 @@ const _SI_SB = _rd_streak_b(joinpath(_SI_DIR, "b.jld2"); seed=42, masked=2)
 const _SI_REGIONS = "[[fit.regions]]\nt_range_ns = [0.0, 0.8]\nnbins = 2\n\n[[fit.regions]]\nt_range_ns = [0.8, 1.2]\nnbins = 4"
 const _SI_TEXT = _rd_sx_text(_SI_SA, _SI_SB, joinpath(_SI_DIR, "out"); regions=_SI_REGIONS)
 const _SI_DECK = read_deck(_rd_write(_SI_DIR, "si.toml", _SI_TEXT))
-const _SI_PROBLEM, _SI_OPT, _SI_START = OTIS.build_problem(_SI_DECK)
+const _SI_PROBLEM, _SI_OPT, _SI_START = TRUST.build_problem(_SI_DECK)
 const _SI_RESULT = polish(_SI_PROBLEM, solve(_SI_PROBLEM, _SI_OPT; start=_SI_START)).result
 const _SI_SCATTER = slice_scatter(_SI_DECK, _SI_RESULT)
 
@@ -121,8 +121,8 @@ end
     mktempdir() do dir
         write_result(joinpath(dir, "new.jld2"), r; deck="d", scatter=sc)
         write_result(joinpath(dir, "old.jld2"), r; deck="d", scatter=old16)
-        a = OTIS.jldopen(f -> Dict(_rd_leaves(f, "scatter")), joinpath(dir, "new.jld2"), "r")
-        b = OTIS.jldopen(f -> Dict(_rd_leaves(f, "scatter")), joinpath(dir, "old.jld2"), "r")
+        a = TRUST.jldopen(f -> Dict(_rd_leaves(f, "scatter")), joinpath(dir, "new.jld2"), "r")
+        b = TRUST.jldopen(f -> Dict(_rd_leaves(f, "scatter")), joinpath(dir, "old.jld2"), "r")
         want = Set(["scatter/m", "scatter/t_fine", "scatter/coarse_bin", "scatter/counts", "scatter/status",
             "scatter/decrease"])
         for name in ("T_D", "u_D"), k in ("values", "near_bound", "s_stat", "n_near_bound")
@@ -134,8 +134,8 @@ end
         @test_throws "write_readable: scatter holds no quantiles for [\"T_D\", \"u_D\"]; pass the ScatterResult slice_scatter returned" write_readable(
             joinpath(dir, "w.h5"), r, _SI_PROBLEM; scatter=old16)
         rd = _rd_dict(write_readable(joinpath(dir, "sc.h5"), r, _SI_PROBLEM; scatter=sc))
-        @test rd["layout_version"] == "otis-readable-2"
-        @test startswith(rd["README"], "otis-readable-2: ")
+        @test rd["layout_version"] == "trust-readable-2"
+        @test startswith(rd["README"], "trust-readable-2: ")
         for name in ("T_D", "u_D")
             @test rd["scatter/p16/$name"] == sc.p16[name]
             @test rd["scatter/median/$name"] == sc.median[name]

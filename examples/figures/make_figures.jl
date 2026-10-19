@@ -9,7 +9,7 @@
 # `mktempdir()` instead so the test never touches the committed files.
 
 using CairoMakie
-using OTIS
+using TRUST
 using Random: Xoshiro
 
 include(joinpath(@__DIR__, "..", "problems.jl"))
@@ -173,7 +173,7 @@ function figure_noise(outdir, problem)
 
     # E[image] is the blurred mean (the spread is linear); the model's own mean is not blurred
     # (OQ-40, Phase 4.B spec D12).
-    z = vec((sd.image .- OTIS._point_spread(Sbar, model.sigma_px)) ./ sig)
+    z = vec((sd.image .- TRUST._point_spread(Sbar, model.sigma_px)) ./ sig)
 
     ax2 = Axis(fig[1, 2]; xlabel="(image - E[image]) / σ  [realized σ, sigma_px = $(model.sigma_px)]", ylabel="density")
     hist!(ax2, z; normalization=:pdf, bins=60, color=(:steelblue, 0.5), label="residuals")

@@ -4,11 +4,11 @@
 # twelve slices each, T_D and u_D ramps in time, T_e = 400 eV, n_e = 3e19 cm^-3: the fast tier's decks
 # keep SX's own effect chains and variables, whose problem types the "uncertainty" gate has compiled; the
 # slow tier's RD deck adds an interval, a held series, two dependents, two scalars and a frozen variable.
-# Every package the files need is reached through OTIS (test/slow's environment has no JLD2, TOML or
+# Every package the files need is reached through TRUST (test/slow's environment has no JLD2, TOML or
 # Random of its own).
 
-const _RD_JLD2 = parentmodule(OTIS.jldopen)
-const _RD_TOML = OTIS.TOML
+const _RD_JLD2 = parentmodule(TRUST.jldopen)
+const _RD_TOML = TRUST.TOML
 
 # Every leaf dataset of a JLD2 file, or of one group of it: name => value (test_result.jl's
 # _walk_leaf_values).
@@ -28,7 +28,7 @@ function _rd_leaves(f, prefix="")
 end
 
 # A file's leaf datasets as a Dict.
-_rd_dict(path::AbstractString) = OTIS.jldopen(f -> Dict(_rd_leaves(f)), path, "r")
+_rd_dict(path::AbstractString) = TRUST.jldopen(f -> Dict(_rd_leaves(f)), path, "r")
 
 const _RD_PLAIN = Union{AbstractArray{<:Real},AbstractArray{<:AbstractString},AbstractString,Real}
 
@@ -62,7 +62,7 @@ function _rd_streak(path, t_rec, shift, l0, l1, nl, scale, background; seed=noth
         collection=Collection(theta_deg=60.0, k_model=:exact), lambda_m=lambda, effects=effects)
     image = measure(expt)
     sig = sigma(GaussianNoise(; a=121.0, b=141.75), image)
-    seed === nothing || (image = image .+ sig .* randn(OTIS.Xoshiro(seed), size(image)...))
+    seed === nothing || (image = image .+ sig .* randn(TRUST.Xoshiro(seed), size(image)...))
     mask = nothing
     if masked > 0
         mask = fill(true, size(image))
@@ -102,7 +102,7 @@ function _rd_sx_text(pa, pb, outdir; regions=_RD_REGIONS, regularizer=_RD_REGULA
     te_var = te_free ? "T_e = { bounds = [100.0, 1000.0], init = 380.0 }\n" : ""
     out = readable === nothing ? "" : "readable = $readable\n"
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     channels = ["a", "b"]
 
     $regions
@@ -152,7 +152,7 @@ end
 # test_uncertainty.jl's SX5 deck.
 function _rd_single_text(pa, outdir)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(_rd_path(pa))"
@@ -191,7 +191,7 @@ end
 # width, fwhm_nm), and the dependents ne (bound to n_e_cm3) and ratio (bound to nothing).
 function _rd_deck_text(pa, pb, hold, outdir)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     channels = ["a", "b"]
 
     $_RD_REGIONS
@@ -258,7 +258,7 @@ function _rd_deck_text(pa, pb, hold, outdir)
 end
 
 # The leaf datasets a readable file holds for `result` (channel names `names`), with the optional
-# datasets and groups as written: the layout's key set, pinned (OQ-63 (f); otis-readable-2's quantiles
+# datasets and groups as written: the layout's key set, pinned (OQ-63 (f); trust-readable-2's quantiles
 # and held values from Phase 4.N spec D7).
 function _rd_expected_keys(result, names; deck::Bool, gn::Bool, laplace=nothing, scatter=nothing)
     want = Set(["layout_version", "README", "source", "t_ns", "bin_lo_ns", "bin_hi_ns",

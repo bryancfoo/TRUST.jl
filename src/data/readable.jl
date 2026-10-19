@@ -1,8 +1,8 @@
-# write_readable: the otis-readable-2 layout, the readable companion fit(deck) writes beside
+# write_readable: the trust-readable-2 layout, the readable companion fit(deck) writes beside
 # result.jld2 (Phase 4.M, Step 4.M.1; OQ-63; docs/derivations/data_layout.md Section 6). One fit as a
 # user reads it: the time and wavelength axes in ns and nm, per channel the data, sigma, model, mask
 # and the chi2 per bin, every parameter in its deck unit, and the Laplace sigma and the scatter's
-# windows when given. Plain arrays and strings only, as every OTIS layout; no reader in the package,
+# windows when given. Plain arrays and strings only, as every TRUST layout; no reader in the package,
 # whose own record of a fit stays result.jld2.
 
 using JLD2: jldopen
@@ -10,17 +10,17 @@ using JLD2: jldopen
 """
     READABLE_LAYOUT_VERSION
 
-The `layout_version` string written to every readable file: `"otis-readable-2"` since Phase 4.N
+The `layout_version` string written to every readable file: `"trust-readable-2"` since Phase 4.N
 (spec D7, [OQ-64](../../dev/open_questions.md#oq-64) item 4: `scatter/p16`, `median`, `p84` and
-`held` joined the scatter group), `"otis-readable-1"` before (Phase 4.M spec D5). Nothing in the
+`held` joined the scatter group), `"trust-readable-1"` before (Phase 4.M spec D5). Nothing in the
 package reads the file back.
 """
-const READABLE_LAYOUT_VERSION = "otis-readable-2"
+const READABLE_LAYOUT_VERSION = "trust-readable-2"
 
 # The file's own README dataset (Phase 4.M spec D9; Phase 4.N spec D7), ASCII so that any HDF5
 # reader decodes it.
 const _READABLE_README = """
-otis-readable-2: one OTIS fit, written to be read directly (h5py or any HDF5 reader).
+trust-readable-2: one TRUST fit, written to be read directly (h5py or any HDF5 reader).
 Orientation: arrays are stored as Julia writes them, (n_lambda, n_t), so h5py reads them as
 (n_t, n_lambda): data[j] is time bin j's spectrum against lambda_nm, one row per time bin.
 Units: times in ns, wavelengths in nm; params/<name> in the unit units/<name> names, the deck key
@@ -57,7 +57,7 @@ The package's own record of the fit is result.jld2 beside this file.
                    deck = nothing, laplace = nothing, scatter = nothing) -> path
 
 Writes the readable companion of a fit to `path` (`docs/derivations/data_layout.md` Section 6,
-[OQ-63](../../dev/open_questions.md#oq-63); Phase 4.M spec D5 to D12), the layout `otis-readable-2`:
+[OQ-63](../../dev/open_questions.md#oq-63); Phase 4.M spec D5 to D12), the layout `trust-readable-2`:
 `layout_version`, `README` (what the file holds, its orientation and its units), `source`
 (`"write_readable"`; `"fit"` when `fit(deck)` writes it), `deck` when given and not empty (the
 effective deck's text; h5py cannot read an empty scalar string, so no string the file holds is one,
@@ -71,7 +71,7 @@ model, the per-bin quantiles and the held values, Phase 4.N spec D7). **The call
 file**: opened with `"w"`, no append, no partial update.
 
 `problem` is the problem `result` was fitted from, or one rebuilt from the same deck
-(`OTIS.build_problem(read_deck(path))`): the data, σ and mask come from it and the model from
+(`TRUST.build_problem(read_deck(path))`): the data, σ and mask come from it and the model from
 `result`, so its channel names, its time axis (bitwise), its `ntheta` and each channel's image size
 must match `result`'s, a loud error otherwise. `laplace` and `scatter` must have been computed at
 `result.theta` exactly, and `scatter` must carry its windows' data and its quantiles (a

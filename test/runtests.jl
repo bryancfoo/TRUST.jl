@@ -1,19 +1,19 @@
 using SafeTestsets
 using Test
 
-# D47 (the user, 2026-09-11): a comma-separated, case-insensitive OTIS_TESTS filter, matched
+# D47 (the user, 2026-09-11): a comma-separated, case-insensitive TRUST_TESTS filter, matched
 # against each @safetestset's own name, with a plain `if` around each. Unset or empty runs
 # everything, so every existing invocation (and Level 1's own) keeps working unchanged. D48
-# (Level 2, 2026-09-11): the gates below live inside one outer `@testset "OTIS"` because a
+# (Level 2, 2026-09-11): the gates below live inside one outer `@testset "TRUST"` because a
 # top-level `@safetestset` throws the instant it records a failure, which would otherwise kill
 # this script and silently skip every gate written after it; a nested testset records the
 # failure and lets its siblings run, so the summary always names every gate that was selected.
-const _OTIS_TESTS_RAW = get(ENV, "OTIS_TESTS", "")
-const _OTIS_TESTS_TOKENS = [lowercase(strip(t)) for t in split(_OTIS_TESTS_RAW, ",") if !isempty(strip(t))]
-_wanted(name::AbstractString) = isempty(_OTIS_TESTS_TOKENS) ||
-    any(occursin(tok, lowercase(name)) for tok in _OTIS_TESTS_TOKENS)
+const _TRUST_TESTS_RAW = get(ENV, "TRUST_TESTS", "")
+const _TRUST_TESTS_TOKENS = [lowercase(strip(t)) for t in split(_TRUST_TESTS_RAW, ",") if !isempty(strip(t))]
+_wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
+    any(occursin(tok, lowercase(name)) for tok in _TRUST_TESTS_TOKENS)
 
-@testset "OTIS" verbose = true begin
+@testset "TRUST" verbose = true begin
     if _wanted("smoke")
         @safetestset "smoke" begin include("test_smoke.jl") end
     end
@@ -235,7 +235,7 @@ end
 # The slow tier (conventions.md 8.6). test/slow/ carries its OWN environment, because its files
 # need CairoMakie, whose precompile has no place in the fast suite's (OQ-15). Nothing in the tier
 # runs in this environment, so the gate prints how to run it rather than including it.
-if get(ENV, "OTIS_SLOW_TESTS", "") != ""
-    @info "OTIS_SLOW_TESTS is set. The slow tier has its own environment; run it with: " *
+if get(ENV, "TRUST_SLOW_TESTS", "") != ""
+    @info "TRUST_SLOW_TESTS is set. The slow tier has its own environment; run it with: " *
           "julia --project=test/slow test/slow/runslow.jl"
 end

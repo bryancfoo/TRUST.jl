@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using ForwardDiff
 
 @testset "S1: T boundary round trip" begin

@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _variable_channels, _stage_deck, _staged_fit
+using TRUST
+using TRUST: _variable_channels, _stage_deck, _staged_fit
 
 # Step 4.F.1's slow rows (Phase 4.F spec D9, D24), gated "staged fit (slow)": ST3, the staged fit
 # through fit(deck), which fits, and ST4, the reach, whose two-channel problem with a channel-only
@@ -32,7 +32,7 @@ pin_blas_threads(_STS_NBLAS)
         # each stage is the fit of the single-channel deck examples/problems.jl derives from text
         plain = _st_text(dir; optimizer="procedure = \"lbfgs\"")
         for name in ("epw", "iaw")
-            p, opt, st = OTIS.build_problem(read_deck(_st_write(dir, "$name.toml", single_channel_deck_text(plain, name))))
+            p, opt, st = TRUST.build_problem(read_deck(_st_write(dir, "$name.toml", single_channel_deck_text(plain, name))))
             alone = solve(p, opt; start=st)
             @test r.stages.channels[name].theta == alone.theta
             @test r.stages.channels[name].chi2 == alone.chi2
@@ -40,7 +40,7 @@ pin_blas_threads(_STS_NBLAS)
         end
 
         # the joint start is the stages' values, assembled by name through flatten
-        problem, _, _ = OTIS.build_problem(deck)
+        problem, _, _ = TRUST.build_problem(deck)
         vals = [v.name => r.stages.channels[r.stages.sources[v.name]].variables[v.name].values
                 for v in problem.pspec.variables]
         @test r.stages.start == flatten(problem.pspec, vals)
@@ -74,7 +74,7 @@ end
             "s_iaw = { bounds = [0.5, 2.0], init = 1.0 }\nT_D  = { bounds")
         text = replace(text, "[channel.iaw.data]" => "[channel.iaw]\nweight = 2.5\n\n[channel.iaw.data]")
         deck = read_deck(_st_write(dir, "reach.toml", text))
-        problem, _, _ = OTIS.build_problem(deck)
+        problem, _, _ = TRUST.build_problem(deck)
         names = [v.name for v in problem.pspec.variables]
         reach = Dict(zip(names, _variable_channels(problem.pspec, 2)))
         @test reach == Dict("T_D" => [1, 2], "T_e" => [1, 2], "s_iaw" => [2], "logn" => [1, 2], "m_e" => [1, 2])

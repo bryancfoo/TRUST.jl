@@ -10,7 +10,7 @@
 # 2026-09-30; Phase 4.A's A20), the staged fit at 3.5 and 2.8 (TS2); the result file carries each
 # stage's fit under stages/.
 
-deck_version = "otis-deck-2"
+deck_version = "trust-deck-2"
 channels = ["epw", "iaw"]
 
 [[fit.regions]]

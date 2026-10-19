@@ -5,7 +5,7 @@
 # TH5 re-run in their own files, not repeated here.
 
 using Test
-using OTIS
+using TRUST
 
 include(joinpath(@__DIR__, "..", "fixtures", "rf1_reference.jl"))
 
@@ -118,19 +118,19 @@ end
 # per species) calls `cauchy_dfdv` exactly once, so a 1:1 correspondence holds without touching
 # src/ (rule 8.2: the reference never shares machinery with the code under test).
 
-mutable struct _CountingShape{F} <: OTIS.AbstractVelocityDistribution
+mutable struct _CountingShape{F} <: TRUST.AbstractVelocityDistribution
     inner::F
     counter::Base.RefValue{Int}
 end
 (w::_CountingShape)(x) = w.inner(x)
-OTIS.dfdx(w::_CountingShape, x) = OTIS.dfdx(w.inner, x)
-OTIS.moment(w::_CountingShape, n::Integer) = OTIS.moment(w.inner, n)
-function OTIS.cauchy_dfdv(w::_CountingShape, xi::Number)
+TRUST.dfdx(w::_CountingShape, x) = TRUST.dfdx(w.inner, x)
+TRUST.moment(w::_CountingShape, n::Integer) = TRUST.moment(w.inner, n)
+function TRUST.cauchy_dfdv(w::_CountingShape, xi::Number)
     w.counter[] += 1
-    return OTIS.cauchy_dfdv(w.inner, xi)
+    return TRUST.cauchy_dfdv(w.inner, xi)
 end
-OTIS.parameters(w::_CountingShape) = OTIS.parameters(w.inner)
-OTIS.reconstruct(w::_CountingShape, v::NamedTuple) = _CountingShape(OTIS.reconstruct(w.inner, v), w.counter)
+TRUST.parameters(w::_CountingShape) = TRUST.parameters(w.inner)
+TRUST.reconstruct(w::_CountingShape, v::NamedTuple) = _CountingShape(TRUST.reconstruct(w.inner, v), w.counter)
 
 @testset "RF2: dielectric is called exactly once per (bin, wavelength)" begin
     counter = Ref(0)

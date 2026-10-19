@@ -6,8 +6,8 @@
 # Fried-Conte series, ForwardDiff or a finite difference.
 
 using Test
-using OTIS
-using OTIS: _Zderiv, _Zpp, _hermite_lobe, _hermite_lobe_entries, _warn_hermite_lobe, _cauchy_real,
+using TRUST
+using TRUST: _Zderiv, _Zpp, _hermite_lobe, _hermite_lobe_entries, _warn_hermite_lobe, _cauchy_real,
             _cauchy_upper, _cauchy_lower, _shape_eltype, _widen_shape, HERMITE_NEGATIVE_MASS_WARN,
             ZDERIV_ASYMPTOTIC_XI, SHAPE_REGISTRY
 using QuadGK: quadgk
@@ -357,7 +357,7 @@ end
         @test shape["c5"] === 0.002
         @test shape["c6"] === 0.0
 
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         b3 = only(b for b in problem.pspec.bindings if b.name == "c3_e")
         b4 = only(b for b in problem.pspec.bindings if b.name == "c4_e")
         @test b3.kind === :leaf && string(b3.path) == "electrons.e.f.c3"

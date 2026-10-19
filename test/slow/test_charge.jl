@@ -1,10 +1,10 @@
 using Test
-using OTIS
-using OTIS: jvp!, jtvp!, _gauss_newton_diagonal, _full_residuals, _kernel_effects, _widen_trace, _make_cache,
+using TRUST
+using TRUST: jvp!, jtvp!, _gauss_newton_diagonal, _full_residuals, _kernel_effects, _widen_trace, _make_cache,
     _jacobian_bin!, JACOBIAN_CHUNK, _collect_kernel_bindings
 using LinearAlgebra: dot
 import Random
-const ForwardDiff = OTIS.ForwardDiff   # test/slow's environment has no ForwardDiff of its own
+const ForwardDiff = TRUST.ForwardDiff   # test/slow's environment has no ForwardDiff of its own
 
 # Step 4.J.2's slow rows (Phase 4.J spec D16, D17), gated "continuous charge (slow)": CZ14 and CZ16 compile
 # the brute-force Jacobian, the central differences and the per-bin dual pass of a deuterium-carbon problem
@@ -108,13 +108,13 @@ function _cz_dual_pass_bytes(j::Int)
     for (gk, i) in enumerate(kernel_global_var)
         kernel_global_of_var[i] = gk
     end
-    DFT = ForwardDiff.Dual{OTIS._JacobianTag,Float64,JACOBIAN_CHUNK}
+    DFT = ForwardDiff.Dual{TRUST._JacobianTag,Float64,JACOBIAN_CHUNK}
     work_trace = _widen_trace(pspec.trace, DFT)
     vals = Vector{DFT}(undef, pspec.nslots)
     col_cache = _make_cache(DFT, nlambda)
     block = Matrix{Float64}(undef, nlambda, length(pspec.bin_entries[j]))
     kernel_globals = Array{Float64,3}(undef, nlambda, nbins(pspec.trace), G)
-    flag = OTIS._prefactor_flag(expt.prefactor)
+    flag = TRUST._prefactor_flag(expt.prefactor)
     _jb!() = _jacobian_bin!(block, kernel_globals, j, work_trace, vals, col_cache, pspec, nvar, G,
         kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings,
         expt.probe, expt.collection, expt.lambda, flag, theta, expt.gain)
@@ -158,7 +158,7 @@ const _CZ_FITS = _cz_recovery_fits()
     z_true = _cz_z_true.(t_ns)
     @test length(z_true) == _CZ_NBINS
     e_clean = abs.(r.clean.values["ZC"] .- z_true)
-    problem, _, _ = OTIS.build_problem(read_deck(r.free_path))
+    problem, _, _ = TRUST.build_problem(read_deck(r.free_path))
     pol = polish(problem, r.free; tol=1e-6)
     lap = laplace(problem, pol.result.theta)
     sig = lap.sigma_samp["ZC"]
@@ -174,7 +174,7 @@ const _CZ_FITS = _cz_recovery_fits()
     @test chi2n(r.six) > chi2n(r.free)
     @test chi2n(r.four) > chi2n(r.free)
     # the result file (OQ-60 (g)): the fitted series and the binding text
-    OTIS.jldopen(joinpath(r.noisy_dir, "free", "result.jld2"), "r") do f
+    TRUST.jldopen(joinpath(r.noisy_dir, "free", "result.jld2"), "r") do f
         @test f["variables/ZC/values"] == r.free.values["ZC"]
         @test occursin("ions.C.charge", f["deck"])
     end

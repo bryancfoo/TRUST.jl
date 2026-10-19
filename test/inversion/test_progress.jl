@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: PROGRESS_WINDOW, _progress_on, _count_near_bound, _eval_all!
+using TRUST
+using TRUST: PROGRESS_WINDOW, _progress_on, _count_near_bound, _eval_all!
 import TOML
 
 # Step 4.K.1: the progress lines during a fit (Phase 4.K spec D4 to D10, D13; OQ-61, decided
@@ -245,7 +245,7 @@ function _pg_deck(dir::AbstractString, name::AbstractString, optimizer::Abstract
         image=fill(30.0, 8, 4), sigma=fill(1.0, 8, 4)); source="test")
     path = joinpath(dir, name)
     write(path, """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -292,7 +292,7 @@ end
         deck = read_deck(_pg_deck(dir, "on.toml",
             "procedure = \"levenberg_marquardt\"\nlevenberg_marquardt = { progress = 10 }"))
         @test deck.sections["optimizer"]["levenberg_marquardt"]["progress"] == 10
-        problem, opt, _ = OTIS.build_problem(deck)
+        problem, opt, _ = TRUST.build_problem(deck)
         @test opt isa LevenbergMarquardt && opt.progress == 10
         eff = effective_deck(deck, problem, opt)
         @test TOML.parse(eff)["optimizer"]["levenberg_marquardt"]["progress"] == 10
@@ -302,7 +302,7 @@ end
 
         # a table without the key: the default, 0, filled into the validated table and the effective deck
         deck0 = read_deck(_pg_deck(dir, "off.toml", "procedure = \"lbfgs\"\nlbfgs = { iterations = 3 }"))
-        p0, o0, _ = OTIS.build_problem(deck0)
+        p0, o0, _ = TRUST.build_problem(deck0)
         @test deck0.sections["optimizer"]["lbfgs"]["progress"] == 0 && o0.progress == 0
         @test TOML.parse(effective_deck(deck0, p0, o0))["optimizer"]["lbfgs"]["progress"] == 0
 

@@ -1,8 +1,9 @@
 # CLAUDE.md
 
-OTIS.jl is a Julia package for forward modelling and inverting optical Thomson scattering
+TRUST.jl is a Julia package for forward modelling and inverting optical Thomson scattering
 spectra, aimed at streaked (time-resolved) data inverted with regularization along the time
-axis. The name expands to **O**ptical **T**homson **I**nversion **S**uite. The reference text is
+axis. The name expands to **T**unable **R**egularized **U**nfolding of **S**cattered **T**homson;
+the package was named OTIS until 2026-10-18. The reference text is
 Sheffield, Froula, Glenzer and Luhmann, *Plasma Scattering of Electromagnetic Radiation*, 2nd
 ed. (`context/sheffield2011.pdf`; cite it as Sheffield with a section or equation number). The
 user's own paper, `context/foo2026.pdf`, describes the method and the test problems but may

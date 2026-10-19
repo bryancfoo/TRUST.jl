@@ -34,7 +34,7 @@
 > comments) without ever entering that quadrature, since a zero-partial `a` short-circuits it
 > (round 4's fix, D5). The first-call latency carries the `{FT, L}` type parameter's one-time
 > specialization cost: about **1.0 s** more than the Maxwellian's first call, on top of the
-> package's own `using OTIS` time (~0.36 s, not part of either figure above).
+> package's own `using TRUST` time (~0.36 s, not part of either figure above).
 
 This document derives what `src/distributions/supergaussian.jl` (and, from Step 1.SG.2,
 `src/distributions/supergaussian_table.jl`) implements, in the package's own normalization.

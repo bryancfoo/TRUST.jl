@@ -4,8 +4,8 @@
 # Zprime, ForwardDiff or a finite difference, never the function itself.
 
 using Test
-using OTIS
-using OTIS: GN_TABLE, GN_DEGREE_START, GN_DEGREE_CAP_XI, GN_DEGREE_CAP_M, GN_BISECT_MAX,
+using TRUST
+using TRUST: GN_TABLE, GN_DEGREE_START, GN_DEGREE_CAP_XI, GN_DEGREE_CAP_M, GN_BISECT_MAX,
             _gn_uncached, _gn_cauchy_reference, _gn_principal_value, _cheb_slice, _cheb_table_eval,
             _basefloat, _cauchy_upper, _widen_shape, _cauchy_series, SHAPE_REGISTRY
 using SpecialFunctions: loggamma, digamma, gamma
@@ -535,7 +535,7 @@ end
 
 function _gn21_deck(datafile, outdir)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -603,7 +603,7 @@ end
         deck = read_deck(deckpath)
         @test deck.sections["plasma"]["electrons"]["e"]["shape"]["type"] == "GeneralizedNormal"
 
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         b = only(b for b in problem.pspec.bindings if b.name == "m_e")
         @test b.kind === :leaf
         @test string(b.path) == "electrons.e.f.m"

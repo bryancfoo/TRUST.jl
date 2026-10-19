@@ -1,12 +1,12 @@
 using Test
-using OTIS
+using TRUST
 using ForwardDiff: derivative
 
 include(joinpath(@__DIR__, "..", "shape_contract.jl"))
 
 # A shape defined only by its call, with no dfdx or cauchy_dfdv override, so that everything
 # else in the interface is exercised through the generic fallbacks (spec G3, OQ-3 item 1).
-struct PlainMaxwellian <: OTIS.AbstractVelocityDistribution end
+struct PlainMaxwellian <: TRUST.AbstractVelocityDistribution end
 (::PlainMaxwellian)(x) = exp(-x^2) / sqrt(pi)
 
 @testset "G1: AD through the generic Cauchy fallback vs analytic Z''" begin

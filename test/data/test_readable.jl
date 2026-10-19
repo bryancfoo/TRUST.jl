@@ -1,15 +1,15 @@
 using Test
-using OTIS
+using TRUST
 
 # Step 4.M.1: the readable fit output (Phase 4.M spec D5 to D16; OQ-63, decided 2026-10-14). RD1 to
 # RD10, gate "readable", every row on synthetic data (Phase E's A29). fit(deck) writes readable.h5
-# (otis-readable-2) beside result.jld2 unless [output] readable = false, and write_readable writes the
+# (trust-readable-2) beside result.jld2 unless [output] readable = false, and write_readable writes the
 # same file from a script, with the Laplace sigma and the scatter's windows when given. These rows fit
 # test_uncertainty.jl's SX deck on noisy streaks (camera b's first two wavelength rows masked), whose
 # problem types the "uncertainty" gate has already compiled; the RD deck's rows (an interval, a held
 # series, dependents, scalars, a frozen variable, a near-bound entry) are test/slow/test_readable.jl's.
 # RD14 is Phase 4.L's (spec D9, OQ-62 item 8): a key-off fit removes an earlier run's readable.h5.
-# Phase 4.N (spec D9) changed RD7's two version literals to otis-readable-2 and RD10's field list to the
+# Phase 4.N (spec D9) changed RD7's two version literals to trust-readable-2 and RD10's field list to the
 # twenty fields ScatterResult now has; the scatter's new datasets are in the fixture's key set.
 
 include(joinpath(@__DIR__, "..", "fixtures", "readable_fixture.jl"))
@@ -24,7 +24,7 @@ const _RD_DECK = read_deck(_rd_write(_RD_DIR, "on.toml", _RD_TEXT))
 const _RD_DECK_OFF = read_deck(_rd_write(_RD_DIR, "off.toml", _rd_sx_text(_RD_SA, _RD_SB, _RD_OFF; readable=false)))
 const _RD_RESULT = _rd_fit(_RD_DECK)
 const _RD_RESULT_OFF = _rd_fit(_RD_DECK_OFF)
-const _RD_PROBLEM = first(OTIS.build_problem(_RD_DECK))
+const _RD_PROBLEM = first(TRUST.build_problem(_RD_DECK))
 const _RD_POL = polish(_RD_PROBLEM, _RD_RESULT).result
 const _RD_LAP = laplace(_RD_PROBLEM, _RD_POL.theta)
 const _RD_SCATTER = slice_scatter(_RD_DECK, _RD_POL)
@@ -83,7 +83,7 @@ end
     rd = _rd_dict(joinpath(_RD_ON, "readable.h5"))
     re = _rd_dict(joinpath(_RD_ON, "result.jld2"))
     for (c, name) in enumerate(("a", "b"))
-        ch = OTIS._channel_problem(_RD_PROBLEM, c)
+        ch = TRUST._channel_problem(_RD_PROBLEM, c)
         @test isequal(rd["channels/$name/data"], ch.data.image)
         @test isequal(rd["channels/$name/sigma"], ch.sigma)
         @test rd["channels/$name/mask"] == UInt8.(ch.mask)
@@ -99,7 +99,7 @@ end
 
 @testset "RD4: chi2 per bin over the fitted pixels, recomputed from data, model, sigma and mask" begin
     re = _rd_dict(joinpath(_RD_ON, "result.jld2"))
-    OTIS.jldopen(joinpath(_RD_ON, "readable.h5"), "r") do f
+    TRUST.jldopen(joinpath(_RD_ON, "readable.h5"), "r") do f
         for name in ("a", "b")
             chi2, n = _rd_chi2_bins(f, "channels/$name")
             @test isapprox(f["channels/$name/chi2"], chi2; rtol=1e-12)
@@ -119,7 +119,7 @@ end
 @testset "RD5: params bitwise FitResult.values, units, flags, the axes and fit/" begin
     r = _RD_RESULT
     rd = _rd_dict(joinpath(_RD_ON, "readable.h5"))
-    @test isempty(OTIS._near_bound_entries(r))
+    @test isempty(TRUST._near_bound_entries(r))
     for (name, unit) in (("T_D", "T_eV"), ("u_D", "u_kms"))
         @test rd["params/$name"] isa Vector{Float64}
         @test isequal(rd["params/$name"], r.values[name])
@@ -155,8 +155,8 @@ end
     @test size(rd["channels/b/data"]) == (16, 3)
     @test length(rd["channels/a/lambda_nm"]) == 24
     @test length(rd["channels/b/lambda_nm"]) == 16
-    problem = first(OTIS.build_problem(_RD_SINGLE_DECK))
-    OTIS.jldopen(joinpath(_RD_SINGLE_OUT, "readable.h5"), "r") do f
+    problem = first(TRUST.build_problem(_RD_SINGLE_DECK))
+    TRUST.jldopen(joinpath(_RD_SINGLE_OUT, "readable.h5"), "r") do f
         @test collect(keys(f["channels"])) == ["main"]
         @test isequal(f["channels/main/data"], problem.data.image)
         @test size(f["channels/main/model"]) == (24, 12)
@@ -170,9 +170,9 @@ end
 # ------------------------------------------------------------------------------------------
 
 @testset "RD7: read back: the orientation, the version, the key set and the bin windows" begin
-    OTIS.jldopen(joinpath(_RD_ON, "readable.h5"), "r") do f
-        @test f["layout_version"] == "otis-readable-2"
-        @test f["README"] isa String && startswith(f["README"], "otis-readable-2: ")
+    TRUST.jldopen(joinpath(_RD_ON, "readable.h5"), "r") do f
+        @test f["layout_version"] == "trust-readable-2"
+        @test f["README"] isa String && startswith(f["README"], "trust-readable-2: ")
         @test size(f["channels/a/data"]) == (length(f["channels/a/lambda_nm"]), length(f["t_ns"]))
         @test Set(keys(f)) == Set(["layout_version", "README", "source", "deck", "t_ns", "bin_lo_ns",
             "bin_hi_ns", "channels", "params", "units", "flags", "fit"])
@@ -183,14 +183,14 @@ end
         @test isapprox(f["bin_hi_ns"], [0.4, 0.8, 1.2]; atol=1e-12)
         @test all(f["bin_lo_ns"] .<= f["t_ns"] .<= f["bin_hi_ns"])
     end
-    OTIS.jldopen(joinpath(_RD_SINGLE_OUT, "readable.h5"), "r") do f
+    TRUST.jldopen(joinpath(_RD_SINGLE_OUT, "readable.h5"), "r") do f
         @test Set(first.(_rd_leaves(f))) == _rd_expected_keys(_RD_SINGLE_RESULT, ("main",); deck=true, gn=true)
     end
     mktempdir() do dir
         path = write_readable(joinpath(dir, "all.h5"), _RD_POL, _RD_PROBLEM; deck="the deck",
             laplace=_RD_LAP, scatter=_RD_SCATTER)
         @test path == joinpath(dir, "all.h5")
-        OTIS.jldopen(path, "r") do f
+        TRUST.jldopen(path, "r") do f
             @test Set(keys(f)) == Set(["layout_version", "README", "source", "deck", "t_ns", "bin_lo_ns",
                 "bin_hi_ns", "channels", "params", "units", "flags", "fit", "laplace", "scatter"])
             leaves = _rd_leaves(f)
@@ -239,12 +239,12 @@ end
             lap.sigma_post, lap.sigma_samp, lap.near_bound)
         @test_throws "write_readable: laplace was computed at a different θ than result.theta" write_readable(
             joinpath(dir, "w.h5"), r, _RD_PROBLEM; laplace=lap_wrong)
-        single = first(OTIS.build_problem(_RD_SINGLE_DECK))
+        single = first(TRUST.build_problem(_RD_SINGLE_DECK))
         @test_throws "write_readable: problem has channels [\"main\"], but result has [\"a\", \"b\"]" write_readable(
             joinpath(dir, "w.h5"), r, single)
         te_free = read_deck(_rd_write(dir, "te.toml", _rd_sx_text(_RD_SA, _RD_SB, joinpath(dir, "te"); te_free=true)))
         @test_throws "write_readable: problem has ntheta = 7, but result has 6" write_readable(
-            joinpath(dir, "w.h5"), r, first(OTIS.build_problem(te_free)))
+            joinpath(dir, "w.h5"), r, first(TRUST.build_problem(te_free)))
     end
 end
 
@@ -254,15 +254,15 @@ end
 
 @testset "RD9: scatter/ only when given: the windows' values, their data and their models" begin
     sc, s = _RD_SCATTER, _RD_DECK.sections
-    chan_list = OTIS._channel_list(s)
-    raw, _, _ = OTIS._read_channels(s, chan_list, true)
-    regions = OTIS._build_averaging_regions(s["fit_regions"])
+    chan_list = TRUST._channel_list(s)
+    raw, _, _ = TRUST._read_channels(s, chan_list, true)
+    regions = TRUST._build_averaging_regions(s["fit_regions"])
     fine = [AveragingRegion(rg.lo, rg.hi, rg.nbins * sc.m[i], "") for (i, rg) in enumerate(regions)]
-    windows = OTIS._average_channels(raw, chan_list, fine)
+    windows = TRUST._average_channels(raw, chan_list, fine)
     mktempdir() do dir
         @test !haskey(_rd_dict(write_readable(joinpath(dir, "bare.h5"), _RD_POL, _RD_PROBLEM)), "scatter/t_ns")
         path = write_readable(joinpath(dir, "sc.h5"), _RD_POL, _RD_PROBLEM; scatter=sc)
-        OTIS.jldopen(path, "r") do f
+        TRUST.jldopen(path, "r") do f
             @test isequal(f["scatter/t_ns"], t_from_si.(sc.t_fine, :t_ns))
             @test f["scatter/bin"] == sc.coarse_bin
             @test f["scatter/status"] == string.(sc.status)
@@ -288,10 +288,10 @@ end
             for (j, lo, hi) in ((5, 0.4, 0.5), (12, 1.1, 1.2))
                 text = _rd_sx_text(_RD_SA, _RD_SB, joinpath(dir, "w$j");
                     regions="[[fit.regions]]\nt_range_ns = [$lo, $hi]\nnbins = 1", regularizer="")
-                p = first(OTIS.build_problem(read_deck(_rd_write(dir, "w$j.toml", text))))
+                p = first(TRUST.build_problem(read_deck(_rd_write(dir, "w$j.toml", text))))
                 theta = flatten(p.pspec, ["T_D" => sc.values["T_D"][j], "u_D" => sc.values["u_D"][j]])
                 for (c, name) in enumerate(("a", "b"))
-                    ch = OTIS._channel_problem(p, c)
+                    ch = TRUST._channel_problem(p, c)
                     m = measure(unflatten(ch.experiment, p.pspec, theta; channel=c))
                     @test isapprox(f["scatter/channels/$name/model"][:, j], vec(m); rtol=1e-12)
                 end
@@ -318,8 +318,8 @@ end
     mktempdir() do dir
         write_result(joinpath(dir, "new.jld2"), r; deck="d", scatter=sc)
         write_result(joinpath(dir, "old.jld2"), r; deck="d", scatter=old)
-        a = OTIS.jldopen(f -> Dict(_rd_leaves(f, "scatter")), joinpath(dir, "new.jld2"), "r")
-        b = OTIS.jldopen(f -> Dict(_rd_leaves(f, "scatter")), joinpath(dir, "old.jld2"), "r")
+        a = TRUST.jldopen(f -> Dict(_rd_leaves(f, "scatter")), joinpath(dir, "new.jld2"), "r")
+        b = TRUST.jldopen(f -> Dict(_rd_leaves(f, "scatter")), joinpath(dir, "old.jld2"), "r")
         want = Set(["scatter/m", "scatter/t_fine", "scatter/coarse_bin", "scatter/counts", "scatter/status",
             "scatter/decrease"])
         for name in ("T_D", "u_D"), k in ("values", "near_bound", "s_stat", "n_near_bound")

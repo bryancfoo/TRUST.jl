@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _interpolate_response
+using TRUST
+using TRUST: _interpolate_response
 import ForwardDiff
 using Random
 
@@ -9,7 +9,7 @@ using Random
     e_flat = Sensitivity(scale=2.5, lambda_m=collect(range(230e-9, 260e-9; length=8)),
         response=ones(8))
     e_scalar = Sensitivity(scale=2.5)
-    op = OTIS._prepare(e_flat, lambda, [0.0])
+    op = TRUST._prepare(e_flat, lambda, [0.0])
     rng = Random.Xoshiro(20260911)
     P = rand(rng, 64, 4) .+ 0.1
     R_flat = apply!(similar(P), P, e_flat, op)
@@ -43,10 +43,10 @@ end
     e = Sensitivity(scale=1.0, lambda_m=lam_cal, response=resp_cal)
 
     lambda_short_blue = collect(range(235e-9, 245e-9; length=16))   # starts before lam_cal
-    @test_throws "not spanned" OTIS._prepare(e, lambda_short_blue, [0.0])
+    @test_throws "not spanned" TRUST._prepare(e, lambda_short_blue, [0.0])
 
     lambda_short_red = collect(range(245e-9, 255e-9; length=16))    # ends after lam_cal
-    @test_throws "not spanned" OTIS._prepare(e, lambda_short_red, [0.0])
+    @test_throws "not spanned" TRUST._prepare(e, lambda_short_red, [0.0])
 end
 
 @testset "SR5: islinear still holds, with a response" begin
@@ -54,7 +54,7 @@ end
     resp_cal = [0.2, 0.5, 0.9, 1.0, 0.95, 0.7, 0.4, 0.15]
     lambda = collect(range(235e-9, 255e-9; length=64))
     e = Sensitivity(scale=3.0, lambda_m=lam_cal, response=resp_cal)
-    op = OTIS._prepare(e, lambda, [0.0])
+    op = TRUST._prepare(e, lambda, [0.0])
     @test islinear(e)
 
     rng = Random.Xoshiro(20260912)
@@ -75,7 +75,7 @@ end
 
     function f(x)
         e = Sensitivity(scale=x, lambda_m=lam_cal, response=resp_cal)
-        op = OTIS._prepare(e, lambda, [0.0])
+        op = TRUST._prepare(e, lambda, [0.0])
         return sum(apply!(similar(P, typeof(x)), P, e, op))
     end
     x0 = 2.0

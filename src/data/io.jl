@@ -10,25 +10,36 @@ The `layout_version` string written to every streak JLD2 file and checked on rea
 
 Spec D19, D45.
 """
-const STREAK_LAYOUT_VERSION = "otis-streak-1"
+const STREAK_LAYOUT_VERSION = "trust-streak-1"
 
 """
     TRACE_LAYOUT_VERSION
 
 The `layout_version` string written to every trace JLD2 file and checked on read.
-**`"otis-trace-2"` since Step 4.J.1** (Phase 4.J spec D9, [OQ-60](../../dev/open_questions.md#oq-60)
-item 6): a species' `charge` is written `Float64`, where `otis-trace-1` wrote `Int64`. `read_trace`
-refuses an `otis-trace-1` file, naming both versions; there is no reader for the old layout.
+**`"trust-trace-2"` since Step 4.J.1** (Phase 4.J spec D9, [OQ-60](../../dev/open_questions.md#oq-60)
+item 6): a species' `charge` is written `Float64`, where `trust-trace-1` wrote `Int64`. `read_trace`
+refuses an `trust-trace-1` file, naming both versions; there is no reader for the old layout.
 
 Spec D20, D45; Phase 4.J spec D9.
 """
-const TRACE_LAYOUT_VERSION = "otis-trace-2"
+const TRACE_LAYOUT_VERSION = "trust-trace-2"
 
+"""
+    _canonical_version(v)
+
+Canonicalizes a `layout_version` or `deck_version` string read from a file: a string that begins
+with `"otis-"`, the package's name before 2026-10-18, is returned with that prefix replaced by
+`"trust-"`; any other value, including `nothing`, is returned unchanged. The number is never
+touched, so an old spelling of a *different* layout number is refused exactly as its new spelling
+is. Writers never emit the old prefix. (Level 1 rename decision D3, 2026-10-18.)
+"""
+_canonical_version(v::AbstractString) = startswith(v, "otis-") ? "trust-" * SubString(v, 6) : String(v)
+_canonical_version(v) = v
 
 # Keys written explicitly by _write_meta! and _write_probe_collection_meta!: an sd.meta entry
 # under one of these names (e.g. one synthesize() already populated) is superseded, not
 # duplicated -- write_streak's explicit source/probe/collection arguments win.
-const _RESERVED_META_KEYS = ("source", "created_unix", "otis_version",
+const _RESERVED_META_KEYS = ("source", "created_unix", "trust_version",
     "lambda_probe_nm", "theta_deg", "polarization_deg", "k_model")
 
 """
@@ -53,7 +64,7 @@ _from_empty_marker(v) = (v isa AbstractString && v == "-") ? "" : v
 function _write_meta!(f, sd::StreakData, source::AbstractString)
     f["meta/source"] = _empty_marker(source)
     f["meta/created_unix"] = Float64(time())
-    f["meta/otis_version"] = string(pkgversion(OTIS))
+    f["meta/trust_version"] = string(pkgversion(TRUST))
     for (k, v) in sd.meta
         k in _RESERVED_META_KEYS && continue
         f["meta/$k"] = v isa AbstractArray ? collect(v) : v isa AbstractString ? _empty_marker(v) : v
@@ -76,7 +87,7 @@ end
 
 Writes `sd` to `path` as a JLD2 file of plain numeric arrays and strings (`docs/derivations/data_layout.md`):
 `layout_version`, `lambda_nm`, `t_ns`, `image`, optionally `sigma` and `mask` (`UInt8`, `1` = use
-the pixel), and a `meta` group (`source`, `created_unix`, `otis_version`, the probe/collection
+the pixel), and a `meta` group (`source`, `created_unix`, `trust_version`, the probe/collection
 geometry keys when given, and every entry of `sd.meta`). Arrays are written in Julia's
 column-major order, **wavelength first**, so an h5py reader sees the transpose `(N_t, N_λ)`. An empty
 `source`, or an empty string value in `sd.meta`, is written as `"-"` (Phase 4.N spec D20: h5py cannot read
@@ -134,7 +145,7 @@ Spec D19; Phase 4.N spec D20.
 """
 function read_streak(path::AbstractString)
     jldopen(path, "r") do f
-        version = _require_dataset(f, "layout_version", path)
+        version = _canonical_version(_require_dataset(f, "layout_version", path))
         version == STREAK_LAYOUT_VERSION || throw(ArgumentError(
             "read_streak: \"$path\" has layout_version \"$version\"; expected \"$STREAK_LAYOUT_VERSION\""))
         lambda_nm = _require_dataset(f, "lambda_nm", path)
@@ -202,7 +213,7 @@ function write_trace(path::AbstractString, trace::PlasmaTrace; source="")
         _write_species_set!(f, "template/ions", trace.template.ions)
         f["meta/source"] = _empty_marker(source)
         f["meta/created_unix"] = Float64(time())
-        f["meta/otis_version"] = string(pkgversion(OTIS))
+        f["meta/trust_version"] = string(pkgversion(TRUST))
     end
     return path
 end
@@ -256,7 +267,7 @@ function read_trace(path::AbstractString; as::Symbol=:arrays)
     as === :arrays || as === :trace || throw(ArgumentError(
         "read_trace: as must be :arrays or :trace; got :$as"))
     arrays = jldopen(path, "r") do f
-        layout_version = _require_dataset(f, "layout_version", path)
+        layout_version = _canonical_version(_require_dataset(f, "layout_version", path))
         layout_version == TRACE_LAYOUT_VERSION || throw(ArgumentError(
             "read_trace: \"$path\" has layout_version \"$layout_version\"; expected \"$TRACE_LAYOUT_VERSION\""))
         axis_name = _require_dataset(f, "axis_name", path)

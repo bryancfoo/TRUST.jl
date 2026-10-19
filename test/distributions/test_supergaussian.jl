@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _sg_cauchy_reference, _cauchy_series, _require_high_moments, _upper_gamma,
+using TRUST
+using TRUST: _sg_cauchy_reference, _cauchy_series, _require_high_moments, _upper_gamma,
             _dgamma_da, _sg_x0, _sg_C, _cheb_table_eval, SG_TABLE, _cauchy_upper, _basefloat
 using ForwardDiff: derivative
 import ForwardDiff

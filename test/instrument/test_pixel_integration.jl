@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _SubsampledAxis, _kernel_effects, _chain_order
+using TRUST
+using TRUST: _SubsampledAxis, _kernel_effects, _chain_order
 import ForwardDiff
 
 # Step 4.F.2: the pixel's integration, sampled (Phase 4.F spec D10-D12, OQ-53, the user's decision
@@ -86,7 +86,7 @@ end
 
     # the kernel's own fold (measure.jl) is these samples' fold, bitwise
     for n in (2, 3, 4)
-        kernel = OTIS._accumulate!(zeros(11), p, _PI_PROBE, _PI_COLL, lam, (PixelIntegration(subsamples=n),), 1.0, true)
+        kernel = TRUST._accumulate!(zeros(11), p, _PI_PROBE, _PI_COLL, lam, (PixelIntegration(subsamples=n),), 1.0, true)
         folded = zeros(11)
         for (wq, pq, probeq, collq, axis) in samples(PixelIntegration(subsamples=n), p, _PI_PROBE, _PI_COLL, lam)
             folded .+= wq .* spectrum(pq, probeq, collq, collect(axis))
@@ -113,7 +113,7 @@ end
         ref = zeros(length(lam))
         for (wq, oq) in zip(ks.weights, ks.offsets), (wg, og) in zip(gs.weights, gs.offsets), i in 1:n
             coll = Collection{Float64}(_PI_COLL.theta + oq, :exact, 0.0, 0.0, 0, 0.0)
-            pg = OTIS._with_leaf(pj, gs.ref, OTIS._leaf_value(pj, gs.ref) + og)
+            pg = TRUST._with_leaf(pj, gs.ref, TRUST._leaf_value(pj, gs.ref) + og)
             axis = cal .+ ((i - (n + 1) / 2) / n) .* pitch
             ref .+= (wq * wg / n) .* spectrum(pg, _PI_PROBE, coll, axis)
         end
@@ -153,18 +153,18 @@ end
 
         deck = deck_with("pixel_integration = { subsamples = 4 }")
         @test deck.sections["instrument"]["pixel_integration"] == Dict{String,Any}("subsamples" => 4)
-        problem, opt, start = OTIS.build_problem(deck)
+        problem, opt, start = TRUST.build_problem(deck)
         @test [nameof(typeof(e)) for e in problem.experiment.effects] == [:PixelIntegration, :SpectralIRF, :Sensitivity]
         @test problem.experiment.effects[1] === PixelIntegration(subsamples=4)
         @test read_deck(w("eff.toml", effective_deck(deck, problem, opt))) == deck
 
-        one = OTIS.build_problem(deck_with("pixel_integration = { subsamples = 1 }"))
-        none = OTIS.build_problem(deck_with(""))
+        one = TRUST.build_problem(deck_with("pixel_integration = { subsamples = 1 }"))
+        none = TRUST.build_problem(deck_with(""))
         @test all(residuals(one[1], one[3]) .=== residuals(none[1], none[3]))
 
         @test_throws "must be an integer" deck_with("pixel_integration = { subsamples = 1.5 }")
         @test_throws "must be an integer" deck_with("pixel_integration = { subsamples = \"n\" }")
-        @test_throws "subsamples must be a positive integer; got 0" OTIS.build_problem(
+        @test_throws "subsamples must be a positive integer; got 0" TRUST.build_problem(
             deck_with("pixel_integration = { subsamples = 0 }"))
     end
 end

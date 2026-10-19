@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _with_weight, _leaf_si_path
+using TRUST
+using TRUST: _with_weight, _leaf_si_path
 using Random: Xoshiro
 
 # FR1 to FR8 against dev/phase3_instructions.md Section 10 (spec D38), the slow tier's own
@@ -12,7 +12,7 @@ using Random: Xoshiro
 # Each cut-down FitProblem is built from the SAME deck chunk 12 already wrote for the
 # full-resolution examples (examples/*.toml): read_deck, then a copy of its own
 # `sections["data"]["file"]` pointed at a freshly synthesized 128 x 32 streak instead of the
-# full-resolution one (OTIS.Deck/OTIS.build_problem directly -- a "script deck" in
+# full-resolution one (TRUST.Deck/TRUST.build_problem directly -- a "script deck" in
 # conventions.md 7.4's sense, everything but the data file exactly the committed deck). This
 # reuses the exact fitted-variable bounds/inits, dependents, instrument chain, optimizer and
 # regularizer terms the full-resolution reproduction runs, rather than a second hand-built copy
@@ -84,7 +84,7 @@ function _fr_deck_for_cutdown(name::AbstractString, sd_path::AbstractString)
     deck = read_deck(joinpath(_FR_EXAMPLES_DIR, "$name.toml"))
     sections = deepcopy(deck.sections)
     sections["data"] = merge(sections["data"], Dict{String,Any}("file" => sd_path))
-    return OTIS.Deck(deck.deck_version, sections)
+    return TRUST.Deck(deck.deck_version, sections)
 end
 
 _fr_total_variation(v::AbstractVector) = sum(abs(v[j+1] - v[j]) for j in 1:(length(v)-1))
@@ -135,7 +135,7 @@ function _fr_epw()
         sd_path = joinpath(dir, "epw_ablation_128x32_streak.jld2")
         write_streak(sd_path, sd; source="epw_ablation_128x32")
         deck = _fr_deck_for_cutdown("epw_ablation", sd_path)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
 
         truth = Dict{String,Vector{Float64}}(
             "logn" => log10.(_fr_truth(problem_nt.trace, "n_e_cm3")),
@@ -196,7 +196,7 @@ function _fr_multiflow()
         sd_path = joinpath(dir, "iaw_multiflow_128x32_streak.jld2")
         write_streak(sd_path, sd; source="iaw_multiflow_128x32")
         deck = _fr_deck_for_cutdown("iaw_multiflow", sd_path)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         nt = nbins(problem.pspec.trace)
 
         truth = Dict{String,Vector{Float64}}(
@@ -258,7 +258,7 @@ function _fr_shock()
         sd_path = joinpath(dir, "iaw_shock_128x32_streak.jld2")
         write_streak(sd_path, sd; source="iaw_shock_128x32")
         deck = _fr_deck_for_cutdown("iaw_shock", sd_path)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
 
         pre_iv = problem.pspec.intervals[findfirst(iv -> iv.name == "pre", problem.pspec.intervals)]
         post_iv = problem.pspec.intervals[findfirst(iv -> iv.name == "post", problem.pspec.intervals)]
@@ -360,8 +360,8 @@ function _fr_piecewise()
     return mktempdir() do dir
         sd_path = joinpath(dir, "iaw_shock_128x32_streak.jld2")
         write_streak(sd_path, sd; source="iaw_shock_128x32")
-        whole_problem, _, _ = OTIS.build_problem(_fr_deck_for_cutdown("iaw_shock", sd_path))
-        problem, optimizer, _ = OTIS.build_problem(_fr_deck_for_cutdown("iaw_shock_piecewise", sd_path))
+        whole_problem, _, _ = TRUST.build_problem(_fr_deck_for_cutdown("iaw_shock", sd_path))
+        problem, optimizer, _ = TRUST.build_problem(_fr_deck_for_cutdown("iaw_shock_piecewise", sd_path))
         same_data = chi2(whole_problem, whole.theta) === whole.chi2
         same_layout = problem.pspec.ntheta == whole_problem.pspec.ntheta &&
             problem.pspec.offsets == whole_problem.pspec.offsets &&
@@ -414,8 +414,8 @@ end
 @testset "FR11: the near-bound entries of the reproductions' reported fits (reported)" begin
     for (label, r) in (("EPW, Lambda = 2e-4", _FR_EPW.shown), ("multi-flow, Lambda = 5e-3", _FR_MULTIFLOW.shown),
                        ("shock, Lambda = 1e-1", _FR_SHOCK.scan.results[_FR_SHOCK.idx_b]))
-        entries = OTIS._warn_near_bound(r)
-        @info "FR11 $label: the near-bound entries" entries = length(entries) near_bound_fraction = OTIS._near_bound_fraction(r) status = r.status converged = r.converged
+        entries = TRUST._warn_near_bound(r)
+        @info "FR11 $label: the near-bound entries" entries = length(entries) near_bound_fraction = TRUST._near_bound_fraction(r) status = r.status converged = r.converged
         @test length(entries) == sum(count(r.near_bound[v.name]) for v in r.pspec.variables if v.vary)
     end
 end

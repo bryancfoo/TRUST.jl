@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _leaf_si_path
+using TRUST
+using TRUST: _leaf_si_path
 using Random: Xoshiro
 using Statistics: median
 
@@ -65,14 +65,14 @@ function _sa_epw()
         sections = deepcopy(deck0.sections)
         # The regions moved to a shared [[fit.regions]] at chunk 7 (D40 amendment 10); this
         # reproduces exactly what read_deck now does with the same regions and fraction.
-        sections["data"] = OTIS._validate_data_section(Dict{String,Any}(
+        sections["data"] = TRUST._validate_data_section(Dict{String,Any}(
             "file" => sd_path,
             "lambda_range_nm" => [220.0, 260.0],
             "min_usable_fraction" => 0.5))
-        sections["fit_regions"] = OTIS._validate_regions(
+        sections["fit_regions"] = TRUST._validate_regions(
             Any[Dict{String,Any}("t_range_ns" => [2.0, 5.6], "nbins" => 32)])
-        deck = OTIS.Deck(deck0.deck_version, sections)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        deck = TRUST.Deck(deck0.deck_version, sections)
+        problem, optimizer, start = TRUST.build_problem(deck)
         @info "SA1: problem built" npixels = problem.npixels naxis = length(problem.experiment.t)
         flush(stderr)
 

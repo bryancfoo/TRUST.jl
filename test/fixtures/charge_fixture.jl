@@ -92,7 +92,7 @@ function _cz_deck_text(dir::AbstractString; charge::AbstractString="6", variable
     file = replace(joinpath(dir, "cz_iaw.jld2"), "\\" => "/")
     out = replace(joinpath(dir, "out"), "\\" => "/")
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     [data]
     file = "$file"
     [geometry]
@@ -175,7 +175,7 @@ function _cz_x(pspec::ParameterSpec, theta::AbstractVector, name::AbstractString
     i = findfirst(v -> v.name == name, pspec.variables)
     v = pspec.variables[i]
     k = !v.time_varying ? 0 : (v.interval == 0 ? j - 1 : j - first(pspec.intervals[v.interval].bins))
-    return OTIS._from_unconstrained(theta[pspec.offsets[i]+k], v.lower, v.upper)
+    return TRUST._from_unconstrained(theta[pspec.offsets[i]+k], v.lower, v.upper)
 end
 
 # CZ15's oracle: the problem's plasma at one bin, built through ion(charge = Z) directly.
@@ -225,7 +225,7 @@ function _cz_recovery_deck(dir::AbstractString, scale::Real; charge::AbstractStr
     zvar = free ? "ZC = { bounds = [3.0, 7.0], init = 6.0, time_varying = true }" : ""
     zterm = free ? "  { select = [\"ZC\"], operator = \"D2\", normalization = \"absolute\", scale = 0.5 }," : ""
     text = """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     [data]
     file = "$file"
     [geometry]

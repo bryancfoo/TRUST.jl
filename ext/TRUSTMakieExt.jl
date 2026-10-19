@@ -1,19 +1,19 @@
 # Makie plotting methods for the eight stubs declared in src/data/streak.jl. Spec D26: plain
 # methods on package-declared stubs, not @recipe (a @recipe's plot function lives in this
-# extension, not in OTIS, and MakieCore is not a hard dependency, OQ-1).
-module OTISMakieExt
+# extension, not in TRUST, and MakieCore is not a hard dependency, OQ-1).
+module TRUSTMakieExt
 
 using Makie
 
-using OTIS
-using OTIS: PlasmaTrace, StreakData, LeafPath, _resolve_leaf, _leaf_row, _leaf_display_unit,
+using TRUST
+using TRUST: PlasmaTrace, StreakData, LeafPath, _resolve_leaf, _leaf_row, _leaf_display_unit,
     _leaf_value, _masked_image
 
 function _streak_heatmap!(ax, lambda, t, image; kwargs...)
     return Makie.heatmap!(ax, t, lambda, permutedims(image); kwargs...)
 end
 
-function OTIS.streakplot(lambda, t, image; kwargs...)
+function TRUST.streakplot(lambda, t, image; kwargs...)
     fig = Makie.Figure()
     ax = Makie.Axis(fig[1, 1]; xlabel="t", ylabel="λ")
     hm = _streak_heatmap!(ax, lambda, t, image; kwargs...)
@@ -22,7 +22,7 @@ function OTIS.streakplot(lambda, t, image; kwargs...)
 end
 
 # Phase 4.N spec D18: masked pixels drawn blank (NaN) unless masked = false.
-function OTIS.streakplot(sd::StreakData; masked::Bool=true, kwargs...)
+function TRUST.streakplot(sd::StreakData; masked::Bool=true, kwargs...)
     lambda_nm = lambda_from_si.(sd.lambda, :lambda_nm)
     t_ns = t_from_si.(sd.t, :t_ns)
     fig = Makie.Figure()
@@ -32,20 +32,20 @@ function OTIS.streakplot(sd::StreakData; masked::Bool=true, kwargs...)
     return fig
 end
 
-function OTIS.streakplot!(ax, sd::StreakData; masked::Bool=true, kwargs...)
+function TRUST.streakplot!(ax, sd::StreakData; masked::Bool=true, kwargs...)
     lambda_nm = lambda_from_si.(sd.lambda, :lambda_nm)
     t_ns = t_from_si.(sd.t, :t_ns)
     return _streak_heatmap!(ax, lambda_nm, t_ns, masked ? _masked_image(sd) : sd.image; kwargs...)
 end
 
-function OTIS.spectrumplot(lambda, P; kwargs...)
+function TRUST.spectrumplot(lambda, P; kwargs...)
     fig = Makie.Figure()
     ax = Makie.Axis(fig[1, 1]; xlabel="λ", ylabel="P")
     Makie.lines!(ax, lambda, P; kwargs...)
     return fig
 end
 
-function OTIS.spectrumplot!(ax, lambda, P; kwargs...)
+function TRUST.spectrumplot!(ax, lambda, P; kwargs...)
     return Makie.lines!(ax, lambda, P; kwargs...)
 end
 
@@ -63,16 +63,16 @@ function _trace_series(trace::PlasmaTrace, path::AbstractString)
     return t_ns, y, unit_key
 end
 
-function OTIS.traceplot(trace::PlasmaTrace, path::AbstractString; sigma=nothing, kwargs...)
+function TRUST.traceplot(trace::PlasmaTrace, path::AbstractString; sigma=nothing, kwargs...)
     _, _, unit_key = _trace_series(trace, path)
     fig = Makie.Figure()
     ylabel = isempty(unit_key) ? path : "$path ($unit_key)"
     ax = Makie.Axis(fig[1, 1]; xlabel="t (ns)", ylabel=ylabel)
-    OTIS.traceplot!(ax, trace, path; sigma=sigma, kwargs...)
+    TRUST.traceplot!(ax, trace, path; sigma=sigma, kwargs...)
     return fig
 end
 
-function OTIS.traceplot!(ax, trace::PlasmaTrace, path::AbstractString; sigma=nothing, kwargs...)
+function TRUST.traceplot!(ax, trace::PlasmaTrace, path::AbstractString; sigma=nothing, kwargs...)
     t_ns, y, _ = _trace_series(trace, path)
     if sigma !== nothing
         Makie.band!(ax, t_ns, y .- sigma, y .+ sigma; color=(:steelblue, 0.25))
@@ -80,16 +80,16 @@ function OTIS.traceplot!(ax, trace::PlasmaTrace, path::AbstractString; sigma=not
     return Makie.lines!(ax, t_ns, y; kwargs...)
 end
 
-function OTIS.lcurveplot(chi2::AbstractVector, R::AbstractVector; weights=nothing, kwargs...)
+function TRUST.lcurveplot(chi2::AbstractVector, R::AbstractVector; weights=nothing, kwargs...)
     fig = Makie.Figure()
     ax = Makie.Axis(fig[1, 1]; xlabel="R", ylabel="χ²")
-    OTIS.lcurveplot!(ax, chi2, R; weights=weights, kwargs...)
+    TRUST.lcurveplot!(ax, chi2, R; weights=weights, kwargs...)
     return fig
 end
 
-function OTIS.lcurveplot!(ax, chi2::AbstractVector, R::AbstractVector; weights=nothing, kwargs...)
+function TRUST.lcurveplot!(ax, chi2::AbstractVector, R::AbstractVector; weights=nothing, kwargs...)
     color = weights === nothing ? (:steelblue) : weights
     return Makie.scatterlines!(ax, R, chi2; color=color, kwargs...)
 end
 
-end # module OTISMakieExt
+end # module TRUSTMakieExt

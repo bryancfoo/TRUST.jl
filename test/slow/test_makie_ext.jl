@@ -1,10 +1,10 @@
 using Test
-using OTIS
+using TRUST
 using CairoMakie
 using Random: Xoshiro
 
 @testset "MK1: the extension loads" begin
-    @test Base.get_extension(OTIS, :OTISMakieExt) !== nothing
+    @test Base.get_extension(TRUST, :TRUSTMakieExt) !== nothing
 end
 
 function _mk_experiment(; nlambda=64, nt=16)

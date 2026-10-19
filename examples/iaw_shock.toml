@@ -12,7 +12,7 @@
 # Two weights appear in foo2026's own figures for this problem, Lambda = 1e-2 and 1e-1 (D38);
 # this deck uses the more strongly regularized of the two, 1e-1 (Fig. 5's main panel).
 
-deck_version = "otis-deck-2"
+deck_version = "trust-deck-2"
 
 [data]
 file = "runs/iaw_shock_streak.jld2"

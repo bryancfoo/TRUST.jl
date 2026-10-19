@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using ForwardDiff
 
 @testset "GE1: constructor round trip across unit keywords" begin
@@ -224,7 +224,7 @@ end
     probe = ProbeBeam(lambda_probe_nm = 526.5)
     lam0 = lambda_to_si(500.0, :lambda_nm)
     p = Plasma(n_e_cm3 = 1e19, electrons = (electrons(T_eV = 500),))
-    p_dual = OTIS._widen_plasma(p, typeof(ForwardDiff.Dual(1.0, 1.0)))
+    p_dual = TRUST._widen_plasma(p, typeof(ForwardDiff.Dual(1.0, 1.0)))
     probe_dual = ProbeBeam(lambda_probe_m = ForwardDiff.Dual(probe.lambda, 1.0))
 
     for k_model in (:exact, :approximate)
@@ -321,7 +321,7 @@ end
     p = Plasma(n_e_cm3 = 1e19, electrons = (electrons(T_eV = 500),))
     lam_s = lambda_to_si(500.0, :lambda_nm)
     k, omega, k_s = wavevector(probe, collection, lam_s, p)
-    omega_s = omega + OTIS._omega_probe(probe)
+    omega_s = omega + TRUST._omega_probe(probe)
     omega_pe_sq = p.n_e * ELEMENTARY_CHARGE^2 / (VACUUM_PERMITTIVITY * ELECTRON_MASS)
     k_s_oracle = sqrt(omega_s^2 - omega_pe_sq) / SPEED_OF_LIGHT
     @test isapprox(k_s, k_s_oracle; rtol = 1e-15)

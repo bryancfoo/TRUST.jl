@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using LinearAlgebra: BLAS
 
 # DK1 to DK16 against dev/phase3_instructions.md Section 9 (spec D33), gated "deck". DK14
@@ -31,7 +31,7 @@ end
 # substituted in.
 function _dk_minimal_deck(datafile::AbstractString, outdir::AbstractString; extra_geometry="")
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -87,7 +87,7 @@ end
         write(deckpath, _dk_minimal_deck(datafile, outdir))
 
         deck1 = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck1)
+        problem, optimizer, start = TRUST.build_problem(deck1)
         eff = effective_deck(deck1, problem, optimizer)
 
         effpath = joinpath(dir, "effective.toml")
@@ -131,7 +131,7 @@ end
 
         # -- the deck --
         deck_text = """
-        deck_version = "otis-deck-2"
+        deck_version = "trust-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -169,7 +169,7 @@ end
         deckpath = joinpath(dir, "p2.toml")
         write(deckpath, deck_text)
         deck = read_deck(deckpath)
-        deck_problem, _, deck_start = OTIS.build_problem(deck)
+        deck_problem, _, deck_start = TRUST.build_problem(deck)
         deck_M = measure(unflatten(deck_problem.experiment, deck_problem.pspec, deck_start))
 
         @test deck_start == hand_theta
@@ -190,7 +190,7 @@ end
         write(deckpath, _dk_minimal_deck(datafile, outdir))
 
         deck = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         eff = effective_deck(deck, problem, optimizer)
 
         @test occursin("ions.D.T (unit_key=T_eV)", eff)
@@ -211,7 +211,7 @@ end
         write(deckpath, deck_text)
 
         deck = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         eff = effective_deck(deck, problem, optimizer)
         @test occursin("1 - 0.0*T_D", eff)
     end
@@ -227,7 +227,7 @@ end
         _dk_write_streak(datafile)
         outdir = joinpath(dir, "out")
         deck_text = """
-        deck_version = "otis-deck-2"
+        deck_version = "trust-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -277,7 +277,7 @@ end
         deckpath = joinpath(dir, "deck.toml")
         write(deckpath, deck_text)
         deck = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
 
         bindings = Dict{String,Vector}()
         for b in problem.pspec.bindings
@@ -306,7 +306,7 @@ end
         _dk_write_streak(datafile)
         outdir = joinpath(dir, "out")
         deck_text = """
-        deck_version = "otis-deck-2"
+        deck_version = "trust-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -349,7 +349,7 @@ end
         @test deck.sections["instrument"]["gradient_smearing"]["leaf"] ==
               "plasma.electrons.e.T_eV"
 
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         @test problem.experiment.collection.k_model === :exact
     end
 end
@@ -364,7 +364,7 @@ end
         _dk_write_streak(datafile)
         outdir = joinpath(dir, "out")
         deck_text = """
-        deck_version = "otis-deck-2"
+        deck_version = "trust-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -398,7 +398,7 @@ end
         datafile = joinpath(dir, "data.jld2")
         _dk_write_streak(datafile)
         deck_text = """
-        deck_version = "otis-deck-2"
+        deck_version = "trust-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -430,7 +430,7 @@ end
         datafile = joinpath(dir, "data.jld2")
         _dk_write_streak(datafile)
         deck_text = """
-        deck_version = "otis-deck-2"
+        deck_version = "trust-deck-2"
 
         [data]
         file = "$(replace(datafile, "\\" => "/"))"
@@ -570,7 +570,7 @@ end
         deckpath = joinpath(dir, "deck.toml")
         write(deckpath, deck_text)
         deck = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         eff = effective_deck(deck, problem, optimizer)
 
         effpath = joinpath(dir, "eff.toml")
@@ -578,7 +578,7 @@ end
         deck2 = read_deck(effpath)
 
         ks = deck2.sections["instrument"]["k_smearing"]
-        @test Set(keys(ks)) == Set(String.(fieldnames(OTIS.KSmearingOptions)))
+        @test Set(keys(ks)) == Set(String.(fieldnames(TRUST.KSmearingOptions)))
         @test ks["nodes"] == 5
         @test ks["half_angle_deg"] == 3.0
 
@@ -604,7 +604,7 @@ end
         deckpath = joinpath(dir, "deck.toml")
         write(deckpath, deck_text)
         deck = read_deck(deckpath)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
 
         l_idx = findall(l -> 262.0e-9 <= l <= 264.0e-9, sd.lambda)
         t_idx = findall(t -> 2.0e-9 <= t <= 5.0e-9, sd.t)
@@ -661,7 +661,7 @@ end
         @test isfile(joinpath(outdir, "result.jld2"))
         @test isfile(joinpath(outdir, "effective_deck.toml"))
         r = read_result(joinpath(outdir, "result.jld2"))
-        @test r.layout_version == "otis-result-3"
+        @test r.layout_version == "trust-result-3"
     end
 end
 
@@ -677,22 +677,22 @@ end
 
         no_version_path = joinpath(dir, "no_version.toml")
         write(no_version_path, replace(_dk_minimal_deck(datafile, outdir),
-            "deck_version = \"otis-deck-2\"\n" => ""))
-        @test_throws "otis-deck-2" read_deck(no_version_path)
+            "deck_version = \"trust-deck-2\"\n" => ""))
+        @test_throws "trust-deck-2" read_deck(no_version_path)
 
-        # otis-deck-1 is refused by name, not just as an unknown string: it names the version
+        # trust-deck-1 is refused by name, not just as an unknown string: it names the version
         # this deck actually has.
         wrong_version_path = joinpath(dir, "wrong_version.toml")
         write(wrong_version_path, replace(_dk_minimal_deck(datafile, outdir),
-            "deck_version = \"otis-deck-2\"" => "deck_version = \"otis-deck-1\""))
-        @test_throws "otis-deck-1" read_deck(wrong_version_path)
+            "deck_version = \"trust-deck-2\"" => "deck_version = \"trust-deck-1\""))
+        @test_throws "trust-deck-1" read_deck(wrong_version_path)
 
         good_path = joinpath(dir, "good.toml")
         write(good_path, _dk_minimal_deck(datafile, outdir))
         deck = read_deck(good_path)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         eff = effective_deck(deck, problem, optimizer)
-        @test occursin("deck_version = \"otis-deck-2\"", eff)
+        @test occursin("deck_version = \"trust-deck-2\"", eff)
 
         effpath = joinpath(dir, "eff.toml")
         write(effpath, eff)
@@ -718,13 +718,13 @@ end
 # hold (spectral_irf, temporal_irf, wavelength_calibration, k_smearing) are deleted; BF4 and BF6
 # (test/inversion/test_binding_factors.jl) cover them as positive rows. **DK17 keeps one positive
 # row of its own** (A19, amended 2026-09-23): the calibration offset deck must *build*
-# (`OTIS.build_problem`), not just `read_deck`, because a revert of the table lookup in
+# (`TRUST.build_problem`), not just `read_deck`, because a revert of the table lookup in
 # `_build_effect_and_pending!` fails at build time, not at read time -- without this row,
 # reverting D9's table lookup in `deck.jl` leaves `deck`'s own pass count unchanged.
 
 function _dk17_deck(datafile::AbstractString, instrument_line::AbstractString)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -771,7 +771,7 @@ end
         builds_path = joinpath(dir, "dk17_wavelength_calibration.toml")
         write(builds_path, _dk17_deck(datafile, "wavelength_calibration = { lambda_offset_nm = \"x\" }"))
         deck = read_deck(builds_path)
-        problem, optimizer, start = OTIS.build_problem(deck)
+        problem, optimizer, start = TRUST.build_problem(deck)
         b = only(b for b in problem.pspec.bindings if b.name == "x")
         @test b.factor == 1e-9
         @test b.unit_key == "lambda_offset_nm"
@@ -803,7 +803,7 @@ end
         deck1 = read_deck(deckpath)
         @test deck1.sections["optimizer"]["lbfgs"]["precondition"] === false
 
-        problem, optimizer, start = OTIS.build_problem(deck1)
+        problem, optimizer, start = TRUST.build_problem(deck1)
         @test optimizer.precondition === false
 
         eff = effective_deck(deck1, problem, optimizer)
@@ -830,7 +830,7 @@ end
 # ------------------------------------------------------------------------------------------
 #
 # Before chunk 7, read_deck read the sections it knew by name and silently ignored everything
-# else, so a [channel.epw] table in an otis-deck-2 deck would be silently ignored and the fit
+# else, so a [channel.epw] table in a trust-deck-2 deck would be silently ignored and the fit
 # would run single-channel. The channel deck's own CD1 covers a [channel.x] table specifically;
 # this row covers a plain unknown top-level key on an otherwise-shorthand deck.
 
@@ -870,7 +870,7 @@ end
 function _dk_p1_deck(datafile, outdir; t_bounds="[50.0, 800.0]", t_init=200.0,
                      optimizer="procedure = \"levenberg_marquardt\"", extra_variables="")
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(replace(datafile, "\\" => "/"))"
@@ -942,8 +942,8 @@ _dk_count(logs, needle) = count(l -> occursin(needle, string(l.message)), logs)
         @test result_a2.iterations == 1
 
         r_a2 = read_result(joinpath(outdir_a2, "result.jld2"))
-        @test r_a2.fit.gn_decrease > OTIS.GN_DECREASE_WARN
-        problem2, _, _ = OTIS.build_problem(read_deck(deckpath_a2))
+        @test r_a2.fit.gn_decrease > TRUST.GN_DECREASE_WARN
+        problem2, _, _ = TRUST.build_problem(read_deck(deckpath_a2))
         @test r_a2.fit.gn_decrease ≈ gn_decrease(problem2, result_a2.theta) rtol = 1e-12
 
         # Fixture C: levenberg_marquardt, converges to a genuine minimum.
@@ -1057,7 +1057,7 @@ _dk_with_fit_table(text, key, file, names) = replace(text, "sigma = \"supplied\"
         _dk_p1_streak(datafile)
         deckpath = joinpath(dir, "c.toml")
         write(deckpath, _dk_p1_deck(datafile, joinpath(dir, "c")))
-        _, _, start = OTIS.build_problem(read_deck(deckpath))
+        _, _, start = TRUST.build_problem(read_deck(deckpath))
         fit(deckpath)
         @test all(read_result(joinpath(dir, "c", "result.jld2")).fit.start .=== start)
 
@@ -1065,7 +1065,7 @@ _dk_with_fit_table(text, key, file, names) = replace(text, "sigma = \"supplied\"
             units=Dict("T_D" => "T_eV"))
         deckpath_s = joinpath(dir, "s.toml")
         write(deckpath_s, _dk_with_fit_table(_dk_p1_deck(datafile, joinpath(dir, "s")), "start", sp, ["T_D", "u_D"]))
-        problem, _, start_s = OTIS.build_problem(read_deck(deckpath_s))
+        problem, _, start_s = TRUST.build_problem(read_deck(deckpath_s))
         @test all(start_s .=== flatten(problem.pspec, ["T_D" => 240.0, "u_D" => 30.0]))
         fit(deckpath_s)
         @test all(read_result(joinpath(dir, "s", "result.jld2")).fit.start .=== start_s)
@@ -1089,11 +1089,11 @@ end
         # its own result as its start: fit/theta to the logit's round trip, at most four ulps of the
         # larger bound magnitude carried through dy/dx = 1/_dx_dy (spec D9)
         write(joinpath(dir, "a.toml"), _dk_with_fit_table(_dk_p1_deck(datafile, joinpath(dir, "a")), "start", rpath, ["T_D", "u_D"]))
-        problem, _, start = OTIS.build_problem(read_deck(joinpath(dir, "a.toml")))
+        problem, _, start = TRUST.build_problem(read_deck(joinpath(dir, "a.toml")))
         worst = 0.0
         for (k, v) in enumerate(problem.pspec.variables)
             x = r.variables[v.name].values[1]
-            tol = 4 * eps(max(abs(v.lower), abs(v.upper))) / OTIS._dx_dy(x, v.lower, v.upper)
+            tol = 4 * eps(max(abs(v.lower), abs(v.upper))) / TRUST._dx_dy(x, v.lower, v.upper)
             worst = max(worst, abs(start[k] - r.fit.theta[k]) / tol)
         end
         @info "DK25: the start against fit/theta, in units of the round trip's bound" worst
@@ -1101,7 +1101,7 @@ end
 
         # its own result as a hold: u_D held at its fitted value, recorded with held = 1
         write(joinpath(dir, "b.toml"), _dk_with_fit_table(_dk_p1_deck(datafile, joinpath(dir, "b")), "hold", rpath, ["u_D"]))
-        problem_b, _, _ = OTIS.build_problem(read_deck(joinpath(dir, "b.toml")))
+        problem_b, _, _ = TRUST.build_problem(read_deck(joinpath(dir, "b.toml")))
         @test problem_b.pspec.ntheta == 1
         fit(joinpath(dir, "b.toml"))
         rb = read_result(joinpath(dir, "b", "result.jld2"))
@@ -1113,7 +1113,7 @@ end
         kev = replace(_dk_p1_deck(datafile, joinpath(dir, "k"); t_bounds="[0.05, 0.8]", t_init=0.2),
             "T_eV = \"T_D\"" => "T_keV = \"T_D\"")
         write(joinpath(dir, "k.toml"), _dk_with_fit_table(kev, "start", rpath, ["T_D"]))
-        @test_throws "gives \"T_D\" in \"T_eV\", but this deck binds it through \"T_keV\"" OTIS.build_problem(read_deck(joinpath(dir, "k.toml")))
+        @test_throws "gives \"T_D\" in \"T_eV\", but this deck binds it through \"T_keV\"" TRUST.build_problem(read_deck(joinpath(dir, "k.toml")))
     end
 end
 
@@ -1135,5 +1135,37 @@ end
         @test _dk_count(logs, "stopped at its iteration cap") == 1
         record = only(filter(l -> occursin("iteration cap", string(l.message)), logs))
         @test record.kwargs[:iterations] == 1 && record.kwargs[:status] === :iterations
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# DK27: the otis- alias of the deck version (the 2026-10-18 rename, Level 1 decision D3)
+# ------------------------------------------------------------------------------------------
+
+@testset "DK27: read_deck accepts deck_version otis-deck-2 and refuses other numbers" begin
+    mktempdir() do dir
+        datafile = joinpath(dir, "data.jld2")
+        _dk_write_streak(datafile)
+        outdir = joinpath(dir, "out")
+        text = _dk_minimal_deck(datafile, outdir)
+        put(name, t) = (path = joinpath(dir, name); write(path, t); path)
+        @test occursin("deck_version = \"trust-deck-2\"", text)
+
+        # 1: the current number, old spelling: reads as the same Deck (exact), the canonical version
+        ref = read_deck(put("ref.toml", text))
+        old_text = replace(text, "deck_version = \"trust-deck-2\"" => "deck_version = \"otis-deck-2\"")
+        @test occursin("otis-deck-2", old_text)
+        old = read_deck(put("old.toml", old_text))
+        @test old.deck_version == "trust-deck-2"
+        @test old == ref
+        problem, optimizer, _ = TRUST.build_problem(old)
+        eff = effective_deck(old, problem, optimizer)
+        @test occursin("deck_version = \"trust-deck-2\"", eff)
+        @test !occursin("otis-", eff)
+
+        # 2: the wrong number in the old spelling is refused, naming the canonical string
+        bad_text = replace(text, "deck_version = \"trust-deck-2\"" => "deck_version = \"otis-deck-1\"")
+        @test_throws "has deck_version \"trust-deck-1\"; this version of TRUST reads \"trust-deck-2\"" read_deck(
+            put("bad.toml", bad_text))
     end
 end

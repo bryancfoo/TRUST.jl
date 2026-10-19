@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _chain_order, _chain_class, _kernel_rank, _kernel_effects, ACCEPTED_UNITS
+using TRUST
+using TRUST: _chain_order, _chain_class, _kernel_rank, _kernel_effects, ACCEPTED_UNITS
 
 # Step 4.G.1: the tabulated k-smearing (Phase 4.G spec D3-D9, OQ-56, decided 2026-10-03). TK1-TK8,
 # gate "tabulated k-smearing"; TK9, which compiles the KB chain's dual pass with the rays in it, is in
@@ -175,14 +175,14 @@ end
         deck = read_deck(w("d.toml", _tk_deck_text(dir)))
         @test deck.sections["instrument"]["tabulated_k_smearing"] ==
               Dict{String,Any}("offsets_deg" => collect(_TK_OFFSETS_DEG), "weights" => collect(_TK_WEIGHTS))
-        problem, opt, start = OTIS.build_problem(deck)
+        problem, opt, start = TRUST.build_problem(deck)
         effects = problem.experiment.effects
         @test [nameof(typeof(x)) for x in effects] == [:TabulatedKSmearing, :SpectralIRF, :Sensitivity]
         @test effects[1].offsets === _tk_rays().offsets && effects[1].weights === _tk_rays().weights
         eff = effective_deck(deck, problem, opt)
         @test read_deck(w("eff.toml", eff)) == deck
         o = objective(problem, start)
-        result = OTIS._build_result(problem, start, o, [(iteration=0.0, objective=o, chi2=o, R=0.0)], true,
+        result = TRUST._build_result(problem, start, o, [(iteration=0.0, objective=o, chi2=o, R=0.0)], true,
             :f_tolerance, 0, 1, 0, 0.0, "none")
         write_result(joinpath(dir, "r.jld2"), result; problem=problem, deck=eff)
         r = read_result(joinpath(dir, "r.jld2"))
@@ -211,7 +211,7 @@ end
                 line="tabulated_k_smearing = { offsets_deg = [0.0], weights = [\"x\"] }")))
 
         # refused when build_problem constructs the effect, with the constructor's message
-        bp(line) = OTIS.build_problem(rd(line))
+        bp(line) = TRUST.build_problem(rd(line))
         @test_throws "offsets and weights must have the same length; got 2 and 1" bp(
             "tabulated_k_smearing = { offsets_deg = [0.0, 1.0], weights = [1.0] }")
         @test_throws "offsets and weights must have the same length; got 0 and 1" bp(

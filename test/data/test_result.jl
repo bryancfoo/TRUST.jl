@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 import JLD2
 using JLD2: jldopen
 using Random: Xoshiro
@@ -103,7 +103,7 @@ const _RE_RESULT, _RE_SCAN = _re_fixture()
             got = Set(first.(_walk_leaf_values(f)))
             expected = Set{String}([
                 "layout_version", "meta/source", "meta/created", "meta/created_unix",
-                "meta/otis_version", "deck", "axis_name", "axis", "axis_unit",
+                "meta/trust_version", "deck", "axis_name", "axis", "axis_unit",
                 "axis_boundary_unit",
                 "fit/theta", "fit/chi2", "fit/R", "fit/objective", "fit/weight",
                 "fit/term_values", "fit/npixels", "fit/iterations", "fit/f_calls",
@@ -123,7 +123,7 @@ const _RE_RESULT, _RE_SCAN = _re_fixture()
             for p in result.experiment.trace.paths
                 push!(expected, "leaves/$(string(p))/values")
             end
-            # channels/ (D40, chunk 7): every otis-result-3 file has it, "main" alone for a
+            # channels/ (D40, chunk 7): every trust-result-3 file has it, "main" alone for a
             # single-channel fit; write_result is given no problem here, so no residual/mask.
             push!(expected, "channels/names")
             for summ in result.channels
@@ -175,7 +175,7 @@ end
         write_result(path, result; deck="the effective deck", source="fit", scan=_RE_SCAN)
         r = read_result(path)
 
-        @test r.layout_version == "otis-result-3"
+        @test r.layout_version == "trust-result-3"
         @test r.deck == "the effective deck"
         @test r.axis_name == :t
         @test r.axis == pspec.axis
@@ -210,7 +210,7 @@ end
         @test r.fit.converged == UInt8(result.converged)
         @test r.fit.status == string(result.status)
         @test r.fit.termination == string(result.termination)
-        @test r.fit.near_bound_fraction == OTIS._near_bound_fraction(result)
+        @test r.fit.near_bound_fraction == TRUST._near_bound_fraction(result)
         @test r.fit.optimizer == result.optimizer
         @test r.fit.elapsed == result.elapsed
 
@@ -247,11 +247,11 @@ end
     mktempdir() do dir
         path = joinpath(dir, "result.jld2")
         write_result(path, _RE_RESULT)
-        @test read_result(path).layout_version == "otis-result-3"
+        @test read_result(path).layout_version == "trust-result-3"
 
         badpath = joinpath(dir, "bad.jld2")
         jldopen(badpath, "w") do f
-            f["layout_version"] = "otis-result-0"
+            f["layout_version"] = "trust-result-0"
         end
         @test_throws "has layout_version" read_result(badpath)
     end
@@ -262,8 +262,8 @@ end
 # ------------------------------------------------------------------------------------------
 
 @testset "RE5: the streak and trace layouts are untouched" begin
-    @test OTIS.STREAK_LAYOUT_VERSION == "otis-streak-1"
-    @test OTIS.TRACE_LAYOUT_VERSION == "otis-trace-2"   # amended 2026-10-10: Phase 4.J's one bump (spec D4, D9)
+    @test TRUST.STREAK_LAYOUT_VERSION == "trust-streak-1"
+    @test TRUST.TRACE_LAYOUT_VERSION == "trust-trace-2"   # amended 2026-10-10: Phase 4.J's one bump (spec D4, D9)
 
     nl, nt = 16, 4
     lam = collect(range(235e-9, 255e-9; length=nl))
@@ -386,7 +386,7 @@ end
         write_trace(path, trace; source="test")
 
         arrays = read_trace(path)
-        @test arrays.layout_version == "otis-trace-2"   # amended 2026-10-10 (Phase 4.J spec D4, D9)
+        @test arrays.layout_version == "trust-trace-2"   # amended 2026-10-10 (Phase 4.J spec D4, D9)
         @test arrays.values == trace.values
 
         rebuilt = read_trace(path; as=:trace)
@@ -437,7 +437,7 @@ end
 end
 
 # ------------------------------------------------------------------------------------------
-# RE12, RE13 (A19, D47): laplace/ and calibration_scan/ inside otis-result-3. A joint,
+# RE12, RE13 (A19, D47): laplace/ and calibration_scan/ inside trust-result-3. A joint,
 # two-channel fixture, built here (not shared across the @safetestset boundary): channel b
 # carries an unbound WavelengthCalibration, chunk 9's own uncertainty fixture (D35's MC fixture,
 # copied, dlam_b removed).
@@ -573,7 +573,7 @@ end
 end
 
 # ------------------------------------------------------------------------------------------
-# RE14 (A19, D52): scatter/ inside otis-result-3. A local copy of test_uncertainty.jl's SXA
+# RE14 (A19, D52): scatter/ inside trust-result-3. A local copy of test_uncertainty.jl's SXA
 # fixture (not shared across the @safetestset boundary, chunk 6's own rule): a two-channel deck,
 # T_D and u_D free and time-varying, T_e fixed, noise-free data.
 # ------------------------------------------------------------------------------------------
@@ -611,7 +611,7 @@ _re14_write_b(path::AbstractString) = _re14_write(path, collect(range(0.03, 1.13
 
 function _re14_deck_text(path_a::AbstractString, path_b::AbstractString, outdir::AbstractString)
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     channels = ["a", "b"]
 
     [[fit.regions]]
@@ -683,7 +683,7 @@ function _re14_deck_and_scatter()
         deckpath = joinpath(dir, "deck.toml")
         write(deckpath, text)
         deck = read_deck(deckpath)
-        problem, opt, start = OTIS.build_problem(deck)
+        problem, opt, start = TRUST.build_problem(deck)
         r = solve(problem, opt; start=start)
         pol = polish(problem, r)
         sc = slice_scatter(deck, pol.result)
@@ -731,7 +731,7 @@ const _RE14_FIXTURE = _re14_deck_and_scatter()
 end
 
 # ------------------------------------------------------------------------------------------
-# RE15 (Phase 4.B spec D5, D21): fit/gn_decrease, optional inside otis-result-3
+# RE15 (Phase 4.B spec D5, D21): fit/gn_decrease, optional inside trust-result-3
 # ------------------------------------------------------------------------------------------
 
 @testset "RE15: write_result with gn_decrease (Phase 4.B spec D5)" begin
@@ -794,5 +794,42 @@ end
         end
         old = read_result(path)
         @test old.deck == "" && old.variables["u_D"].unit == ""
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# RE17: the otis- alias of the result layout (the 2026-10-18 rename, Level 1 decision D3)
+# ------------------------------------------------------------------------------------------
+
+@testset "RE17: read_result accepts the otis- spelling of the current number only" begin
+    result = _RE_RESULT
+    rewrite(path, version) = jldopen(path, "a+") do f
+        delete!(f, "layout_version")
+        f["layout_version"] = version
+    end
+    mktempdir() do dir
+        path = joinpath(dir, "result.jld2")
+        write_result(path, result; deck="the effective deck", source="fit", scan=_RE_SCAN)
+        ref = read_result(path)
+        @test jldopen(f -> f["layout_version"], path, "r") == "trust-result-3"   # writers never emit otis-
+
+        # 1: the current number, old spelling: reads; the whole :arrays tuple is the untouched file's
+        # (exact), its layout_version field the canonical string. RE3's own field checks run on it too.
+        rewrite(path, "otis-result-3")
+        @test jldopen(f -> f["layout_version"], path, "r") == "otis-result-3"
+        r = read_result(path)
+        @test r.layout_version == "trust-result-3"
+        @test isequal(r, ref)
+        @test r.deck == "the effective deck"
+        @test r.axis == result.pspec.axis
+        for v in result.pspec.variables
+            @test r.variables[v.name].values == result.values[v.name]
+        end
+        @test r.fit.theta == result.theta
+        @test r.scan.chi2 == _RE_SCAN.chi2
+
+        # 2: the wrong number in the old spelling is refused, naming the canonical string
+        rewrite(path, "otis-result-0")
+        @test_throws "has layout_version \"trust-result-0\"; expected \"trust-result-3\"" read_result(path)
     end
 end

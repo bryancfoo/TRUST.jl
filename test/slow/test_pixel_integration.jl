@@ -1,8 +1,8 @@
 using Test
-using OTIS
-using OTIS: _kernel_effects, _widen_trace, _make_cache, _jacobian_bin!, JACOBIAN_CHUNK,
+using TRUST
+using TRUST: _kernel_effects, _widen_trace, _make_cache, _jacobian_bin!, JACOBIAN_CHUNK,
     _collect_kernel_bindings, jvp!
-const ForwardDiff = OTIS.ForwardDiff   # test/slow's environment has no ForwardDiff of its own
+const ForwardDiff = TRUST.ForwardDiff   # test/slow's environment has no ForwardDiff of its own
 
 # Step 4.F.2's slow rows (Phase 4.F spec D17, D24), gated "pixel integration (slow)": PI6 and PI8,
 # which compile the KB chain's dual pass with a PixelIntegration in it, too slow for the phase's
@@ -32,13 +32,13 @@ include(joinpath(@__DIR__, "..", "fixtures", "sampling_fixture.jl"))
     for (gk, i) in enumerate(kernel_global_var)
         kernel_global_of_var[i] = gk
     end
-    DFT = ForwardDiff.Dual{OTIS._JacobianTag,Float64,JACOBIAN_CHUNK}
+    DFT = ForwardDiff.Dual{TRUST._JacobianTag,Float64,JACOBIAN_CHUNK}
     work_trace = _widen_trace(pspec.trace, DFT)
     vals = Vector{DFT}(undef, pspec.nslots)
     col_cache = _make_cache(DFT, nlambda)
     block = Matrix{Float64}(undef, nlambda, length(pspec.bin_entries[1]))
     kernel_globals = Array{Float64,3}(undef, nlambda, length(pspec.trace.axis), G)
-    flag = OTIS._prefactor_flag(expt.prefactor)
+    flag = TRUST._prefactor_flag(expt.prefactor)
     _jb!() = _jacobian_bin!(block, kernel_globals, 1, work_trace, vals, col_cache, pspec, nvar, G,
         kernel_global_idx, kernel_global_of_var, kernel_effects0, kernel_bindings,
         expt.probe, expt.collection, expt.lambda, flag, theta)

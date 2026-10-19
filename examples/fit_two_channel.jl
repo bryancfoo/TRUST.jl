@@ -10,8 +10,8 @@
 # The figure itself is drawn separately, in the figures environment
 # (examples/figures/make_two_channel_figure.jl), which reads the joint fit and the two stages back.
 
-using OTIS
-using OTIS: _near_bound_fraction
+using TRUST
+using TRUST: _near_bound_fraction
 using Statistics: median
 
 include(joinpath(@__DIR__, "problems.jl"))

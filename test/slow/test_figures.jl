@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using Random: Xoshiro
 
 include(joinpath(@__DIR__, "..", "..", "examples", "problems.jl"))

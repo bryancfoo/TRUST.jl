@@ -1,10 +1,10 @@
 using Test
-using OTIS
-using OTIS: _interpolate_series
+using TRUST
+using TRUST: _interpolate_series
 using JLD2: jldopen
 
 # Step 4.I.1: the start file (Phase 4.I spec D5, D6, D8, D9, D13; OQ-59 item 2), gated "start file".
-# SF1 to SF3: the otis-start-1 layout, write_start/read_start and the interpolation; SF4 to SF6: a
+# SF1 to SF3: the trust-start-1 layout, write_start/read_start and the interpolation; SF4 to SF6: a
 # deck's [fit.start] -- build_problem's start, and every refusal read_deck and build_problem make; SF7:
 # a result file of the same deck as its start.
 
@@ -19,13 +19,13 @@ include(joinpath(@__DIR__, "..", "fixtures", "start_hold_fixture.jl"))
     mktempdir() do dir
         path = _sh_start_file(dir)
         jldopen(path, "r") do f
-            @test f["layout_version"] == "otis-start-1"
+            @test f["layout_version"] == "trust-start-1"
             @test f["meta/source"] == "test"
             @test f["variables/T_e/unit"] == "T_eV"
             @test !haskey(f, "variables/logn/unit")
         end
         st = read_start(path)
-        @test st.layout_version == "otis-start-1"
+        @test st.layout_version == "trust-start-1"
         @test st.source == "test"
         @test st.axis == _SH_AXIS_NS .* 1e-9
         @test all(st.values["T_e"] .=== _SH_SERIES["T_e"])
@@ -62,16 +62,16 @@ end
         @test_throws "units names \"b\", which values does not" write_start(p; axis_s=[1.0, 2.0], values=v, units=Dict("b" => "T_eV"))
 
         jldopen(p, "w") do f
-            f["layout_version"] = "otis-start-0"
+            f["layout_version"] = "trust-start-0"
         end
-        @test_throws "has layout_version \"otis-start-0\"; expected \"otis-start-1\"" read_start(p)
+        @test_throws "has layout_version \"trust-start-0\"; expected \"trust-start-1\"" read_start(p)
         jldopen(p, "w") do f
-            f["layout_version"] = "otis-start-1"
+            f["layout_version"] = "trust-start-1"
             f["axis"] = [1.0, 2.0]
         end
         @test_throws "is missing the required dataset \"variables\"" read_start(p)
         jldopen(p, "w") do f
-            f["layout_version"] = "otis-start-1"
+            f["layout_version"] = "trust-start-1"
             f["axis"] = [1.0, 2.0]
             f["variables/a/values"] = [1.0, 2.0, 3.0]
         end
@@ -102,11 +102,11 @@ end
     mktempdir() do dir
         _st_streaks(dir)
         text = _sh_epw_text(dir)
-        p0, _, s0 = OTIS.build_problem(read_deck(_st_write(dir, "plain.toml", text)))
+        p0, _, s0 = TRUST.build_problem(read_deck(_st_write(dir, "plain.toml", text)))
         sp = _sh_start_file(dir)
         deck = read_deck(_st_write(dir, "start.toml", _sh_tables(text; start=(sp, ["T_e", "logn", "m_e"]))))
         @test deck.sections["fit_start"] == Dict{String,Any}("file" => _st_path(sp), "variables" => Any["T_e", "logn", "m_e"])
-        problem, _, start = OTIS.build_problem(deck)
+        problem, _, start = TRUST.build_problem(deck)
         pspec = problem.pspec
         ax = read_start(sp).axis
         oracle = [nm => [_sh_interp(ax, _SH_SERIES[nm], t) for t in pspec.axis] for nm in ("T_e", "logn", "m_e")]
@@ -162,11 +162,11 @@ end
     mktempdir() do dir
         _st_streaks(dir)
         text = _sh_epw_text(dir)
-        bp(name, t) = OTIS.build_problem(read_deck(_st_write(dir, name, t)))
+        bp(name, t) = TRUST.build_problem(read_deck(_st_write(dir, name, t)))
         sp = _sh_start_file(dir)
 
         # a file of neither layout (the EPW streak itself)
-        @test_throws "build_problem: [fit.start] file \"$(_st_path(joinpath(dir, "epw.jld2")))\" has layout_version \"otis-streak-1\"; expected \"otis-result-3\" (a result file) or \"otis-start-1\"" bp("a.toml",
+        @test_throws "build_problem: [fit.start] file \"$(_st_path(joinpath(dir, "epw.jld2")))\" has layout_version \"trust-streak-1\"; expected \"trust-result-3\" (a result file) or \"trust-start-1\"" bp("a.toml",
             _sh_tables(text; start=(joinpath(dir, "epw.jld2"), ["T_e"])))
         # a name the file does not hold
         @test_throws "build_problem: [fit.start] names \"T_D\", which file \"$(_st_path(sp))\" does not hold; it holds [\"T_e\", \"logn\", \"m_e\"]" bp("b.toml",
@@ -204,23 +204,23 @@ end
 # SF7: a result file of the deck itself as its start returns its theta, to the logit's round trip
 # ------------------------------------------------------------------------------------------
 
-@testset "SF7: an otis-result-3 file as [fit.start]" begin
+@testset "SF7: a trust-result-3 file as [fit.start]" begin
     mktempdir() do dir
         _st_streaks(dir)
         text = _sh_epw_text(dir)
-        problem, _, start = OTIS.build_problem(read_deck(_st_write(dir, "plain.toml", text)))
+        problem, _, start = TRUST.build_problem(read_deck(_st_write(dir, "plain.toml", text)))
         theta = start .+ 0.1 .* sin.(1:length(start))             # four time-varying variables, off their inits
-        r = OTIS._build_result(problem, theta, 0.0, OTIS._TRAJECTORY_ROW[], true, :converged_at_start, 0, 0, 0,
+        r = TRUST._build_result(problem, theta, 0.0, TRUST._TRAJECTORY_ROW[], true, :converged_at_start, 0, 0, 0,
             0.0, "none")
         rpath = write_result(joinpath(dir, "result.jld2"), r)
         names = ["T_D", "T_e", "logn", "m_e"]
-        p2, _, start2 = OTIS.build_problem(read_deck(_st_write(dir, "own.toml", _sh_tables(text; start=(rpath, names)))))
+        p2, _, start2 = TRUST.build_problem(read_deck(_st_write(dir, "own.toml", _sh_tables(text; start=(rpath, names)))))
         # four ulps of the larger bound's magnitude, carried through dy/dx = 1/_dx_dy (spec D9)
         worst = 0.0
         for (iv, v) in enumerate(p2.pspec.variables), k in 0:(p2.pspec.widths[iv]-1)
             i = p2.pspec.offsets[iv] + k
-            x = OTIS._from_unconstrained(theta[i], v.lower, v.upper)
-            tol = 4 * eps(max(abs(v.lower), abs(v.upper))) / OTIS._dx_dy(x, v.lower, v.upper)
+            x = TRUST._from_unconstrained(theta[i], v.lower, v.upper)
+            tol = 4 * eps(max(abs(v.lower), abs(v.upper))) / TRUST._dx_dy(x, v.lower, v.upper)
             worst = max(worst, abs(start2[i] - theta[i]) / tol)
         end
         @info "SF7: the start against the file's theta, in units of the round trip's bound" worst
@@ -245,5 +245,69 @@ end
         st = read_start(path)
         @test st.source == ""
         @test st.units == Dict("T_e" => "")
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# SF9, SF10: the otis- alias of the start layout, and of the [fit.start] file dispatch (the
+# 2026-10-18 rename, Level 1 decision D3)
+# ------------------------------------------------------------------------------------------
+
+_sf_rewrite(path, version) = jldopen(path, "a+") do f
+    delete!(f, "layout_version")
+    f["layout_version"] = version
+end
+
+@testset "SF9: read_start accepts the otis- spelling of the current number only" begin
+    mktempdir() do dir
+        path = _sh_start_file(dir)
+        ref = read_start(path)
+        @test jldopen(f -> f["layout_version"], path, "r") == "trust-start-1"   # writers never emit otis-
+
+        # 1: the current number, old spelling: reads, every field the untouched file's (exact)
+        _sf_rewrite(path, "otis-start-1")
+        @test jldopen(f -> f["layout_version"], path, "r") == "otis-start-1"
+        old = read_start(path)
+        @test old.layout_version == "trust-start-1"
+        @test isequal(old, ref)
+
+        # 2: the wrong number in the old spelling is refused, naming the canonical string
+        _sf_rewrite(path, "otis-start-0")
+        @test_throws "has layout_version \"trust-start-0\"; expected \"trust-start-1\"" read_start(path)
+    end
+end
+
+@testset "SF10: [fit.start] accepts otis-start-1 and otis-result-3 files, and refuses other numbers" begin
+    mktempdir() do dir
+        _st_streaks(dir)
+        text = _sh_epw_text(dir)
+        bp(name, t) = TRUST.build_problem(read_deck(_st_write(dir, name, t)))
+
+        # a start file
+        sp = _sh_start_file(dir)
+        _, _, start_ref = bp("ref_start.toml", _sh_tables(text; start=(sp, ["T_e", "logn", "m_e"])))
+        _sf_rewrite(sp, "otis-start-1")
+        _, _, start_old = bp("old_start.toml", _sh_tables(text; start=(sp, ["T_e", "logn", "m_e"])))
+        @test all(start_old .=== start_ref)
+
+        # a result file (SF7's scaffolding)
+        problem, _, start = TRUST.build_problem(read_deck(_st_write(dir, "plain.toml", text)))
+        theta = start .+ 0.1 .* sin.(1:length(start))
+        r = TRUST._build_result(problem, theta, 0.0, TRUST._TRAJECTORY_ROW[], true, :converged_at_start, 0, 0, 0,
+            0.0, "none")
+        rpath = write_result(joinpath(dir, "result.jld2"), r)
+        names = ["T_D", "T_e", "logn", "m_e"]
+        _, _, res_ref = bp("ref_result.toml", _sh_tables(text; start=(rpath, names)))
+        _sf_rewrite(rpath, "otis-result-3")
+        _, _, res_old = bp("old_result.toml", _sh_tables(text; start=(rpath, names)))
+        @test all(res_old .=== res_ref)
+
+        # the wrong numbers in the old spelling are refused, and the message names the canonical string
+        _sf_rewrite(sp, "otis-start-0")
+        @test_throws "has layout_version \"trust-start-0\"; expected \"trust-result-3\" (a result file) or \"trust-start-1\"" bp(
+            "bad_start.toml", _sh_tables(text; start=(sp, ["T_e"])))
+        _sf_rewrite(rpath, "otis-result-2")
+        @test_throws "has layout_version \"trust-result-2\"; expected \"trust-result-3\" (a result file) or \"trust-start-1\"" bp(
+            "bad_result.toml", _sh_tables(text; start=(rpath, names)))
     end
 end

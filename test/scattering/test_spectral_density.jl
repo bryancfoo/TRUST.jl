@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using SpecialFunctions: dawson
 using QuadGK: quadgk
 

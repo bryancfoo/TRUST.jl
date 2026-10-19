@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using ForwardDiff
 
 const H_MASS_AMU = 1.007276466879   # CODATA proton mass, in amu
@@ -27,7 +27,7 @@ peak_position(x, y) = first(peak_position_and_value(x, y))
     lambdas = range(lambda_to_si(500.0, :lambda_nm), lambda_to_si(560.0, :lambda_nm); length = 32)
     P = spectrum(p, probe, collection, lambdas)
     for (i, lam) in enumerate(lambdas)
-        @test P[i] == OTIS._spectrum_at(p, probe, collection, lam)
+        @test P[i] == TRUST._spectrum_at(p, probe, collection, lam)
     end
     P2 = similar(P)
     spectrum!(P2, p, probe, collection, lambdas)
@@ -41,9 +41,9 @@ end
     lambdas = range(lambda_to_si(500.0, :lambda_nm), lambda_to_si(560.0, :lambda_nm); length = 8)
     for lam in lambdas
         k, omega, k_s = wavevector(probe, collection, lam, p)
-        val = OTIS._spectrum_at(p, probe, collection, lam)
-        omega_probe = OTIS._omega_probe(probe)
-        factored = val / OTIS._wavelength_jacobian(lam) / OTIS._prefactor(omega, omega_probe, true)
+        val = TRUST._spectrum_at(p, probe, collection, lam)
+        omega_probe = TRUST._omega_probe(probe)
+        factored = val / TRUST._wavelength_jacobian(lam) / TRUST._prefactor(omega, omega_probe, true)
         @test isapprox(factored, spectral_density(p, k, omega); rtol = 1e-14)
     end
 end
@@ -55,7 +55,7 @@ end
     lam = lambda_to_si(500.0, :lambda_nm)
     k, omega, k_s = wavevector(probe, collection, lam, p)
     S = spectral_density(p, k, omega)
-    @test OTIS._spectrum_at(p, probe, collection, lam, false) == S * OTIS._wavelength_jacobian(lam)
+    @test TRUST._spectrum_at(p, probe, collection, lam, false) == S * TRUST._wavelength_jacobian(lam)
 
     @test_throws "spectrum: prefactor must be :first_order or :none; got :full" spectrum(
         p, probe, collection, [lam]; prefactor = :full)
@@ -109,12 +109,12 @@ end
     p = reference_plasma()
     probe = ProbeBeam(lambda_probe_nm = 526.5)
     c_approx = Collection(theta_deg = 90, k_model = :approximate)
-    omega_i = OTIS._omega_probe(probe)
+    omega_i = TRUST._omega_probe(probe)
     for omega in (1e12, 1e13, 5e13, 2e14, 5e14)
         lam_plus = 2pi * SPEED_OF_LIGHT / (omega_i + omega)
         lam_minus = 2pi * SPEED_OF_LIGHT / (omega_i - omega)
-        Pp = OTIS._spectrum_at(p, probe, c_approx, lam_plus, false) / OTIS._wavelength_jacobian(lam_plus)
-        Pm = OTIS._spectrum_at(p, probe, c_approx, lam_minus, false) / OTIS._wavelength_jacobian(lam_minus)
+        Pp = TRUST._spectrum_at(p, probe, c_approx, lam_plus, false) / TRUST._wavelength_jacobian(lam_plus)
+        Pm = TRUST._spectrum_at(p, probe, c_approx, lam_minus, false) / TRUST._wavelength_jacobian(lam_minus)
         @test isapprox(Pp, Pm; rtol = 1e-12)
     end
 
@@ -122,15 +122,15 @@ end
     c_exact = Collection(theta_deg = 90, k_model = :exact)
     lam_i = probe.lambda
     dlam = lambda_to_si(5.0, :lambda_nm)
-    Pp = OTIS._spectrum_at(p, probe, c_exact, lam_i + dlam, false) / OTIS._wavelength_jacobian(lam_i + dlam)
-    Pm = OTIS._spectrum_at(p, probe, c_exact, lam_i - dlam, false) / OTIS._wavelength_jacobian(lam_i - dlam)
+    Pp = TRUST._spectrum_at(p, probe, c_exact, lam_i + dlam, false) / TRUST._wavelength_jacobian(lam_i + dlam)
+    Pm = TRUST._spectrum_at(p, probe, c_exact, lam_i - dlam, false) / TRUST._wavelength_jacobian(lam_i - dlam)
     @test abs(Pp - Pm) / max(abs(Pp), abs(Pm)) > 1e-3
 end
 
 function _sp78_setup()
     probe = ProbeBeam(lambda_probe_nm = 526.5)
     collection = Collection(theta_deg = 90)
-    omega_i = OTIS._omega_probe(probe)
+    omega_i = TRUST._omega_probe(probe)
     n_cr = VACUUM_PERMITTIVITY * ELECTRON_MASS * omega_i^2 / ELEMENTARY_CHARGE^2
     n_e = 0.005 * n_cr
     p = Plasma(n_e_cm3 = n_from_si(n_e, :n_cm3), electrons = (electrons(T_eV = 300),),
@@ -159,15 +159,15 @@ end
 
 @testset "SP8: blue/red EPW peak ratio vs Eq. 5.4.10" begin
     p, probe, collection, lam_i, a, dlam_pred, blue_grid, red_grid = _sp78_setup()
-    Pblue_over_J = spectrum(p, probe, collection, blue_grid) ./ OTIS._wavelength_jacobian.(blue_grid)
-    Pred_over_J = spectrum(p, probe, collection, red_grid) ./ OTIS._wavelength_jacobian.(red_grid)
+    Pblue_over_J = spectrum(p, probe, collection, blue_grid) ./ TRUST._wavelength_jacobian.(blue_grid)
+    Pred_over_J = spectrum(p, probe, collection, red_grid) ./ TRUST._wavelength_jacobian.(red_grid)
     _, blue_val = peak_position_and_value(blue_grid, Pblue_over_J)
     _, red_val = peak_position_and_value(red_grid, Pred_over_J)
     ratio = blue_val / red_val
     @test ratio > 1
 
     k_i, _, _ = wavevector(probe, collection, lam_i, p)
-    omega_i = OTIS._omega_probe(probe)
+    omega_i = TRUST._omega_probe(probe)
     omega_pe = plasma_frequency(p.electrons["e"])
     predicted = 1 + 4 * sqrt(omega_pe^2 + a^2 * k_i^2) / omega_i
     @info "SP8 blue/red ratio" measured = ratio predicted = predicted

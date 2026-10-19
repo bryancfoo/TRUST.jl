@@ -1,7 +1,7 @@
 # Phase 4.B Step 4.B.5: the three shapes' synthetic two-channel streaks, full resolution. Spec D39.
 # Run: julia --project=. examples/shapes.jl
 
-using OTIS
+using TRUST
 
 include(joinpath(@__DIR__, "problems.jl"))
 

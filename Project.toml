@@ -1,4 +1,4 @@
-name = "OTIS"
+name = "TRUST"
 uuid = "9a288518-95a0-434c-aa8d-fc74e0293225"
 version = "0.1.0"
 authors = ["Bryan Foo <bryancfoo@gmail.com>"]
@@ -21,7 +21,7 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
 
 [extensions]
-OTISMakieExt = "Makie"
+TRUSTMakieExt = "Makie"
 
 [compat]
 ChainRulesCore = "1.26.1"

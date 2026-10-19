@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 using QuadGK: quadgk
 using SpecialFunctions: dawson
 using ForwardDiff: derivative

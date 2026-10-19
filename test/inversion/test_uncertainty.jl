@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: jvp!, jtvp!, jacobian, _full_residuals, gradient!, _free_entries, _theta_layout,
+using TRUST
+using TRUST: jvp!, jtvp!, jacobian, _full_residuals, gradient!, _free_entries, _theta_layout,
     _to_unconstrained, _from_unconstrained, _dx_dy, _chain_class, BOUND_PROXIMITY_TOL,
     _detrended_spread
 import Random
@@ -446,7 +446,7 @@ function _sx_deck_text(path_a::AbstractString, path_b::AbstractString, outdir::A
     te_value::AbstractString="400.0", te_var_block::AbstractString="",
     regularizer_block::AbstractString="[regularizer]\nweight = 1.0\nterms = [\n  { select = [\"T_D\", \"u_D\"], operator = \"D2\", normalization = \"relative\" },\n]\n")
     return """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
     channels = ["a", "b"]
 
     $regions_block
@@ -508,7 +508,7 @@ function _sx_build(dir::AbstractString, text::AbstractString, deckname::Abstract
     path = joinpath(dir, deckname)
     write(path, text)
     deck = read_deck(path)
-    problem, opt, start = OTIS.build_problem(deck)
+    problem, opt, start = TRUST.build_problem(deck)
     r = solve(problem, opt; start=start)
     pol = polish(problem, r)
     return deck, problem, pol.result
@@ -531,10 +531,10 @@ const _SX_SCATTER_B = slice_scatter(_SX_DECK_B, _SX_RESULT_B)
 
 # The coarse chan_data, built the same way build_problem does internally, for SX1's own
 # window-count cross-check (D48 item 2's own check, reused here rather than reimplemented).
-const _SX_CHAN_LIST = OTIS._channel_list(_SX_DECK_A.sections)
-const _SX_RAW, _SX_PROBES, _SX_COLLECTIONS = OTIS._read_channels(_SX_DECK_A.sections, _SX_CHAN_LIST, true)
-const _SX_REGIONS = OTIS._build_averaging_regions(_SX_DECK_A.sections["fit_regions"])
-const _SX_COARSE = OTIS._average_channels(_SX_RAW, _SX_CHAN_LIST, _SX_REGIONS)
+const _SX_CHAN_LIST = TRUST._channel_list(_SX_DECK_A.sections)
+const _SX_RAW, _SX_PROBES, _SX_COLLECTIONS = TRUST._read_channels(_SX_DECK_A.sections, _SX_CHAN_LIST, true)
+const _SX_REGIONS = TRUST._build_averaging_regions(_SX_DECK_A.sections["fit_regions"])
+const _SX_COARSE = TRUST._average_channels(_SX_RAW, _SX_CHAN_LIST, _SX_REGIONS)
 
 @testset "SX1: the grid" begin
     sc = _SX_SCATTER_A
@@ -602,7 +602,7 @@ end
 
 @testset "SX5: the two refusals; an interval no variable uses scatters as before" begin
     text_noregions = """
-    deck_version = "otis-deck-2"
+    deck_version = "trust-deck-2"
 
     [data]
     file = "$(_sx_path(_SX_PATH_A))"

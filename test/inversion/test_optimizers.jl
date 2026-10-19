@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _cgls, _build_procedure, _PROCEDURE_NAMES, _PROCEDURE_BASE_NAMES, _from_unconstrained,
+using TRUST
+using TRUST: _cgls, _build_procedure, _PROCEDURE_NAMES, _PROCEDURE_BASE_NAMES, _from_unconstrained,
     jtvp!, jvp!, jacobian, _full_residuals, _gauss_newton_diagonal, _gauss_newton_floor,
     PRECOND_FLOOR_REL
 using LinearAlgebra: norm

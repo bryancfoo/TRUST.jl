@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: LeafRef, _resolve_leaf, _leaf_row, _leaf_value, _with_leaf
+using TRUST
+using TRUST: LeafRef, _resolve_leaf, _leaf_row, _leaf_value, _with_leaf
 import ForwardDiff
 
 # The D22 reference plasma (test/scattering/test_spectrum_supergaussian.jl): n_e_cm3 = 5e19, one

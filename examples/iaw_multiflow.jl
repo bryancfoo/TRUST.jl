@@ -1,7 +1,7 @@
 # foo2026 Section III.B: the IAW multi-flow problem, full resolution. Spec D25.
 # Run: julia --project=. examples/iaw_multiflow.jl
 
-using OTIS
+using TRUST
 using Random: Xoshiro
 
 include(joinpath(@__DIR__, "problems.jl"))

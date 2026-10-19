@@ -34,7 +34,7 @@
 # it was written on. Its output goes to the phase report, never to a committed file; the streaks it
 # writes live in a temporary directory and are deleted.
 
-using OTIS
+using TRUST
 using Printf
 using Statistics: median
 using LinearAlgebra: BLAS
@@ -124,7 +124,7 @@ function main()
             r = st.result
             t_gn = @elapsed gd = gn_decrease(st.problem, r.theta)
             chi2n = Dict(c.name => c.chi2 / c.npixels for c in r.channels)
-            entries = OTIS._near_bound_entries(r)
+            entries = TRUST._near_bound_entries(r)
             say(@sprintf("  status = %s converged = %s iterations = %d elapsed = %.1f s (staged, wall %.1f s); polish's last decrease = %.3e; gn_decrease = %.3e (%.1f s)",
                 r.status, r.converged, r.iterations, r.elapsed, t, st.decreases[end], gd, t_gn))
             say(@sprintf("  chi2/n: EPW %.4f, IAW %.4f; stages alone: EPW %.4f, IAW %.4f",
@@ -133,7 +133,7 @@ function main()
             # pixels the fit used; and chi2/n with the camera's worst bin left out.
             worst_bins = Dict{String,Int}()
             for (c, label) in ((1, "EPW"), (2, "IAW"))
-                ch = OTIS._channel_problem(st.problem, c)
+                ch = TRUST._channel_problem(st.problem, c)
                 model = measure(r.experiments[c])
                 used = falses(size(ch.data.image))
                 used[ch.pixel_index] .= true

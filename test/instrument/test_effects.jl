@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _resolve_leaf, _leaf_value, _with_leaf, LeafRef, _sigma_from_fwhm, _fwhm_from_sigma,
+using TRUST
+using TRUST: _resolve_leaf, _leaf_value, _with_leaf, LeafRef, _sigma_from_fwhm, _fwhm_from_sigma,
     _convolution_matrix, GAUSS_LEGENDRE_NODES, GAUSS_LEGENDRE_WEIGHTS,
     GAUSS_HERMITE_NODES, GAUSS_HERMITE_WEIGHTS, _bin_kernel!, _make_cache, _streak_eltype
 import ForwardDiff
@@ -534,7 +534,7 @@ end
         @test ForwardDiff.value(reconstruct(GradientSmearing(template; leaf="electrons.e.T", width=0.0),
             (width=ForwardDiff.Dual(0.0, s),)).width) === 0.0
         # an inadmissible zero is refused, whatever the seed (:485, :562, :569)
-        @test_throws "sigma must be strictly positive" OTIS.GaussianKernel(ForwardDiff.Dual(0.0, s))
+        @test_throws "sigma must be strictly positive" TRUST.GaussianKernel(ForwardDiff.Dual(0.0, s))
         @test_throws "SpectralIRF: FWHM must be strictly positive" SpectralIRF(fwhm_m=ForwardDiff.Dual(0.0, s))
         @test_throws "TemporalIRF: FWHM must be strictly positive" TemporalIRF(fwhm_s=ForwardDiff.Dual(0.0, s))
     end

@@ -1,5 +1,5 @@
 using Test
-using OTIS
+using TRUST
 import JLD2
 using JLD2: jldopen
 
@@ -107,7 +107,7 @@ end
     mktempdir() do dir
         path1 = joinpath(dir, "no_image.jld2")
         jldopen(path1, "w") do f
-            f["layout_version"] = OTIS.STREAK_LAYOUT_VERSION
+            f["layout_version"] = TRUST.STREAK_LAYOUT_VERSION
             f["lambda_nm"] = lambda_from_si.(lam, :lambda_nm)
             f["t_ns"] = t_from_si.(t, :t_ns)
         end
@@ -115,16 +115,16 @@ end
 
         path2 = joinpath(dir, "bad_version.jld2")
         jldopen(path2, "w") do f
-            f["layout_version"] = "otis-streak-0"
+            f["layout_version"] = "trust-streak-0"
             f["lambda_nm"] = lambda_from_si.(lam, :lambda_nm)
             f["t_ns"] = t_from_si.(t, :t_ns)
             f["image"] = rand(nl, nt)
         end
-        @test_throws "has layout_version \"otis-streak-0\"; expected \"otis-streak-1\"" read_streak(path2)
+        @test_throws "has layout_version \"trust-streak-0\"; expected \"trust-streak-1\"" read_streak(path2)
 
         path3 = joinpath(dir, "wrong_size.jld2")
         jldopen(path3, "w") do f
-            f["layout_version"] = OTIS.STREAK_LAYOUT_VERSION
+            f["layout_version"] = TRUST.STREAK_LAYOUT_VERSION
             f["lambda_nm"] = lambda_from_si.(lam, :lambda_nm)
             f["t_ns"] = t_from_si.(t, :t_ns)
             f["image"] = rand(nl, nt + 1)
@@ -147,12 +147,12 @@ end
         path = joinpath(dir, "trace.jld2")
         write_trace(path, trace; source="test")
         r = read_trace(path)
-        @test r.layout_version == OTIS.TRACE_LAYOUT_VERSION
+        @test r.layout_version == TRUST.TRACE_LAYOUT_VERSION
         @test all(r.axis .=== trace.axis)
         @test all(r.values .=== trace.values)
         @test r.paths == string.(trace.paths)
         @test r.template["electrons"]["names"] == ["e"]
-        @test r.template["electrons"]["species"]["e"]["mass_kg"] == OTIS.ELECTRON_MASS
+        @test r.template["electrons"]["species"]["e"]["mass_kg"] == TRUST.ELECTRON_MASS
         @test r.template["electrons"]["species"]["e"]["charge"] == -1
         @test r.template["electrons"]["species"]["e"]["shape"] == "SuperGaussian"
         @test haskey(r.template["electrons"]["species"]["e"]["shape_p"], "m")
@@ -193,7 +193,7 @@ end
             @test f["meta/source"] == "s"
             @test f["meta/created_unix"] isa Float64
             @test before - 60 <= f["meta/created_unix"] <= after + 60
-            @test f["meta/otis_version"] isa String
+            @test f["meta/trust_version"] isa String
             @test isapprox(f["meta/lambda_probe_nm"], 263.25; rtol=1e-12)
             @test isapprox(f["meta/theta_deg"], 60.0; rtol=1e-12)
             @test isapprox(f["meta/polarization_deg"], 10.0; rtol=1e-12)
@@ -279,5 +279,36 @@ end
         @test read_streak(path).meta["note"] == ""
         tpath = write_trace(joinpath(dir, "trace.jld2"), trace)
         @test jldopen(f -> f["meta/source"], tpath, "r") == "-"
+    end
+end
+
+# ------------------------------------------------------------------------------------------
+# IO13: the otis- alias of the streak layout (the 2026-10-18 rename, Level 1 decision D3)
+# ------------------------------------------------------------------------------------------
+
+@testset "IO13: read_streak accepts the otis- spelling of the current number only" begin
+    nl, nt = 8, 4
+    lam = collect(range(235e-9, 255e-9; length=nl))
+    t = collect(range(2.0e-9, 3.0e-9; length=nt))
+    sd = StreakData(lambda_m=lam, t_s=t, image=rand(nl, nt), sigma=rand(nl, nt) .+ 0.1,
+        mask=trues(nl, nt), meta=Dict{String,Any}("a" => "hello"))
+    rewrite(path, version) = jldopen(path, "a+") do f
+        delete!(f, "layout_version")
+        f["layout_version"] = version
+    end
+    mktempdir() do dir
+        path = write_streak(joinpath(dir, "streak.jld2"), sd; source="io13")
+        ref = read_streak(path)
+        @test jldopen(f -> f["layout_version"], path, "r") == "trust-streak-1"   # writers never emit otis-
+
+        # 1: the current number, old spelling: reads, and every field is the untouched file's (exact)
+        rewrite(path, "otis-streak-1")
+        @test jldopen(f -> f["layout_version"], path, "r") == "otis-streak-1"
+        old = read_streak(path)
+        @test all(isequal(getfield(old, k), getfield(ref, k)) for k in fieldnames(StreakData))
+
+        # 2: a wrong number in the old spelling is refused, naming the canonical string
+        rewrite(path, "otis-streak-0")
+        @test_throws "has layout_version \"trust-streak-0\"; expected \"trust-streak-1\"" read_streak(path)
     end
 end

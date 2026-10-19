@@ -40,7 +40,7 @@
 # Budget: 30 minutes (hard limit 60); Level 2's two runs took 6.7 minutes each on the machine it
 # was written on (spec D12).
 
-using OTIS
+using TRUST
 using Printf
 using LinearAlgebra: BLAS, dot, norm, cond, eigen, Symmetric, Diagonal, diag
 import ForwardDiff
@@ -128,13 +128,13 @@ function main()
             for name in ("epw", "iaw")
                 path = joinpath(sdir, "$name.toml")
                 write(path, single_channel_deck_text(text, name))
-                p, opt, st = OTIS.build_problem(read_deck(path))
+                p, opt, st = TRUST.build_problem(read_deck(path))
                 res[name] = solve(p, opt; start=st)
             end
             res
         end
         epw, iaw = stage["epw"], stage["iaw"]
-        problem, _, _ = OTIS.build_problem(read_deck(dp))
+        problem, _, _ = TRUST.build_problem(read_deck(dp))
         ps = problem.pspec
         start = flatten(ps, ["logn" => epw.values["logn"], "T_e" => epw.values["T_e"],
             "m_e" => epw.values["m_e"], "T_D" => iaw.values["T_D"]])
@@ -153,14 +153,14 @@ function main()
             r.status, r.converged, lm.iterations, join((@sprintf("%.3e", x) for x in pol.decreases), " "), gd))
         say(@sprintf("  chi2/n EPW %.4f, IAW %.4f; objective O* = %.10e; objective === sum(abs2, _full_residuals): %s",
             r.channels[1].chi2 / r.channels[1].npixels, r.channels[2].chi2 / r.channels[2].npixels, O_fit,
-            string(O_fit === sum(abs2, OTIS._full_residuals(problem, theta)))))
+            string(O_fit === sum(abs2, TRUST._full_residuals(problem, theta)))))
 
         slot(name) = findfirst(v -> v.name == name, ps.variables)
         idx(name, j) = (s = slot(name); ps.bin_entries[j][findfirst(==(s), ps.bin_slots[j])])
-        xval(name, th, j) = (v = ps.variables[slot(name)]; OTIS._from_unconstrained(th[idx(name, j)], v.lower, v.upper))
+        xval(name, th, j) = (v = ps.variables[slot(name)]; TRUST._from_unconstrained(th[idx(name, j)], v.lower, v.upper))
         dxdy(name, th, j) = (v = ps.variables[slot(name)]; x = xval(name, th, j); (x - v.lower) * (v.upper - x) / (v.upper - v.lower))
         vm = ps.variables[slot("m_e")]
-        setm(th, j, m) = (th2 = copy(th); th2[idx("m_e", j)] = OTIS._to_unconstrained(m, vm.lower, vm.upper); th2)
+        setm(th, j, m) = (th2 = copy(th); th2[idx("m_e", j)] = TRUST._to_unconstrained(m, vm.lower, vm.upper); th2)
 
         base = Dict(prob.leaves)
         t_ns = t_from_si.(ps.axis, :t_ns)
@@ -180,12 +180,12 @@ function main()
         say("=" ^ 100)
         say("MEASUREMENT 1: the gradient at the reported fit (theta is y, the logit's unconstrained coordinate)")
         t0 = time()
-        rfull = OTIS._full_residuals(problem, theta)
+        rfull = TRUST._full_residuals(problem, theta)
         Jac = jacobian(problem, theta)
         g = zeros(ps.ntheta)
         gradient!(g, problem, theta)
         g2 = zeros(ps.ntheta)
-        OTIS.jtvp!(g2, problem, Jac, rfull)
+        TRUST.jtvp!(g2, problem, Jac, rfull)
         g2 .*= 2
         say(@sprintf("gradient! === 2 jtvp!(jacobian, r): %s; ||g||_2 = %.4e, ||g||_inf = %.4e",
             string(all(g .=== g2)), norm(g), maximum(abs, g)))
@@ -193,7 +193,7 @@ function main()
         verdicts1 = String[]
         scaled1 = Float64[]
         function check(label, d, gd_ad)
-            OTIS.jvp!(col, problem, Jac, d)
+            TRUST.jvp!(col, problem, Jac, d)
             H = dot(col, col)
             s = 2 * sqrt(H)
             g_col = 2 * dot(col, rfull)
@@ -248,7 +248,7 @@ function main()
         nl1 = size(ch1.data.image, 1)
         rows_bin = problem.row_ranges[1][[k for (k, i) in enumerate(ch1.pixel_index) if div(i - 1, nl1) + 1 == BIN]]
         function parts(th)
-            rr = OTIS._full_residuals(problem, th)
+            rr = TRUST._full_residuals(problem, th)
             terms = [sum(abs2, view(rr, problem.npixels .+ term.rows)) for term in problem.regularizer.terms]
             return (O=sum(abs2, rr), epw=sum(abs2, view(rr, problem.row_ranges[1])), iaw=sum(abs2, view(rr, problem.row_ranges[2])),
                 bin=sum(abs2, view(rr, rows_bin)) / length(rows_bin), terms=terms)
@@ -274,7 +274,7 @@ function main()
         free = [idx("logn", BIN), idx("T_e", BIN), idx("T_D", BIN)]
         function reoptimize(th0)
             th = copy(th0)
-            rr = OTIS._full_residuals(problem, th)
+            rr = TRUST._full_residuals(problem, th)
             Ocur = sum(abs2, rr)
             mu = 1e-3
             c = zeros(length(rr))
@@ -285,7 +285,7 @@ function main()
                 for (q, i) in enumerate(free)
                     e = zeros(ps.ntheta)
                     e[i] = 1.0
-                    OTIS.jvp!(c, problem, J, e)
+                    TRUST.jvp!(c, problem, J, e)
                     C[:, q] .= c
                 end
                 A = C' * C
@@ -297,7 +297,7 @@ function main()
                     step = -((A + mu * Diagonal(diag(A))) \ gg)
                     tn = copy(th)
                     tn[free] .+= step
-                    rn = OTIS._full_residuals(problem, tn)
+                    rn = TRUST._full_residuals(problem, tn)
                     On = sum(abs2, rn)
                     if On < Ocur
                         th, rr, Ocur = tn, rn, On
@@ -400,7 +400,7 @@ function main()
             for (q, n) in enumerate(NAMES)
                 e = zeros(ps.ntheta)
                 e[idx(n, j)] = 1.0
-                OTIS.jvp!(c, problem, J, e)
+                TRUST.jvp!(c, problem, J, e)
                 C[:, q] .= view(c, 1:problem.npixels)
             end
             G = C' * C
@@ -430,17 +430,17 @@ function main()
             ax = abs.(xs)
             nser, nfall = 0, 0
             for x in xs
-                abs(x) <= OTIS.GN_TABLE.xi_max && continue
-                _, ok = OTIS._cauchy_series(sp.f, x)
+                abs(x) <= TRUST.GN_TABLE.xi_max && continue
+                _, ok = TRUST._cauchy_series(sp.f, x)
                 ok ? (nser += 1) : (nfall += 1)
             end
             n_off_table += nser + nfall
-            panels = sort(unique([OTIS._cheb_panel_index(OTIS.GN_TABLE, a) for a in ax if a <= OTIS.GN_TABLE.xi_max]))
+            panels = sort(unique([TRUST._cheb_panel_index(TRUST.GN_TABLE, a) for a in ax if a <= TRUST.GN_TABLE.xi_max]))
             say(@sprintf("bin %d %s at the fit: %d used pixels, m %.4f, xi %.4f to %.4f (|xi| %.4f to %.4f); table %d (panels %s), series %d, fallback %d",
-                j, ch.name, length(xs), sp.f.m, minimum(xs), maximum(xs), minimum(ax), maximum(ax), count(<=(OTIS.GN_TABLE.xi_max), ax),
+                j, ch.name, length(xs), sp.f.m, minimum(xs), maximum(xs), minimum(ax), maximum(ax), count(<=(TRUST.GN_TABLE.xi_max), ax),
                 join(panels, ","), nser, nfall))
         end
-        say("GN_TABLE's panel edges in |xi|: ", join((@sprintf("%g", e) for e in OTIS.GN_TABLE.edges), ", "))
+        say("GN_TABLE's panel edges in |xi|: ", join((@sprintf("%g", e) for e in TRUST.GN_TABLE.edges), ", "))
         widths = Dict{Tuple{String,Int},Float64}()
         peaks = Dict{Tuple{String,Int},Float64}()
         for (label, th) in (("fit", theta), ("truth", theta_truth)), j in (BIN, CONTROL)
@@ -495,12 +495,12 @@ function main()
             m = pl.electrons[1].f.m
             h = 1e-4
             ad_R = ForwardDiff.derivative(mm -> real(cauchy_dfdv(GeneralizedNormal(mm), x)), m)
-            fd_R = (OTIS._gn_principal_value(m + h, x) - OTIS._gn_principal_value(m - h, x)) / (2h)
+            fd_R = (TRUST._gn_principal_value(m + h, x) - TRUST._gn_principal_value(m - h, x)) / (2h)
             ad_I = ForwardDiff.derivative(mm -> imag(cauchy_dfdv(GeneralizedNormal(mm), x)), m)
-            fd_I = pi * (dfdx(OTIS._gn_uncached(m + h), x) - dfdx(OTIS._gn_uncached(m - h), x)) / (2h)
+            fd_I = pi * (dfdx(TRUST._gn_uncached(m + h), x) - dfdx(TRUST._gn_uncached(m - h), x)) / (2h)
             ad_p = ForwardDiff.derivative(mm -> GeneralizedNormal(mm)(x), m)
-            fd_p = (OTIS._gn_uncached(m + h)(x) - OTIS._gn_uncached(m - h)(x)) / (2h)
-            tab = ForwardDiff.derivative(mm -> OTIS._cheb_table_eval(OTIS.GN_TABLE, OTIS._cheb_slice(OTIS.GN_TABLE, mm), x), m)
+            fd_p = (TRUST._gn_uncached(m + h)(x) - TRUST._gn_uncached(m - h)(x)) / (2h)
+            tab = ForwardDiff.derivative(mm -> TRUST._cheb_table_eval(TRUST.GN_TABLE, TRUST._cheb_slice(TRUST.GN_TABLE, mm), x), m)
             seeds = [s * ForwardDiff.derivative(t -> real(cauchy_dfdv(GeneralizedNormal(s * t), x)), s * m) for s in (1.0, -1.0)]
             rel = [abs(ad_R - fd_R) / abs(fd_R), abs(ad_I - fd_I) / abs(fd_I), abs(ad_p - fd_p) / abs(fd_p)]
             same = seeds[1] === tab && seeds[2] === tab

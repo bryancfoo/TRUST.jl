@@ -6,7 +6,7 @@
 # added in code, through with_wavelength_calibration, into a copy of the deck written under
 # runs/two_channel/uncertainty/ (which is not committed, runs/ is gitignored).
 
-using OTIS
+using TRUST
 using Statistics: median
 
 include(joinpath(@__DIR__, "problems.jl"))

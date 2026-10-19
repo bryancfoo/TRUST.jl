@@ -1,6 +1,6 @@
 using Test
-using OTIS
-using OTIS: _bin_kernel!, _make_cache, _streak_eltype
+using TRUST
+using TRUST: _bin_kernel!, _make_cache, _streak_eltype
 import ForwardDiff
 using LinearAlgebra.BLAS: get_num_threads
 
@@ -89,14 +89,14 @@ end
 
 @testset "TH6: every bin is visited exactly once" begin
     counts_serial = zeros(Int, 10)
-    OTIS.foreach_bin!(10, () -> nothing; scheduler=:serial) do j, _
+    TRUST.foreach_bin!(10, () -> nothing; scheduler=:serial) do j, _
         counts_serial[j] += 1
     end
     @test all(==(1), counts_serial)
 
     counts_auto = zeros(Int, 10)
     lk = Threads.SpinLock()
-    OTIS.foreach_bin!(10, () -> nothing; scheduler=:auto) do j, _
+    TRUST.foreach_bin!(10, () -> nothing; scheduler=:auto) do j, _
         Threads.lock(lk) do
             counts_auto[j] += 1
         end
@@ -105,7 +105,7 @@ end
 end
 
 @testset "TH7: the scheduler keyword" begin
-    @test_throws "scheduler must be :auto or :serial" OTIS.foreach_bin!(4, () -> nothing; scheduler=:nonsense) do j, c
+    @test_throws "scheduler must be :auto or :serial" TRUST.foreach_bin!(4, () -> nothing; scheduler=:nonsense) do j, c
     end
 end
 
