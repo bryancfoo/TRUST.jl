@@ -93,9 +93,11 @@ end
     # more than one BLAS thread is not bitwise-reproducible run to run, which is exactly why
     # TH3 pins BLAS to one thread before comparing measure results. The pinned reference was
     # generated the same way.
-    # The *_MEASURE arrays match only under Pkg.test()'s --check-bounds=yes (Phase 4.A chunk 10,
-    # Level 3's finding, reproduced by Level 2): under the default flag they differ in up to 1 557
-    # entries at up to 8.1e-16, so re-pin them under --check-bounds=yes.
+    # The *_MEASURE arrays match only under the flags they were pinned with (Phase 4.A chunk 10,
+    # Level 3's finding, reproduced by Level 2): --check-bounds=yes against the default moves
+    # 1 779 of EPW's 4 096 entries by up to 6.8e-16. Since the re-pin of 2026-11-12 they are pinned under the
+    # DEFAULT flags, which is what Pkg.test() runs with from Julia 1.13 on (it forced
+    # --check-bounds=yes through 1.12); re-pin them under whatever Pkg.test() runs with.
     prev = pin_blas_threads(1)
     try
         cases = (("EPW", _rf_epw_ablation, EPW_IDEAL, EPW_MEASURE),

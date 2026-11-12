@@ -506,9 +506,11 @@ end
     expt = Experiment(trace=trace, probe=probe, collection=collection, lambda_m=lambda, effects=effects)
     # measure() applies the IRFs via mul! (BLAS gemm!); pin BLAS to one thread for a
     # bitwise-reproducible comparison, as TH3 does and as the pinned reference was generated.
-    # The EPW_MEASURE array matches only under Pkg.test()'s --check-bounds=yes (Phase 4.A chunk
-    # 10, Level 3's finding, reproduced by Level 2): under the default flag it differs in up to
-    # 1 571 entries at up to 8.1e-16, so re-pin it under --check-bounds=yes.
+    # The EPW_MEASURE array matches only under the flags it was pinned with (Phase 4.A chunk 10,
+    # Level 3's finding, reproduced by Level 2): --check-bounds=yes against the default moves
+    # 1 779 entries by up to 6.8e-16. Since the re-pin of 2026-11-12 it is pinned under the
+    # DEFAULT flags, which is what Pkg.test() runs with from Julia 1.13 on (it forced
+    # --check-bounds=yes through 1.12); re-pin it under whatever Pkg.test() runs with.
     prev = pin_blas_threads(1)
     M = try
         measure(expt)
