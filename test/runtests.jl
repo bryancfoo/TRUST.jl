@@ -56,6 +56,9 @@ _wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
     if _wanted("Hermite")
         @safetestset "Hermite" begin include("distributions/test_hermite.jl") end
     end
+    if _wanted("GaussianGrid")
+        @safetestset "GaussianGrid" begin include("distributions/test_gaussian_grid.jl") end
+    end
     if _wanted("shape cost")
         @safetestset "shape cost" begin include("distributions/test_shape_cost.jl") end
     end

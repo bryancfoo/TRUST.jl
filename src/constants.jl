@@ -81,7 +81,11 @@ that `_si_value` accepts `t_shift_ns`/`t_shift_s` and `_reject_extra_kwargs` cat
 one of them. The `offsets` row is a Step 4.G.1 addition (2026-10-03, Phase 4.G spec D4):
 `TabulatedKSmearing`'s list of angles relative to the collection's θ, in the style of `half_angle`
 -- its factors duplicate `theta`'s, and the row exists so that `_si_axis` accepts
-`offsets_deg`/`offsets_rad` for a vector, refusing neither or both.
+`offsets_deg`/`offsets_rad` for a vector, refusing neither or both. The `u0`, `T_ref` and `dv` rows are
+a Step G.1.1 addition (2026-11-12, Phase G.1 spec D4; `conventions.md` 11.11's reservation):
+`GaussianGrid`'s centre, reference temperature and explicit spacing, in the style of `t_shift` -- their
+factors duplicate `u`'s, `T`'s and `u`'s, and the rows exist so that `_si_value` accepts the keywords and
+`_reject_extra_kwargs` catches a typo, with no `_to_si`/`_from_si` pair of their own.
 """
 const ACCEPTED_UNITS = (
     T      = (T_eV      = EV,               T_keV     = 1000 * EV),
@@ -104,6 +108,9 @@ const ACCEPTED_UNITS = (
     dispersion     = (dispersion_nm_px = 1e-9,   dispersion_m_px = 1.0),
     lambda_center  = (lambda_center_nm = 1e-9,   lambda_center_m = 1.0),
     offsets        = (offsets_deg = π / 180,     offsets_rad = 1.0),
+    u0             = (u0_kms = 1e3,              u0_ms = 1.0),
+    T_ref          = (T_ref_eV = EV,             T_ref_keV = 1000 * EV),
+    dv             = (dv_kms = 1e3,              dv_ms = 1.0),
 )
 
 """
