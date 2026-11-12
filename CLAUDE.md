@@ -171,21 +171,46 @@ what its own tests exercise.
 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
-Run it at the end of every step. One commit per roadmap step, with the step named in the
-message (`Step 0.2: constants and unit conversions`). Never commit `dev/`, `context/` or
-`Manifest.toml`.
+Run it at the end of every step, exactly as written. **Do not add `--check-bounds=yes`** (noted
+2026-11-12): through Julia 1.12 `Pkg.test()` forced bounds checking itself; since Julia 1.13 it
+inherits the flag from the session that calls it, so the suite now runs without it, and the
+bitwise `measure()` references were re-pinned under those flags (`dev/conventions.md` 8.6).
+With the flag five rows fail by round-off and nothing else: RF1b's three `measure` comparisons
+and SN1, whose pins it moves by a few units in the last place, and CS1, whose exact-equality
+check sits on a convergence threshold. The slow tier is not run through `Pkg.test()`:
+`julia --project=test/slow test/slow/runslow.jl`.
+
+One commit per roadmap step, with the step named in the message (`Step 0.2: constants and unit
+conversions`). Never commit `dev/`, `context/` or `Manifest.toml`.
 
 ## Environment
 
-Windows 11, Julia 1.12.7; the package targets Julia 1.10. The Bash tool on this machine has no
-coreutils (`sed`, `ls`, `cat`, `grep`, `head` all fail) and no `python`: use PowerShell or the
-file tools. PowerShell's `-replace` and `-match` are case-insensitive unless written `-creplace`
-and `-cmatch`. Julia sources here use Unicode identifiers (`φ`, `ω`, `α`); create and edit them
-with the file tools, never with `Set-Content` or `Out-File`, which do not preserve UTF-8 reliably.
+Linux (x86-64, 48 logical cores), Julia 1.13.1 as the `juliaup` default, with 1.10.12 also
+installed; the package targets Julia 1.10. The Bash tool has the usual coreutils and `python3`.
+Julia sources here use Unicode identifiers (`φ`, `ω`, `α`); create and edit them with the file
+tools, not with shell redirection.
+
+**The package moved to this machine on 2026-11-12**, from a Windows 11 machine with Julia
+1.12.7 on which everything before that date was built and measured. What that changes:
+
+- **Every timing in `dev/` taken before 2026-11-12 is the old machine's**, the fast suite's
+  fifteen-minute ceiling among them. It is not a baseline here until it is taken again here.
+- **Numbers pinned to the last bit are machine-dependent.** The compiled error-function
+  library behind `Z` differs between the two machines in the last bit of about one call in a
+  hundred, so five reference arrays were re-pinned here (the header of
+  `test/fixtures/rf1_reference.jl` says which and why), and the slow tier's cut-down fits land
+  on different numbers than the old machine's record. The record that holds on this machine is
+  in `dev/conventions.md` 8.6, dated 2026-11-12.
+- **The manifests were resolved on Julia 1.13.1 on 2026-11-12** (root, `test/`, `test/slow/`,
+  `examples/figures/`); only standard-library and bundled-binary entries moved. `experiment/`
+  was not resolved: it still depends on the package under its old name.
+- **`pdftoppm` is not installed**, so the Read tool cannot open the PDFs in `context/`. Say so
+  rather than guess at what a source says.
 
 **If Julia starts crashing repeatedly, stop and await further instruction.** Julia and its
-language server on this machine have crashed in bursts — most recently 2026-09-09, part-way
-through Phase 1.SG Step 1.SG.4, where restarting VSCode cleared it. One crash is bad luck;
+language server crashed in bursts on the old machine — most recently 2026-09-09, part-way
+through Phase 1.SG Step 1.SG.4, where restarting VSCode cleared it; the rule holds on any
+machine. One crash is bad luck;
 **three or four in a row with similar error messages is a broken environment, and the session
 must stop trying.** Record the error message and what you were running, once. Then:
 
