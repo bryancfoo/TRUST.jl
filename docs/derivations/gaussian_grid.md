@@ -1,10 +1,10 @@
 # `GaussianGrid`: a distribution on a fixed grid in lab velocity
 
-This document derives what `src/distributions/gaussian_grid.jl` implements, and the lab-frame
-susceptibility of `src/scattering/susceptibility.jl` (Phase G.1,
+This document derives what `src/distributions/gaussian_grid.jl` and `src/distributions/grid_projection.jl`
+implement, and the lab-frame susceptibility of `src/scattering/susceptibility.jl` (Phase G.1,
 [OQ-68](../../dev/open_questions.md#oq-68); `conventions.md` 1.12). Units are SI throughout: velocities in
 m/s, `f` in s/m, `𝒞f` in s²/m², temperatures in J. `Z′(ζ) = −2(1 + ζZ(ζ))` is the derivative of the plasma
-dispersion function (`plasma_dispersion.md`). *(Step G.1.3 adds Sections 7 and 8.)* Every number quoted was measured through the package on
+dispersion function (`plasma_dispersion.md`). Every number quoted was measured through the package on
 2026-11-12 (Linux x86-64, Julia 1.13.1, ForwardDiff 1.4.5, SpecialFunctions 2.9.0, QuadGK 2.11.3).
 
 ## 1. The comb
@@ -129,6 +129,7 @@ the ripple is multiplied by its wavenumber, about 26 times here.
 |---|---|---|---|
 | defaults: 41 nodes, spacing 0.25, width 1.2 (GG2) | 4.83e-6 | 1.28e-4 | **9.80e-5** |
 | width 1.5 (GG2) | 1.03e-8 | 2.58e-7 | **1.97e-7** |
+| 97 nodes, spacing 0.125, width 1.2 (the projection, Section 7) | 1.85e-6 | | 8.06e-5 |
 
 So **halving the spacing at the same width ratio leaves the floor near 1e-4**, and widening the Gaussians
 removes it. The plan's M1 measured the same floor and attributed it to its scratch fit; it is the basis's.
@@ -165,6 +166,71 @@ search.
 at electron phase velocities), `𝒞f v_ref²` against `Z′(±150)` reads 2.4e-11 relative (GG9), the round-off of
 `Z′` at large argument, since both tend to `1/ζ²` with the same variance.
 
+## 7. The projection onto a grid
+
+`project_to_grid(source, target)` writes a distribution on `target`'s grid (Phase G.1 spec D14). The source is
+a species of either family (a shape through `f_lab` and `𝒞φ(ξ)/v_th²`) or any lab-frame distribution, a
+`GaussianGrid` on another grid among them.
+
+**The fit.** The unnormalized comb `p(v) = Σₙ w⁰ₙ e^{g_{π(n)}} G(v; vₙ, σ)` is fitted to the source's `f`
+by least squares on the collocation set `v₁ − 5σ` to `v_{N_v} + 5σ` in steps of `dv/4`, residuals scaled by
+`dv`, in the logarithms of the weights, so the weights stay positive. The start is the source sampled at the
+nodes, `w⁰ₙ e^{gₙ} = f(vₙ) dv`, floored at 1e-300. Levenberg–Marquardt: `(JᵀJ + λD) δ = −Jᵀr`, `D` the
+diagonal of `JᵀJ` floored at 1e-12 of its largest entry, solved by Cholesky; `λ` from 1e-3, divided by 3
+on an accepted step and multiplied by 5 on a rejected one; every `g` held in [−200, 200]. It stops,
+converged, at the first accepted step that lowers the sum of squares by less than 1e-12 of itself, or when
+no step lowers it at `λ` above 1e12; after 500 iterations, not converged. Since `p` is unnormalized and
+the source has unit integral, the scale is fixed by the data and nothing is flat. Deterministic: the same
+inputs give the same `g` bitwise, whatever `g` the target carried. At the stop the residual is orthogonal to
+every column of the Jacobian to about 1e-8 (GP7, which writes the problem out again and checks it).
+
+**The errors it reports** are measured on the evaluation set `v₁` to `v_{N_v}` in steps of `dv/8`: the
+largest difference in `f` and in `𝒞f`, each divided by the source's largest value there.
+
+**Each registered shape** at the default spacing and width, on a grid of `T_ref = T` and 49 nodes out to ±6
+thermal speeds (GP1), against the plan's M1 (which standardized its comb to the three normalizations):
+
+| Source | error in `𝒞f` | error in `f` | iterations | M1 |
+|---|---|---|---|---|
+| `Maxwellian` | 9.80e-5 | 4.83e-6 | 14 | 9.6e-5 |
+| `SuperGaussian(3)` | 9.44e-5 | 4.11e-6 | 19 | 8.9e-5 |
+| `SuperGaussian(5)` | 2.57e-3 | 2.21e-4 | 21 | 2.9e-3 |
+| `Kappa(3)` | 6.39e-4 | 1.30e-4 | 7 | 1.1e-2 |
+| `SkewNormal(2)` | 1.65e-4 | 9.66e-6 | 16 | 2.0e-4 |
+| `GeneralizedNormal(4)` | 3.16e-3 | 4.38e-4 | 13 | 3.3e-3 |
+| `HermiteExpansion(0.02, 0.01, 0, 0)` | 1.44e-4 | 8.69e-6 | 15 | not measured |
+
+The smooth shapes sit on Section 6's floor; the flat-topped ones (`SuperGaussian(5)`, `GeneralizedNormal(4)`)
+are limited by the width, since a steep edge needs narrower Gaussians: at spacing 0.125 (97 nodes) both
+read 8.5e-5 and 7.4e-5. A projection takes 5 to 10 ms once compiled.
+
+**`Kappa(3)` is limited by the grid's extent, and it shows in the moments**, not in `𝒞f` inside the grid. Its
+power-law tail beyond the last node carries variance a finite grid cannot hold: the derived `T` of the
+projection reads 1.1 % low on ±6 thermal speeds (`T/T_source` 0.98877), 0.27 % low on ±10 (0.99728) and
+0.11 % on ±15 (0.99887), while the error in `𝒞f` on the grid falls only from 6.4e-4 to 5.6e-4 (GP2). M1's
+1.1e-2 is the standardization's: forcing the variance to the source's moved the whole comb.
+
+**A projection onto a grid twice as fine and back** (GP4: `SkewNormal(2)` onto the default grid, then onto 81
+nodes at spacing 0.125, then back): each step reports 1.0e-4 in `𝒞f`, the finer grid's own floor, yet the
+round trip's `𝒞f` lies within 5.3e-8 of the original's: back on its own grid the coarse comb is recovered, the
+ripple of one step undone by the next.
+
+## 8. What a fixed grid cannot hold
+
+Three limits, each a limit of a fixed grid of positive Gaussians (the plan's M7), with their numbers here:
+
+- **Narrower than `σ`**: a comb is never sharper than its own Gaussians. M7's narrow beam, 5 % of the
+  distribution in a Gaussian of width 0.1 `v_th` at 2.5 `v_th` beside a Maxwellian core, projects onto the
+  default grid with an error of **0.87 in `𝒞f`** and 0.29 in `f` (GP3), and onto a grid twice as fine still
+  0.49 and 0.12: not representable. A cold beam is a species of its own.
+- **Beyond the last node**: a tail past the grid is cut off, and its variance with it (`Kappa(3)`, Section 7).
+  Size the grid for the hottest state a streak reaches.
+- **A negative lobe**: positive weights make a positive `f`. `HermiteExpansion` with a lobe is projected onto
+  its positive part.
+
+And, by Section 6, the comb is a Maxwellian's approximation to about 1e-4 of the peak at the default width,
+not bitwise: tests compare with a stated tolerance.
+
 ## 9. The cost
 
 One `spectral_density` call, latency in a loop of 20 000, warmed, one thread, the plasma of Section 6 at one
@@ -186,6 +252,7 @@ here uses it.
 
 `test/distributions/test_gaussian_grid.jl` (gate `GaussianGrid`, GG1 to GG13): the distribution's closed
 forms against quadrature, ForwardDiff and the Maxwellian; `test/plasma/test_species_lab_frame.jl` (gate
-`lab-frame family`, GC1 to GC12): the species, the spectra, the trace and the refusals. Every loose tolerance
-is a sampling error of the grid, pinned at the measurement above; every tight one is an identity.
-`dev/phaseG1_instructions.md` D10 lists each row with its tolerance and its reason.
+`lab-frame family`, GC1 to GC12): the species, the spectra, the trace and the refusals;
+`test/distributions/test_grid_projection.jl` (gate `grid projection`, GP1 to GP7): the projection. Every
+loose tolerance is a sampling error of the grid, pinned at the measurement above; every tight one is an
+identity. `dev/phaseG1_instructions.md` D10 lists each row with its tolerance and its reason.

@@ -14,6 +14,7 @@ include("distributions/hermite.jl")                # new (5.A.1): HermiteExpansi
 include("distributions/gaussian_grid.jl")          # new (G.1.1): AbstractLabDistribution and GaussianGrid
 include("plasma/species.jl")
 include("plasma/parameters.jl")     # methods on Species and SpeciesSpec
+include("distributions/grid_projection.jl")        # new (G.1.3): project_to_grid; needs Species and f_lab
 include("plasma/plasma.jl")         # Plasma constructor uses Species and the unit table
 include("plasma/trace.jl")          # new (2.1): needs Plasma, Species, reconstruct
 include("scattering/susceptibility.jl")   # new: needs alpha, xi, cauchy_dfdv
@@ -54,6 +55,7 @@ export AbstractVelocityDistribution, Maxwellian, SuperGaussian, Kappa, Generaliz
 
 # the lab-frame family (G.1.1)
 export AbstractLabDistribution, GaussianGrid, dfdv, mean_velocity, velocity_variance
+export project_to_grid    # (G.1.3)
 
 # shape interface
 export dfdx, cauchy_dfdv, moment, skewness, excess_kurtosis, parameters, reconstruct

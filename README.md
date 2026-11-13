@@ -289,6 +289,20 @@ than a tenth of a percent of the distribution. `docs/derivations/hermite.md` giv
 series stays positive (`c4` between 0 and 1/24, `|c3|` up to about 0.06) as advice for a deck's bounds.
 Every other fit is exactly what it was.
 
+**Phase G.1 (the gridded distribution: the type, the species, the projection) is complete.** A species
+can now carry its velocity distribution itself, as a `GaussianGrid`: Gaussians of one width at evenly
+spaced nodes fixed in lab velocity, positive weights against a default Maxwellian, and the log-weights
+`g1`, `g2`, … as parameters. `electrons(grid = (T_ref_eV = 700,))` gives 41 nodes at a quarter of the
+700 eV thermal speed, spanning ±5 thermal speeds, and through `spectrum` reproduces the Maxwellian
+spectrum to about 6e-5 of its peak. Changing a `g` reshapes the distribution, and it stays positive. For
+such a species `T` and `u` are computed from the distribution, its variance temperature and mean velocity,
+and are never given. Its Cauchy integral, and every derivative in a weight, are closed form through the
+plasma dispersion function, with no table, and allocate nothing. `project_to_grid` writes any parametric
+species, or another grid, on a given grid and reports its own error. A grid cannot hold a feature narrower
+than its Gaussians or a tail beyond its last node; `docs/derivations/gaussian_grid.md` gives the measured
+limits. A gridded trace is not yet written to a file, and nothing fits a grid yet. Every other result is
+exactly what it was.
+
 The package was named OTIS until 2026-10-18. Files it wrote under that name carry layout
 versions spelled `otis-…`; every reader accepts that spelling for the same layout number and
 reports the canonical `trust-…` string, and every writer emits only `trust-…`. Decks that say
