@@ -89,6 +89,11 @@ function _resolve_leaf(p::Plasma, path::LeafPath)
             end
             field in ("T", "u", "fraction") || throw(ArgumentError(
                 "\"$(string(path))\" is not a leaf; expected T, u, fraction, charge (ions) or f.<parameter>"))
+            # Phase G.1 spec D9: a lab-frame distribution's species has no input T or u
+            (field != "fraction" && _derives_u_T(species_set[idx].f)) && throw(ArgumentError(
+                "\"$(string(path))\": species \"$name\" carries a lab-frame distribution " *
+                "($(nameof(typeof(species_set[idx].f)))); its T and u are computed from the distribution " *
+                "and are not leaves"))
             return LeafRef(set, idx, Symbol(field), false)
         elseif length(rest) == 2 && rest[1] == "f"
             pname = rest[2]
@@ -308,6 +313,13 @@ function _widen_shape(f::AbstractVelocityDistribution, ::Type{FT}) where {FT}
     p = parameters(f)
     isempty(p) && return f
     return reconstruct(f, NamedTuple{keys(p)}(FT.(values(p))))
+end
+
+# A lab-frame distribution widened through its own reconstruct (Phase G.1 spec D8): `ntuple` over the
+# parameter count, since `FT.(values(p))` over a tuple of 32 or more goes through a `Vector{Any}`.
+function _widen_shape(f::AbstractLabDistribution, ::Type{FT}) where {FT}
+    p = parameters(f)
+    return reconstruct(f, NamedTuple{keys(p)}(ntuple(i -> FT(p[i]), Val(length(p)))))
 end
 
 function _widen_species(sp::Species, ::Type{FT}) where {FT}
@@ -618,6 +630,7 @@ function _snapshot_species(sp::Species{FT}, r::SpeciesRows, values::AbstractMatr
     fraction = r.fraction == 0 ? sp.fraction : values[r.fraction, j]
     charge = r.charge == 0 ? sp.charge : values[r.charge, j]    # Phase 4.J spec D13: the per-bin charge
     f = _snapshot_shape(sp.f, r.shape, values, j)
+    u, T = _distribution_u_T(f, sp.mass, u, T)     # Phase G.1 spec D8: a lab-frame f's moments; a no-op for a shape
     n = _density(fraction, n_e, kind, charge)
     return Species{FT,typeof(f)}(sp.name, sp.mass, charge, u, T, f, fraction, n)
 end

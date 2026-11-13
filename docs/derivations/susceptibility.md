@@ -68,6 +68,25 @@ sign and the `/2` appear once**, in `susceptibility`, with a comment; `alpha(sp,
 `α_s`, not `α_s²`, so the square is written once there too (`conventions.md` Phase 0 pitfall
 20).
 
+## 3a. The lab-frame form (Phase G.1)
+
+A species may instead carry a **lab-frame distribution** (`conventions.md` 1.12): `f(v)` itself, in s/m,
+with no shape, no thermal speed and no input flow or temperature (`GaussianGrid`,
+`docs/derivations/gaussian_grid.md`). Section 2's integral is then its Cauchy integral in lab velocity,
+`𝒞f(v_φ) = ∫ f′(v)/(v − v_φ) dv` at `v_φ = ω/k`, on the same Landau contour, and
+
+    χ_s(k, ω) = −(ω_ps²/k²) · 𝒞f(ω/k),     ω_ps² = n_s q_s²/(ε₀ m_s),
+
+the method of `susceptibility` for that family. **It is Section 3's result with the thermal speed divided
+out**: for `f(v) = φ((v − u)/v_th)/v_th`, Section 3's substitution gives `𝒞f(ω/k) = 𝒞φ(ξ)/v_th²`, and
+`ω_ps²/(k² v_th²) = α_s²/2`, so `−(ω_ps²/k²) 𝒞f = −(α_s²/2) 𝒞φ`: the same number by the two routes
+(checked to 1e-13 on a lab-frame Maxwellian, GC3). The minus sign and the absence of a `/2` are written once,
+in the lab-frame method. `ω_ps²` there is `_plasma_frequency_sq`, written without a square root so that its
+partial at a density of exactly zero is finite (`conventions.md` 5.15); `alpha` and `xi` are not used. For
+such a species `T` and `u` are the distribution's variance temperature and mean velocity, so `alpha`, `xi`,
+`thermal_speed` and `debye_length` still return the moment-based values, but the scattering code reads none
+of them.
+
 ## 4. The Maxwellian check: Sheffield Eq. 5.2.5 and Eq. 5.2.6
 
 For a Maxwellian electron species, `𝒞φ(ξ) = Z'(ξ)` exactly (`conventions.md` 1.5), so

@@ -74,6 +74,9 @@ _wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
     if _wanted("plasma trace")
         @safetestset "plasma trace" begin include("plasma/test_trace.jl") end
     end
+    if _wanted("lab-frame family")
+        @safetestset "lab-frame family" begin include("plasma/test_species_lab_frame.jl") end
+    end
     if _wanted("expressions")
         @safetestset "expressions" begin include("inversion/test_expressions.jl") end
     end

@@ -1,9 +1,10 @@
 # `GaussianGrid`: a distribution on a fixed grid in lab velocity
 
-This document derives what `src/distributions/gaussian_grid.jl` implements (Phase G.1,
+This document derives what `src/distributions/gaussian_grid.jl` implements, and the lab-frame
+susceptibility of `src/scattering/susceptibility.jl` (Phase G.1,
 [OQ-68](../../dev/open_questions.md#oq-68); `conventions.md` 1.12). Units are SI throughout: velocities in
 m/s, `f` in s/m, `𝒞f` in s²/m², temperatures in J. `Z′(ζ) = −2(1 + ζZ(ζ))` is the derivative of the plasma
-dispersion function (`plasma_dispersion.md`). *(Step G.1.2 adds Sections 4 and 9, Step G.1.3 Sections 7 and 8.)* Every number quoted was measured through the package on
+dispersion function (`plasma_dispersion.md`). *(Step G.1.3 adds Sections 7 and 8.)* Every number quoted was measured through the package on
 2026-11-12 (Linux x86-64, Julia 1.13.1, ForwardDiff 1.4.5, SpecialFunctions 2.9.0, QuadGK 2.11.3).
 
 ## 1. The comb
@@ -69,7 +70,28 @@ accuracy:
 
 each Gaussian adding its own variance `σ²/2`. **A species carrying the distribution has `u = ū` and
 `T = m V`** (`conventions.md` 1.12): the mean velocity and the variance temperature along **k̂**, exactly
-what `u` and `T` mean for a shape (`shapes.md` Section 3).
+what `u` and `T` mean for a shape (`shapes.md` Section 3). They are computed wherever the species is built
+or its distribution replaced (`electrons`, `ion`, `plasma(trace, j)`), never given, and never leaves.
+
+## 4. The susceptibility in lab velocity, and its equivalence with rule 1.6
+
+Sheffield Eq. 3.3.9 in SI (`susceptibility.md` Section 2) is
+
+    χ_s(k, ω) = −(ω_ps²/k²) ∫ (∂f_s0/∂v)/(v − ω/k) dv,    ω_ps² = n_s q_s²/(ε₀ m_s),
+
+with `f_s0` the unit-normalized reduced distribution along **k̂**. For a lab-frame distribution the integral
+is `𝒞f(ω/k)` by definition, so
+
+    χ_s(k, ω) = −(ω_ps²/k²) · 𝒞f(ω/k),
+
+which is `susceptibility`'s method for the family. **It is rule 1.6 with the thermal speed divided out**:
+for `f(v) = φ((v − u)/v_th)/v_th`, `susceptibility.md` Section 3 shows `𝒞f(ω/k) = 𝒞φ(ξ)/v_th²` with
+`ξ = (ω/k − u)/v_th`, and `ω_ps²/(k² v_th²) = α_s²/2`, so the two forms are the same number. GC3 checks it
+exactly, with no sampling error: a test-local lab-frame distribution that is a Maxwellian in closed form,
+carried by a species, gives the shape route's `χ` and `S(k, ω)` to 1e-13. `ω_ps²` is written without a
+square root (`_plasma_frequency_sq`, linear in the density), so that its partial at a density of exactly
+zero is finite (`conventions.md` 5.15; GC9). In `S(k, ω)` (`conventions.md` 1.7) the species' term is its
+weight times `f(ω/k)`, with no `1/v_th`: `f_lab(sp, v) = f(v)`. No temperature and no flow appear in either.
 
 ## 5. The Maxwellian default, and the symmetric option
 
@@ -113,6 +135,19 @@ removes it. The plan's M1 measured the same floor and attributed it to its scrat
 The width cannot simply be raised, because positive weights of a wider Gaussian cannot make a steep
 edge (the plan's M1: at width 1.5 the flat-topped shapes worsen to 8.6e-3 and 2.5e-2).
 
+**The spectrum** inherits it: a gridded Maxwellian's `spectrum` against the package's Maxwellian spectrum,
+5e19 cm⁻³, electrons at 700 eV, deuterons at 250 eV, probe 263.25 nm, θ = 60°, 512 wavelengths, no
+instrument function:
+
+| Case | max \|ΔP\| / peak |
+|---|---|
+| gridded electrons, EPW window 220 to 260 nm (GC4; the plan's M4 read 5.7e-5 at 49 nodes with a 0.5 nm instrument function) | 6.14e-5 |
+| gridded deuterons at `T_ref` = 250 eV, IAW window 262 to 264.5 nm (GC5) | 6.23e-5 |
+| one electron grid at `T_ref` = 700 eV holding a Maxwellian at 500, 700, 1000 eV (GC6; M8) | 7.61e-5, 6.14e-5, 5.55e-5 |
+
+At 1000 eV on the 700 eV grid the derived `T` reads 1.23e-8 low: the hotter Maxwellian reaches past the
+grid's ±5 `v_ref`.
+
 **Off the real axis.** At `g = 0` the comb's `𝒞f` follows `Z′` better above the axis and departs from it fast
 below: each Gaussian continued to `v − iy` grows like `e^{(y/σ)²}`, the Maxwellian's only like `e^{(y/v_ref)²}`,
 so the ripple is amplified. Measured (default grid, max `|Δ𝒞f|`/2 over `Re ξ ∈ [−5, 5]`, `ξ = (v − u₀)/v_ref`):
@@ -130,9 +165,27 @@ search.
 at electron phase velocities), `𝒞f v_ref²` against `Z′(±150)` reads 2.4e-11 relative (GG9), the round-off of
 `Z′` at large argument, since both tend to `1/ζ²` with the same variance.
 
+## 9. The cost
+
+One `spectral_density` call, latency in a loop of 20 000, warmed, one thread, the plasma of Section 6 at one
+`(k, ω)` (Phase G.1 spec D17; the plan's M6 read 2.6 to 2.8 µs at 49 nodes, 10.2 µs and 26.9 µs under duals
+of 8 and 52):
+
+| Electrons | value | dual, 8 partials | dual, 44 partials |
+|---|---|---|---|
+| `Maxwellian` (dual in `T`) | 0.18 µs | 0.69 µs | 1.4 µs |
+| `SuperGaussian(3)` (dual in `m`) | 0.37 µs | 1.1 µs | 8.7 to 13.8 µs, **17 872 B** |
+| `GaussianGrid`, 41 nodes (dual in every `g`) | 2.1 to 2.2 µs | 3.6 µs | 6.6 µs |
+
+Every `GaussianGrid` call allocates nothing; so does `plasma(trace, j)` with a gridded species whose `g` vary,
+as a value and under duals of 8 and 44 partials (GC8). The 44-partial `SuperGaussian` row is recorded for
+the phases that will take one wide dual sweep over a gridded species beside a fitted super-Gaussian; nothing
+here uses it.
+
 ## 10. The tests
 
 `test/distributions/test_gaussian_grid.jl` (gate `GaussianGrid`, GG1 to GG13): the distribution's closed
-forms against quadrature, ForwardDiff and the Maxwellian. Every loose tolerance is a sampling error of the
-grid, pinned at the measurement above; every tight one is an identity. `dev/phaseG1_instructions.md` D10 lists
-each row with its tolerance and its reason.
+forms against quadrature, ForwardDiff and the Maxwellian; `test/plasma/test_species_lab_frame.jl` (gate
+`lab-frame family`, GC1 to GC12): the species, the spectra, the trace and the refusals. Every loose tolerance
+is a sampling error of the grid, pinned at the measurement above; every tight one is an identity.
+`dev/phaseG1_instructions.md` D10 lists each row with its tolerance and its reason.

@@ -22,7 +22,18 @@ charge number, a real number since Phase 4.J (`-1` for an electron;
 
 `conventions.md` 1.6.
 """
-plasma_frequency(sp::Species) = sqrt(sp.n * (sp.charge * ELEMENTARY_CHARGE)^2 / (VACUUM_PERMITTIVITY * sp.mass))
+plasma_frequency(sp::Species) = sqrt(_plasma_frequency_sq(sp))
+
+"""
+    _plasma_frequency_sq(sp::Species) -> FT
+
+`ω_p² = n q² / (ε₀ m)`, the square `plasma_frequency` takes the root of: linear in the density, so
+that its partial at a density of exactly zero is finite (`conventions.md` 5.15). The lab-frame
+`susceptibility` uses it, never `plasma_frequency(sp)^2` (Phase G.1 spec D12).
+
+`conventions.md` 1.12, 5.15.
+"""
+_plasma_frequency_sq(sp::Species) = sp.n * (sp.charge * ELEMENTARY_CHARGE)^2 / (VACUUM_PERMITTIVITY * sp.mass)
 
 """
     debye_length(sp::Species) -> FT
@@ -65,3 +76,14 @@ only place the shift and the `1/v_th` scaling are applied (`conventions.md` 1.5)
 `conventions.md` 1.4, 1.5; `docs/derivations/shapes.md`.
 """
 f_lab(sp::Union{Species,SpeciesSpec}, v) = sp.f((v - sp.u) / thermal_speed(sp)) / thermal_speed(sp)
+
+"""
+    f_lab(sp, v) -> FT    (a species carrying a lab-frame distribution)
+
+`f(v)` itself: a lab-frame distribution is already the dimensional distribution in lab velocity, so
+there is no shift and no `1/v_th` (`conventions.md` 1.12). `v` in m/s; returns s/m.
+
+`conventions.md` 1.12; Phase G.1 spec D12.
+"""
+f_lab(sp::Union{Species{<:Real,<:AbstractLabDistribution},SpeciesSpec{<:Real,<:AbstractLabDistribution}}, v) =
+    sp.f(v)

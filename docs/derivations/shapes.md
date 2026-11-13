@@ -123,6 +123,32 @@ oracle. It is the first shape the package lets go negative: the constructor refu
 coefficient, and a negative lobe is reported (`_hermite_lobe`, `show`, and a warning from `fit`), not
 refused (`hermite.md` Section 5).
 
+## 5b. The two families: a shape, and a lab-frame distribution
+
+Everything above is about **shapes**: dimensionless `φ(x)` in the reduced variable `x = (v − u)/v_th`, obeying
+Section 1's three normalizations, with the species' `u` and `T` as their origin and scale, inputs like any
+other. From Phase G.1 a species may instead carry a **lab-frame distribution** (`conventions.md` 1.12,
+[OQ-68](../../dev/open_questions.md#oq-68)): the reduced distribution along **k̂** itself, `f(v)` in s/m of lab
+velocity, with `∫ f dv = 1` and nothing else imposed. What separates the two:
+
+| | a shape (`AbstractVelocityDistribution`) | a lab-frame distribution (`AbstractLabDistribution`) |
+|---|---|---|
+| argument | `x` or `ξ`, dimensionless | `v` or `v_φ`, in m/s |
+| normalizations | the three of Section 1 | `∫ f dv = 1` only |
+| the species' `u` and `T` | inputs, the shape's origin and scale | **results**: `u = ∫ v f dv`, `T = m ∫ (v − u)² f dv`, computed wherever the species is built |
+| derivative | `dfdx(f, x)` | `dfdv(f, v)` |
+| Cauchy integral | `cauchy_dfdv(f, ξ) = ∫ φ′(x)/(x − ξ) dx` | `cauchy_dfdv(f, v_φ) = ∫ f′(v)/(v − v_φ) dv`, in s²/m² |
+| moments | `moment(f, n) = ∫ xⁿ φ dx` | `moment(f, n) = ∫ vⁿ f dv`; `mean_velocity`, `velocity_variance` |
+| `f_lab(sp, v)` | `φ((v − u)/v_th)/v_th` (Section 3) | `f(v)` |
+| `susceptibility` | `−(α²/2) 𝒞φ(ξ)` | `−(ω_p²/k²) 𝒞f(ω/k)` (`susceptibility.md` Section 3a) |
+| members | `Maxwellian`, `SuperGaussian`, `Kappa`, `GeneralizedNormal`, `SkewNormal`, `HermiteExpansion` | `GaussianGrid` (`gaussian_grid.md`) |
+
+In both, `T` on a species is the variance temperature along **k̂** and `u` the mean velocity; only who sets them
+differs. A lab-frame distribution is not an exception to Section 1: it is not a shape. The two meet the
+scattering code in exactly two functions, `susceptibility` and `f_lab`, each with a method per family, and
+everything else that touches a species (the trace's per-bin rebuild, the bindings by leaf path) treats the
+distribution slot generically. A species' `T` and `u` leaves exist only for a shape.
+
 ## 6. A shape's derivative in its own parameters
 
 `conventions.md` Section 4's `AbstractVelocityDistribution` entry carries the contract every

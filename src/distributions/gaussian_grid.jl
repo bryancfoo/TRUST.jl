@@ -77,7 +77,8 @@ and flow `u₀`**, written on the grid in closed form, `w⁰ₙ = dv · G(vₙ; 
 σ²)`: a Gaussian narrowed by exactly the width the comb's own Gaussians add back, so `spacing · width`
 must be below 1. The defaults (41 nodes at 0.25 `v_ref` with `width = 1.2`) span ±5 `v_ref` and
 represent that Maxwellian's Cauchy integral to about 1e-4 of its peak (`docs/derivations/gaussian_grid.md`
-Section 6).
+Section 6). A species builder passes its own mass: `electrons(grid = (T_ref_eV = 700,))` builds this form
+with the electron mass, so the mass is never typed twice.
 
 **The explicit form** takes the spacing `dv` itself and the default weights `default_weights`
 (any `Nv ≥ 3` finite positive numbers; their scale is irrelevant), with no temperature.

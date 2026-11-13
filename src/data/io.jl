@@ -166,6 +166,13 @@ end
 
 _shape_name(f::AbstractVelocityDistribution) = string(nameof(typeof(f)))
 
+# Phase G.1 spec D13: the trace layout holds a shape and its parameters; a lab-frame distribution's grid
+# and default have no place in it yet, so write_trace refuses one, before opening the file.
+_require_trace_layout(::AbstractVelocityDistribution, name) = nothing
+_require_trace_layout(f::AbstractLabDistribution, name) = throw(ArgumentError(
+    "write_trace: species \"$name\" carries a lab-frame distribution ($(nameof(typeof(f)))), which the " *
+    "trace layout \"$TRACE_LAYOUT_VERSION\" cannot hold; nothing was written"))
+
 function _write_species_group!(f, prefix::AbstractString, sp)
     f["$prefix/mass_kg"] = Float64(sp.mass)
     f["$prefix/charge"] = Float64(sp.charge)
@@ -197,10 +204,15 @@ x N_t`, SI), and a `template` group describing `trace.template` (density, and, p
 mass, charge, flow, temperature, fraction, shape name and shape parameters). Does **not** write
 enough to reconstruct a `PlasmaTrace` (that needs the component registry of Step 3.6);
 `read_trace` returns plain arrays. An empty `source` is written as `"-"` (Phase 4.N spec D20).
+A template with a species carrying a lab-frame distribution (a `GaussianGrid`) is refused before the
+file is opened: the layout has no place for its grid (Phase G.1 spec D13).
 
-Spec D20; Phase 4.N spec D20.
+Spec D20; Phase 4.N spec D20; Phase G.1 spec D13.
 """
 function write_trace(path::AbstractString, trace::PlasmaTrace; source="")
+    for set in (trace.template.electrons, trace.template.ions), sp in set
+        _require_trace_layout(sp.f, sp.name)
+    end
     jldopen(path, "w") do f
         f["layout_version"] = TRACE_LAYOUT_VERSION
         f["axis_name"] = String(trace.axis_name)

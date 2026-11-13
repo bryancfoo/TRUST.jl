@@ -22,6 +22,26 @@ function susceptibility(sp::Species, k, omega)
 end
 
 """
+    susceptibility(sp::Species{<:Real, <:AbstractLabDistribution}, k, omega) -> Complex
+
+The susceptibility of a species carrying a lab-frame distribution,
+
+    χ_s(k, ω) = −(ω_ps²/k²) · 𝒞f(ω/k),    ω_ps² = n_s q_s²/(ε₀ m_s),
+
+with `𝒞f` the distribution's Cauchy integral in lab velocity, `cauchy_dfdv(sp.f, ω/k)`. This is the
+method above with the thermal speed divided out (for `f(v) = φ((v − u)/v_th)/v_th`, `𝒞f = 𝒞φ/v_th²` and
+`α_s²/2 = ω_ps²/(k² v_th²)`), so no temperature and no flow appear. The minus sign, and the absence of a
+`/2`, are written once, here (`conventions.md` 1.12; `docs/derivations/gaussian_grid.md` Section 4).
+`ω_ps²` is `_plasma_frequency_sq`, linear in the density (`conventions.md` 5.15). `k` in m⁻¹, `omega`
+in rad/s; the result is dimensionless.
+
+`conventions.md` 1.12; [OQ-68](../../dev/open_questions.md#oq-68) item 5; Phase G.1 spec D12.
+"""
+function susceptibility(sp::Species{<:Real, <:AbstractLabDistribution}, k, omega)
+    return -(_plasma_frequency_sq(sp) / k^2) * cauchy_dfdv(sp.f, omega / k)
+end
+
+"""
     dielectric(plasma::Plasma, k, omega) -> (epsilon = ..., chi_e = ...)
 
 The longitudinal dielectric function `ε = 1 + Σ_s χ_s`, summed over every species, electron and
