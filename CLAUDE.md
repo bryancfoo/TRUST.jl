@@ -36,7 +36,7 @@ to carry out Level N−1's instructions as written.
 | Level | Owns | Produces | Does not |
 |---|---|---|---|
 | 1 | `dev/roadmap.md`, `dev/open_questions.md`, `dev/conventions.md`; the broad strokes of the package | Decisions recorded in those three documents; `dev/phaseN_brief.md`, the brief that starts a Level 2 session | Write package code; write phase specs |
-| 2 | One phase of the roadmap at a time | `dev/phaseN_instructions.md` (the spec), `dev/phaseN_prompt.md` (the prompt that starts the Level 3 session), and `dev/phaseN_overall_summary.md` (the running record of what goes back to Level 1) | Write package code (except under the three-strikes rule below); reopen decisions in the Level 1 documents |
+| 2 | One phase of the roadmap at a time | `dev/phaseN_instructions.md` (the spec), `dev/phaseN_prompt.md` (the prompt that starts the Level 3 session; one per chunk, `dev/phaseN_prompt_NN.md`, when a phase is built in chunks), and `dev/phaseN_overall_summary.md` (the running record of what goes back to Level 1) | Write package code (except under the three-strikes rule below); reopen decisions in the Level 1 documents |
 | 3 | The code | `src/`, `test/`, `docs/derivations/`, one commit per step, a hand-off summary in `dev/reports/` | Edit anything in `dev/` outside `dev/reports/`; build ahead of the spec; reopen decisions |
 
 ## Where the project stands
@@ -45,6 +45,14 @@ The three Level 1 documents exist (written 2026-09-06) and are binding. Code arr
 phase: the status line at the top of each phase in `dev/roadmap.md` says what is built, and
 nothing else does. The archived implementation is not a reference; what survived of its
 conventions is in `dev/conventions.md`.
+
+**One effort is planned outside the roadmap: Phase G, the gridded distribution** (opened
+2026-11-12), which fits the velocity distribution itself on a fixed grid in lab velocity. Its
+plan is `dev/gridded_plan.md`, a fourth Level 1 document that Level 1 owns as it owns the other
+three; the status line of each of its phases, G.1 to G.5, is there, and its decisions are
+folded into `dev/open_questions.md` and `dev/conventions.md` like any other phase's. **All of
+Phase G is committed on the branch `gridded_distribution`. `main` is not touched and nothing
+is pushed unless the user asks.**
 
 ## Lower-level instructions are gospel
 
@@ -133,11 +141,11 @@ them must be:
   tests added and the tolerances they actually run at, deviations and their approvals,
   [propagate] items, and any naming or convention ambiguities met on the way.
 
-Once written, `dev/phase0_instructions.md` and `dev/phase0_prompt.md` are the reference
-examples of the form. Until then, the same form for a different package is at
-`C:\Users\bfoo\Documents\GitHub\JANUS.jl\dev\phase0_instructions.md` and
-`C:\Users\bfoo\Documents\GitHub\JANUS.jl\dev\phase0_prompt.md`; copy the structure, not the
-content.
+The reference examples of the form are the most recent phase's own documents in `dev/`: on
+2026-11-14 those are `dev/phaseG2_brief.md` (a brief), `dev/phaseG2_instructions.md` (a spec)
+and `dev/phaseG2_prompt_01.md` to `_03.md` (one prompt per chunk). Copy the structure, not the
+content. (The JANUS.jl files this paragraph first pointed to were on the Windows machine and
+are not on this one.)
 
 ## Briefs
 
@@ -159,8 +167,13 @@ what its own tests exercise.
 - `dev/phaseN_overall_summary.md`: Level 2's running record, for phase N, of everything that
   belongs in a Level 1 document — open items with proposed text, what is already folded in, and
   the measurements worth quoting. Kept current through the phase, not written once at the end.
-- `context/`: reference material, currently `sheffield2011.pdf`, the Sheffield et al. textbook.
-  Gitignored.
+- `context/`: reference material: `sheffield2011.pdf`, the Sheffield et al. textbook;
+  `foo2026.pdf`, the user's paper; and other papers and notes. Gitignored.
+- `experiment/`: the user's work on real data (shot 116349): decks, scripts, notebooks and the
+  records of past fits in `experiment/runs/`, with its own Julia environment that uses the
+  package by path. Untracked (its own `.gitignore` is `*`), and it stays untracked: nothing of
+  the real shot enters the tracked tree, and every test is on synthetic data. No phase edits it
+  unless the user asks.
 - `dev/conventions.md` is binding for every level: units and where they are converted,
   normalizations and sign conventions, naming rules, testing rules. Where it is silent, flag
   the gap rather than choose.
@@ -194,7 +207,10 @@ tools, not with shell redirection.
 1.12.7 on which everything before that date was built and measured. What that changes:
 
 - **Every timing in `dev/` taken before 2026-11-12 is the old machine's**, the fast suite's
-  fifteen-minute ceiling among them. It is not a baseline here until it is taken again here.
+  fifteen-minute ceiling among them, and none of them is a baseline here. **The fast suite's
+  ceiling on this machine is twenty minutes** (the user, 2026-11-13). The binding gate table,
+  the latest median of three and the Linux form of the timing protocol are in
+  `dev/conventions.md` 8.6.
 - **Numbers pinned to the last bit are machine-dependent.** The compiled error-function
   library behind `Z` differs between the two machines in the last bit of about one call in a
   hundred, so five reference arrays were re-pinned here (the header of
@@ -202,8 +218,16 @@ tools, not with shell redirection.
   on different numbers than the old machine's record. The record that holds on this machine is
   in `dev/conventions.md` 8.6, dated 2026-11-12.
 - **The manifests were resolved on Julia 1.13.1 on 2026-11-12** (root, `test/`, `test/slow/`,
-  `examples/figures/`); only standard-library and bundled-binary entries moved. `experiment/`
-  was not resolved: it still depends on the package under its old name.
+  `examples/figures/`); only standard-library and bundled-binary entries moved. **`experiment/`
+  was renamed from `OTIS` to `TRUST` and resolved on 2026-11-13**, at the user's instruction.
+  The records under `experiment/runs/` were left as they were and still carry `otis-…` layout
+  tags, which the package reads as `trust-…` (`_canonical_version`, `src/data/io.jl`).
+- **Line ends are LF, in git and on disk** (`dev/conventions.md` 10.7). The files that came
+  over from Windows as CRLF were converted on 2026-11-13; do not reintroduce CRLF.
+- **A recursive `grep` of `experiment/` returns nothing in the assistant's shell.** There
+  `grep` is a wrapper that honours an ignore file inside the folder it searches, and
+  `experiment/.gitignore` is `*` (which is how the folder stays untracked). Use
+  `/usr/bin/grep -r` on it, or name a subfolder. `dev/` and `context/` are not affected.
 - **`pdftoppm` is not installed**, so the Read tool cannot open the PDFs in `context/`. Say so
   rather than guess at what a source says.
 
