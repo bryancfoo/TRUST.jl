@@ -303,6 +303,23 @@ than its Gaussians or a tail beyond its last node; `docs/derivations/gaussian_gr
 limits. A gridded trace is not yet written to a file, and nothing fits a grid yet. Every other result is
 exactly what it was.
 
+**Phase G.2 (the gridded distribution in time) is complete.** A gridded species can now vary from bin to bin
+through `PlasmaTrace`, `measure`, `synthesize` and the trace file. Any parametric trace becomes its gridded
+twin in two calls: `size_grid(trace, "electrons.e")` sizes a grid that resolves the species' coldest state
+and spans its hottest, and `project_to_grid(trace, "electrons.e" => grid)` writes the species on it bin by
+bin, reporting the projection's error per bin; several species of one mass and charge, such as two electron
+populations, can be merged into one distribution (`("electrons.cold", "electrons.hot") => grid`). A
+gridded trace can also be written directly, with `"electrons.e.f" => G`, a matrix of one row per log-weight
+and one column per bin. Trace files are now `trust-trace-3`, which stores a grid and its default and no
+temperature or flow for a gridded species; `trust-trace-2` files still read. A deck may name a grid at its
+default weights, `shape = { type = "GaussianGrid", T_ref_eV = 700.0, nodes = 41 }`, with every key a fixed
+number and no `T_eV` or `u_kms` beside it. The three foo2026 problems and a new one,
+`bimaxwellian_hydrogen_problem`, a hydrogen plasma whose electrons and protons are each two Maxwellians, all
+have gridded twins whose measured streaks stay within a tenth of the noise of the parametric ones.
+`examples/diagnostics/gridded_identifiability.jl` says, for a problem and a grid, how many combinations of
+the weights the data fix at each time and which velocities they see. Nothing fits a grid yet, and every other
+result is exactly what it was.
+
 The package was named OTIS until 2026-10-18. Files it wrote under that name carry layout
 versions spelled `otis-…`; every reader accepts that spelling for the same layout number and
 reports the canonical `trust-…` string, and every writer emits only `trust-…`. Decks that say
