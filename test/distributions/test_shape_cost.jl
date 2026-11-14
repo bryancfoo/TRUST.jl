@@ -6,7 +6,7 @@
 
 using Test
 using TRUST
-using TRUST: SHAPE_REGISTRY, _SHAPE_OPTIONS, _build_shape
+using TRUST: SHAPE_REGISTRY, _SHAPE_OPTIONS, ELECTRON_MASS
 import ForwardDiff
 
 # --- The representative-instance table (spec D11's forcing function; corrected 2026-09-18,
@@ -25,6 +25,8 @@ const _SC_SHAPES = Dict{String,Any}(
     "GeneralizedNormal" => GeneralizedNormal(3.5),  # mid-domain, and no oracle point of GN10
     "SkewNormal"        => SkewNormal(0.7),  # inside the table, off every oracle point
     "HermiteExpansion"  => HermiteExpansion(c3 = 0.02, c4 = 0.01),  # OQ-66 item 6; c5 = c6 = 0, each still measured
+    # Phase G.2 spec D14 (OQ-69 item 6): a lab-frame distribution, the default 41-node grid at the fixture's 500 eV
+    "GaussianGrid"      => GaussianGrid(; mass_kg = ELECTRON_MASS, T_ref_eV = 500.0),
 )
 
 # --- The fixture: the package's standard collective EPW recipe (test_supergaussian_dm.jl's
@@ -35,8 +37,13 @@ const _SC_PROBE = ProbeBeam(lambda_probe_nm = 263.25)
 const _SC_COLLECTION = Collection(theta_deg = 60, k_model = :exact)
 const _SC_LAMBDA_S = 245e-9  # the midpoint of the 512-point axis (235e-9, 255e-9) RF1a/DP use
 
-_sc_plasma(f, T_eV) = Plasma(n_e_cm3 = 5e19,
-                              electrons = (electrons(T_eV = T_eV, f = f),),
+# Phase G.2 spec D14: a shape's species takes the fixture's temperature; a lab-frame distribution's is built from
+# the distribution alone, since it takes none (its T is computed from it), and T_eV is not used.
+_sc_electrons(f::AbstractVelocityDistribution, T_eV) = electrons(T_eV = T_eV, f = f)
+_sc_electrons(f::AbstractLabDistribution, T_eV) = electrons(f = f)
+
+_sc_plasma(f, T_eV; n_e_cm3 = 5e19) = Plasma(n_e_cm3 = n_e_cm3,
+                              electrons = (_sc_electrons(f, T_eV),),
                               ions = (ion(mass_amu = 2.014, charge = 1, T_eV = 250.0),))
 
 function _sc_fixture_alpha()
@@ -53,6 +60,19 @@ end
 const _SCTag = :ShapeCost
 _sc_dual(value) = ForwardDiff.Dual{_SCTag}(value, 1.0, 0.0, 0.0)
 _sc_seed(f, p::Symbol, dual) = reconstruct(f, merge(parameters(f), NamedTuple{(p,)}((dual,))))
+
+# The yardstick, the ordinary-AD control (Phase G.2 spec D14, OQ-69 item 6): the same plasma under a dual in its
+# species' T for a shape, and under a dual in n_e, with the same tag and the same three partials, for a lab-frame
+# distribution, which has no temperature to seed.
+_sc_yardstick(f::AbstractVelocityDistribution) = _sc_plasma(f, _sc_dual(500.0))
+_sc_yardstick(f::AbstractLabDistribution) = _sc_plasma(f, 500.0; n_e_cm3 = _sc_dual(5e19))
+_sc_yardstick_name(::AbstractVelocityDistribution) = "T"
+_sc_yardstick_name(::AbstractLabDistribution) = "n_e"
+
+# The parameters timed (OQ-68 item 9, the user, 2026-11-12): every one of a shape's; the first, the middle and
+# the last of a lab-frame distribution's (g1, g21 and g41 on the 41-node grid).
+_sc_timed(f::AbstractVelocityDistribution) = sort(collect(keys(parameters(f))))
+_sc_timed(f::AbstractLabDistribution) = (k = keys(parameters(f)); unique([k[1], k[cld(length(k), 2)], k[end]]))
 
 # --- The barrier (conventions.md 5.2's two measurement rules): every measured call consumes the
 # result as a number, value and partials, so nothing can be elided. Wrapped in a function so that
@@ -88,12 +108,17 @@ end
 
 const _SC_N = 50_000  # chunk 3's own loop count for this call (Section 12 row 6)
 
+# A lab-frame distribution's call is about 6.5 us against a shape's 0.2 to 1.5 us, so its loops take a tenth as many
+# calls, each loop lasting about as long as a shape's (Phase G.2 spec D14); a shape's count is unchanged.
+_sc_loop(::AbstractVelocityDistribution) = _SC_N
+_sc_loop(::AbstractLabDistribution) = _SC_N ÷ 10
+
 function _sc_measure(name::String, f, p::Symbol, N::Int)
     v0 = parameters(f)[p]
     f_pdual = _sc_seed(f, p, _sc_dual(v0))
 
     plasma_plain = _sc_plasma(f, 500.0)
-    plasma_tdual = _sc_plasma(f, _sc_dual(500.0))
+    plasma_tdual = _sc_yardstick(f)
     plasma_pdual = _sc_plasma(f_pdual, 500.0)
 
     allocated_pdual = _sc_allocated(plasma_pdual)
@@ -114,7 +139,7 @@ function _sc_measure(name::String, f, p::Symbol, N::Int)
     ratio_1 = t_pdual_1 / t_tdual_1
     ratio_2 = t_pdual_2 / t_tdual_2
 
-    return (shape = name, parameter = p, allocated_pdual = allocated_pdual,
+    return (shape = name, parameter = p, yardstick = _sc_yardstick_name(f), N = N, allocated_pdual = allocated_pdual,
             t_pdual_1 = t_pdual_1, t_tdual_1 = t_tdual_1, ratio_1 = ratio_1,
             t_tdual_2 = t_tdual_2, t_pdual_2 = t_pdual_2, ratio_2 = ratio_2,
             ratio_pt = max(ratio_1, ratio_2),
@@ -126,10 +151,10 @@ const _SC_RESULTS = let
     out = NamedTuple[]
     for name in sort(collect(keys(_SC_SHAPES)))
         f = _SC_SHAPES[name]
-        ps = sort(collect(keys(parameters(f))))
+        ps = _sc_timed(f)
         isempty(ps) && continue
         for p in ps
-            push!(out, _sc_measure(name, f, p, _SC_N))
+            push!(out, _sc_measure(name, f, p, _sc_loop(f)))
         end
     end
     out
@@ -176,7 +201,7 @@ end
 
 @testset "SC3: the p-dual/T-dual throughput ratio, back-to-back both orders" begin
     for r in _SC_RESULTS
-        @info "SC3 (throughput, N=$(_SC_N), ns/call, barriered spectral_density(plasma, k, omega))" shape=r.shape parameter=r.parameter t_pdual_order1=r.t_pdual_1 t_tdual_order1=r.t_tdual_1 ratio_order1=r.ratio_1 t_tdual_order2=r.t_tdual_2 t_pdual_order2=r.t_pdual_2 ratio_order2=r.ratio_2 asserted_ratio=r.ratio_pt
+        @info "SC3 (throughput, N=$(r.N), ns/call, barriered spectral_density(plasma, k, omega))" shape=r.shape parameter=r.parameter yardstick=r.yardstick t_pdual_order1=r.t_pdual_1 t_tdual_order1=r.t_tdual_1 ratio_order1=r.ratio_1 t_tdual_order2=r.t_tdual_2 t_pdual_order2=r.t_pdual_2 ratio_order2=r.ratio_2 asserted_ratio=r.ratio_pt
         @test r.ratio_pt <= 5
     end
 end
@@ -189,7 +214,7 @@ end
 
 @testset "SC4: the T-dual/plain ratio is a real baseline" begin
     for r in _SC_RESULTS
-        @info "SC4 (throughput, N=$(_SC_N), ns/call, barriered spectral_density(plasma, k, omega))" shape=r.shape parameter=r.parameter t_tdual_order1=r.t_tdual_3 t_plain_order1=r.t_plain_1 ratio_order1=r.ratio_tp_1 t_plain_order2=r.t_plain_2 t_tdual_order2=r.t_tdual_4 ratio_order2=r.ratio_tp_2
+        @info "SC4 (throughput, N=$(r.N), ns/call, barriered spectral_density(plasma, k, omega))" shape=r.shape parameter=r.parameter yardstick=r.yardstick t_tdual_order1=r.t_tdual_3 t_plain_order1=r.t_plain_1 ratio_order1=r.ratio_tp_1 t_plain_order2=r.t_plain_2 t_tdual_order2=r.t_tdual_4 ratio_order2=r.ratio_tp_2
         @test max(r.ratio_tp_1, r.ratio_tp_2) >= 1
         @test min(r.ratio_tp_1, r.ratio_tp_2) <= 20
     end
@@ -199,10 +224,21 @@ end
 # _SHAPE_OPTIONS (the deck layer) and SHAPE_REGISTRY (io.jl's read path) are not folded into one
 # table (summary B4); this is the guard that catches the one failure mode a fold would prevent. ---
 
+# Restated at Phase G.2 (spec D14, OQ-69 item 5): its second assertion asked for an io.jl `_build_shape` method
+# taking a dictionary of scalars, which cannot rebuild a grid (its default weights are a vector); it now writes
+# every registered distribution, from SC1's table, into a trace file and reads it back through `read_trace(as =
+# :trace)`, which is what the old assertion stood for, and asks for the same distribution, bitwise.
 @testset "SC5: _SHAPE_OPTIONS and SHAPE_REGISTRY name the same shapes" begin
     @test Set(keys(_SHAPE_OPTIONS)) == Set(keys(SHAPE_REGISTRY))
     for (name, ctor) in SHAPE_REGISTRY
         @test ctor isa Type
-        @test hasmethod(_build_shape, Tuple{Type{ctor},Dict{String,Float64}})
+        f = _SC_SHAPES[name]
+        trace = PlasmaTrace(_sc_plasma(f, 500.0); t_ns = [0.0])
+        rebuilt = mktempdir() do dir
+            path = joinpath(dir, "sc5.jld2")
+            write_trace(path, trace)
+            read_trace(path; as = :trace).template.electrons[1].f
+        end
+        @test rebuilt === f
     end
 end

@@ -173,6 +173,9 @@ _wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
     if _wanted("data io")
         @safetestset "data io" begin include("data/test_io.jl") end
     end
+    if _wanted("gridded file")
+        @safetestset "gridded file" begin include("data/test_io_gridded.jl") end
+    end
     if _wanted("result file")
         @safetestset "result file" begin include("data/test_result.jl") end
     end
@@ -181,6 +184,9 @@ _wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
     end
     if _wanted("deck")
         @safetestset "deck" begin include("config/test_deck.jl") end
+    end
+    if _wanted("gridded registry")
+        @safetestset "gridded registry" begin include("config/test_deck_gridded.jl") end
     end
     if _wanted("near-bound warning")
         @safetestset "near-bound warning" begin include("config/test_deck_near_bound.jl") end

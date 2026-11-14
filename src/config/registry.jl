@@ -10,9 +10,13 @@
 """
     SHAPE_REGISTRY
 
-Deck name -> `AbstractVelocityDistribution` constructor (spec D32). Each entry's option struct
-is in `options.jl` (`MaxwellianOptions`, `SuperGaussianOptions`, `KappaOptions`,
-`GeneralizedNormalOptions`, `SkewNormalOptions`, `HermiteExpansionOptions`).
+Deck name -> distribution constructor (spec D32), **of either family** since Phase G.2 (spec D13,
+[OQ-69](../../dev/open_questions.md#oq-69) item 5, the user's decision of one registry): the six
+shapes (`AbstractVelocityDistribution`) and the lab-frame distribution `GaussianGrid`
+(`AbstractLabDistribution`). Each entry's option struct is in `options.jl` (`MaxwellianOptions`,
+`SuperGaussianOptions`, `KappaOptions`, `GeneralizedNormalOptions`, `SkewNormalOptions`,
+`HermiteExpansionOptions`, `GaussianGridOptions`). `read_trace` builds a stored species' distribution
+from it, and the cost guard (`test/distributions/test_shape_cost.jl`) walks it.
 """
 const SHAPE_REGISTRY = Dict{String,Any}(
     "Maxwellian" => Maxwellian,
@@ -21,6 +25,7 @@ const SHAPE_REGISTRY = Dict{String,Any}(
     "GeneralizedNormal" => GeneralizedNormal,
     "SkewNormal" => SkewNormal,
     "HermiteExpansion" => HermiteExpansion,
+    "GaussianGrid" => GaussianGrid,
 )
 
 """

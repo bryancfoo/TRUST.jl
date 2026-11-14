@@ -164,13 +164,13 @@ end
 # ------------------------------------------------------------------------------------------
 
 @testset "CZ7: trust-trace-2 carries a real charge bitwise; trust-trace-1 is refused" begin
-    @test TRUST.TRACE_LAYOUT_VERSION == "trust-trace-2"
+    @test TRUST.TRACE_LAYOUT_VERSION == "trust-trace-3"   # amended 2026-11-13: Phase G.2's bump (spec D11; the user's U2)
     trace = PlasmaTrace(_cz_single(4.6, 0.7); t_ns=[0.0, 1.0, 2.0], leaves=["n_e_cm3" => [5.0e19, 5.5e19, 6.0e19]])
     mktempdir() do dir
         path = joinpath(dir, "trace.jld2")
         write_trace(path, trace; source="CZ7")
         r = read_trace(path)
-        @test r.layout_version == "trust-trace-2"
+        @test r.layout_version == "trust-trace-3"   # amended 2026-11-13 (Phase G.2 spec D11; the user's U2)
         @test r.template["ions"]["species"]["C"]["charge"] === 4.6
         @test r.template["ions"]["species"]["D"]["charge"] === 1.0
         @test r.template["electrons"]["species"]["e"]["charge"] === -1.0
@@ -350,13 +350,14 @@ end
         path = joinpath(dir, "trace.jld2")
         write_trace(path, trace; source="CZ14")
         ref = read_trace(path)
-        @test jldopen(f -> f["layout_version"], path, "r") == "trust-trace-2"   # writers never emit otis-
+        @test jldopen(f -> f["layout_version"], path, "r") == "trust-trace-3"   # writers never emit otis- (amended 2026-11-13: Phase G.2's bump, spec D11; the user's U2)
 
         # 1: the current number, old spelling: reads, equal to the untouched file's (exact), canonical field
-        rewrite(path, "otis-trace-2")
-        @test jldopen(f -> f["layout_version"], path, "r") == "otis-trace-2"
+        # (amended 2026-11-13: the current number is 3 since Phase G.2, spec D11; the user's U2)
+        rewrite(path, "otis-trace-3")
+        @test jldopen(f -> f["layout_version"], path, "r") == "otis-trace-3"
         old = read_trace(path)
-        @test old.layout_version == "trust-trace-2"
+        @test old.layout_version == "trust-trace-3"
         @test isequal(old, ref)
         rebuilt = read_trace(path; as=:trace)
         @test all(plasma(rebuilt, j).ions["C"].n === plasma(trace, j).ions["C"].n for j in 1:3)

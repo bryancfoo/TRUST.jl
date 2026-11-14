@@ -241,10 +241,13 @@ end
     @test !occursin("computed", sprint(show, MIME"text/plain"(), p.ions[1]))
 end
 
-@testset "GC12: write_trace refuses a lab-frame distribution before opening the file" begin
+# Restated 2026-11-13 (Phase G.2 spec D11, the user's U2): the trace layout holds a grid since trust-trace-3, so the
+# refusal this row asserted is withdrawn (OQ-69 item 4); the row now asserts the file is written and holds the grid.
+@testset "GC12: write_trace writes a lab-frame distribution (trust-trace-3 holds its grid)" begin
     p = _gc_plasma(electrons(T_eV = 700), _gc_deuterons(grid = (T_ref_eV = 250,)))
     tr = PlasmaTrace(p; t_ns = [0.0, 1.0])
     path = joinpath(mktempdir(), "gc12.jld2")
-    @test_throws "write_trace: species \"D\" carries a lab-frame distribution (GaussianGrid), which the trace layout \"trust-trace-2\" cannot hold; nothing was written" write_trace(path, tr)
-    @test !isfile(path)
+    write_trace(path, tr)
+    @test isfile(path)
+    @test read_trace(path).template["ions"]["species"]["D"]["grid"]["nodes"] == 41
 end

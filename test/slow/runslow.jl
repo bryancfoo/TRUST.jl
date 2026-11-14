@@ -32,4 +32,5 @@ using Test
     @safetestset "uncertainty (slow)" begin include("test_uncertainty.jl") end
     @safetestset "Hermite (slow)" begin include("test_hermite.jl") end
     @safetestset "gridded twins (slow)" begin include("test_examples_twins.jl") end
+    @safetestset "shape cost (slow)" begin include("test_shape_cost.jl") end
 end

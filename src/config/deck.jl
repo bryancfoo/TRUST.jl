@@ -669,7 +669,18 @@ const _ION_SPECIES_KEYS = (_ELECTRON_SPECIES_KEYS..., "mass_amu", "mass_kg", "ch
 const _SHAPE_OPTIONS = Dict{String,Any}("Maxwellian" => MaxwellianOptions, "SuperGaussian" => SuperGaussianOptions,
                                          "Kappa" => KappaOptions, "GeneralizedNormal" => GeneralizedNormalOptions,
                                          "SkewNormal" => SkewNormalOptions,
-                                         "HermiteExpansion" => HermiteExpansionOptions)
+                                         "HermiteExpansion" => HermiteExpansionOptions,
+                                         "GaussianGrid" => GaussianGridOptions)
+
+# What a shape entry's option type allows (Phase G.2 spec D13), by a method on the option type, never by its
+# name: whether its keys take variable references (a shape's do; GaussianGrid's never, the grid being fixed for
+# a whole fit), the keys that have no usable default, and whether the species' T and u are computed from it.
+_shape_refs_allowed(::Type) = true
+_shape_refs_allowed(::Type{GaussianGridOptions}) = false
+_required_shape_keys(::Type) = ()
+_required_shape_keys(::Type{GaussianGridOptions}) = ("T_ref_eV",)
+_shape_derives_u_T(::Type) = false
+_shape_derives_u_T(::Type{GaussianGridOptions}) = true
 
 function _validate_shape_entry(given::AbstractDict, known_names::AbstractSet{String}, section::AbstractString)
     given isa AbstractDict || throw(ArgumentError("read_deck: \"$section\" must be a table"))
@@ -678,7 +689,18 @@ function _validate_shape_entry(given::AbstractDict, known_names::AbstractSet{Str
     type isa AbstractString || throw(ArgumentError("read_deck: \"$section.type\" must be a string"))
     OptT = _check_registry_name(_SHAPE_OPTIONS, type, "shape")
     rest = Dict(k => v for (k, v) in given if k != "type")
-    filled = _fill_option_fields(OptT, rest, known_names, section, true)
+    _check_known_keys(rest, String.(fieldnames(OptT)), section)
+    if !_shape_refs_allowed(OptT)
+        for (k, v) in rest
+            v isa AbstractString && throw(ArgumentError(
+                "read_deck: key \"$k\" in section \"$section\" cannot be a variable reference: a $type's keys " *
+                "take numbers only, its grid being fixed for a whole fit"))
+        end
+    end
+    for k in _required_shape_keys(OptT)
+        haskey(rest, k) || throw(ArgumentError("read_deck: section \"$section\" needs \"$k\" for a $type"))
+    end
+    filled = _fill_option_fields(OptT, rest, known_names, section, _shape_refs_allowed(OptT))
     return Dict{String,Any}("type" => type, filled...)
 end
 
@@ -705,6 +727,11 @@ function _validate_species_entry(sptable::AbstractDict, valid_keys, section::Abs
     end
     if haskey(sptable, "shape")
         out["shape"] = _validate_shape_entry(sptable["shape"], known_names, "$section.shape")
+        # Phase G.2 spec D13 (OQ-69 item 5): a species carrying a lab-frame distribution has no input T or u
+        given = Tuple(k for k in ("T_eV", "T_keV", "u_kms", "u_ms") if haskey(sptable, k))
+        (_shape_derives_u_T(_SHAPE_OPTIONS[out["shape"]["type"]]) && !isempty(given)) && throw(ArgumentError(
+            "read_deck: species \"$section\" carries a lab-frame distribution ($(out["shape"]["type"])): its T " *
+            "and u are computed from the distribution and cannot be given; got $given"))
     end
     return out
 end
@@ -1448,7 +1475,8 @@ function _species_kwargs_and_bindings!(bindings::Vector{Pair{String,Any}}, sp::A
         end
     end
     if haskey(sp, "shape")
-        kwargs[:f] = _build_shape_from_deck(sp["shape"], bindings, vals, "$prefix.f")
+        key, val = _build_shape_from_deck(sp["shape"], bindings, vals, "$prefix.f")
+        kwargs[key] = val
     end
     return kwargs
 end
@@ -1466,8 +1494,16 @@ function _build_shape_from_deck(shape::AbstractDict, bindings::Vector{Pair{Strin
             push!(bindings, nm => "$prefix.$k")
         end
     end
-    return _construct_shape(OptT, resolved)
+    return _shape_keyword(OptT, resolved)
 end
+
+# The builder keyword a shape entry becomes (Phase G.2 spec D13), by a method on the option type: `f`, the shape
+# itself, for a shape; `grid`, GaussianGrid's temperature form, for a GaussianGrid, so that the builder makes
+# the grid with the species' own mass.
+_shape_keyword(OptT::Type, resolved::AbstractDict) = :f => _construct_shape(OptT, resolved)
+_shape_keyword(::Type{GaussianGridOptions}, r::AbstractDict) =
+    :grid => (T_ref_eV = r["T_ref_eV"], u0_kms = r["u0_kms"], nodes = r["nodes"], spacing = r["spacing"],
+              width = r["width"], symmetric = r["symmetric"])
 
 _construct_shape(::Type{MaxwellianOptions}, ::AbstractDict) = Maxwellian()
 _construct_shape(::Type{SuperGaussianOptions}, resolved::AbstractDict) = SuperGaussian(resolved["m"])

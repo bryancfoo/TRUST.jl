@@ -263,7 +263,7 @@ end
 
 @testset "RE5: the streak and trace layouts are untouched" begin
     @test TRUST.STREAK_LAYOUT_VERSION == "trust-streak-1"
-    @test TRUST.TRACE_LAYOUT_VERSION == "trust-trace-2"   # amended 2026-10-10: Phase 4.J's one bump (spec D4, D9)
+    @test TRUST.TRACE_LAYOUT_VERSION == "trust-trace-3"   # amended 2026-11-13: Phase G.2's bump (spec D11; the user's U2); 2026-10-10: Phase 4.J's (spec D4, D9)
 
     nl, nt = 16, 4
     lam = collect(range(235e-9, 255e-9; length=nl))
@@ -386,7 +386,7 @@ end
         write_trace(path, trace; source="test")
 
         arrays = read_trace(path)
-        @test arrays.layout_version == "trust-trace-2"   # amended 2026-10-10 (Phase 4.J spec D4, D9)
+        @test arrays.layout_version == "trust-trace-3"   # amended 2026-11-13 (Phase G.2 spec D11; the user's U2); 2026-10-10 (Phase 4.J spec D4, D9)
         @test arrays.values == trace.values
 
         rebuilt = read_trace(path; as=:trace)

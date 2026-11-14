@@ -18,7 +18,7 @@
 # literal (`coefficients = ["bg", "c1", 0.0]`) has one fixed field type to check element by
 # element, each entry independently a variable reference or a fixed number.
 
-# --- SHAPE_REGISTRY's six option structs ---
+# --- SHAPE_REGISTRY's seven option structs (six shapes and, from Phase G.2, GaussianGrid) ---
 
 """
     MaxwellianOptions
@@ -87,6 +87,27 @@ Base.@kwdef struct HermiteExpansionOptions
     c4::Float64 = 0.0
     c5::Float64 = 0.0
     c6::Float64 = 0.0
+end
+
+"""
+    GaussianGridOptions
+
+The deck keys of a species carrying a `GaussianGrid` (Phase G.2 spec D13,
+[OQ-69](../../dev/open_questions.md#oq-69) item 5): `GaussianGrid`'s temperature form, the grid made
+with the species' own mass through the builders' `grid` keyword. `T_ref_eV` is required: its default
+`NaN` is a marker the deck layer refuses (`read_deck` names the key), since an option struct gives
+every field a default; `u0_kms` (`0.0`), `nodes` (`41`), `spacing` (`0.25`), `width` (`1.2`) and
+`symmetric` (`false`) are `GaussianGrid`'s own defaults. **Every key is a fixed number**, never a
+variable reference: the grid is fixed for a whole fit. The weights stand at the default, the Maxwellian
+of `T_ref`; a deck that gives or fits them is Phase G.5's. The effective deck writes all six keys.
+"""
+Base.@kwdef struct GaussianGridOptions
+    T_ref_eV::Float64 = NaN
+    u0_kms::Float64 = 0.0
+    nodes::Int = 41
+    spacing::Float64 = 0.25
+    width::Float64 = 1.2
+    symmetric::Bool = false
 end
 
 # --- EFFECT_REGISTRY's ten option structs ---

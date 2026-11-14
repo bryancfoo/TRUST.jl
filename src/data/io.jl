@@ -16,13 +16,24 @@ const STREAK_LAYOUT_VERSION = "trust-streak-1"
     TRACE_LAYOUT_VERSION
 
 The `layout_version` string written to every trace JLD2 file and checked on read.
-**`"trust-trace-2"` since Step 4.J.1** (Phase 4.J spec D9, [OQ-60](../../dev/open_questions.md#oq-60)
-item 6): a species' `charge` is written `Float64`, where `trust-trace-1` wrote `Int64`. `read_trace`
-refuses an `trust-trace-1` file, naming both versions; there is no reader for the old layout.
+**`"trust-trace-3"` since Step G.2.2** (Phase G.2 spec D11, [OQ-69](../../dev/open_questions.md#oq-69)
+item 4): a species carrying a lab-frame distribution stores its grid and default weights and no `u` or
+`T`. `"trust-trace-2"` (Step 4.J.1, Phase 4.J spec D9: a species' `charge` written `Float64`, where
+`trust-trace-1` wrote `Int64`) is still read, since a file with no gridded species has the same content
+in both (`TRACE_LAYOUTS_READ`); `read_trace` refuses any other version, naming the ones it reads.
 
-Spec D20, D45; Phase 4.J spec D9.
+Spec D20, D45; Phase 4.J spec D9; Phase G.2 spec D11.
 """
-const TRACE_LAYOUT_VERSION = "trust-trace-2"
+const TRACE_LAYOUT_VERSION = "trust-trace-3"
+
+"""
+    TRACE_LAYOUTS_READ
+
+The trace layouts `read_trace` accepts, oldest first: `("trust-trace-2", "trust-trace-3")` (Phase G.2
+spec D11, [OQ-69](../../dev/open_questions.md#oq-69) item 4). A file's `layout_version` is compared after
+`_canonical_version`, so `"otis-trace-2"` reads as `"trust-trace-2"`.
+"""
+const TRACE_LAYOUTS_READ = ("trust-trace-2", TRACE_LAYOUT_VERSION)
 
 """
     _canonical_version(v)
@@ -164,26 +175,44 @@ function read_streak(path::AbstractString)
     end
 end
 
-_shape_name(f::AbstractVelocityDistribution) = string(nameof(typeof(f)))
+# The registry name a species group stores: the distribution's type name, of either family (Phase G.2 spec D11).
+_shape_name(f::Union{AbstractVelocityDistribution, AbstractLabDistribution}) = string(nameof(typeof(f)))
 
-# Phase G.1 spec D13: the trace layout holds a shape and its parameters; a lab-frame distribution's grid
-# and default have no place in it yet, so write_trace refuses one, before opening the file.
-_require_trace_layout(::AbstractVelocityDistribution, name) = nothing
-_require_trace_layout(f::AbstractLabDistribution, name) = throw(ArgumentError(
-    "write_trace: species \"$name\" carries a lab-frame distribution ($(nameof(typeof(f)))), which the " *
-    "trace layout \"$TRACE_LAYOUT_VERSION\" cannot hold; nothing was written"))
+# A shape's species stores its u and T, inputs; a lab-frame distribution's species does not, since they are
+# computed from the distribution (Phase G.2 spec D11, OQ-69 item 4: nothing derived is stored).
+function _write_u_T!(f, prefix::AbstractString, ::AbstractVelocityDistribution, sp)
+    f["$prefix/u_ms"] = Float64(sp.u)
+    f["$prefix/T_J"] = Float64(sp.T)
+    return nothing
+end
+_write_u_T!(f, prefix::AbstractString, ::AbstractLabDistribution, sp) = nothing
+
+# A shape has no grid; a GaussianGrid writes its own (Phase G.2 spec D11): the centre, spacing and width in
+# m/s, the node count, the symmetry flag (UInt8, 1 = symmetric), the default weights, and the node
+# velocities in m/s, redundant with the first three, for a reader without the package.
+_write_grid!(f, prefix::AbstractString, ::AbstractVelocityDistribution) = nothing
+function _write_grid!(f, prefix::AbstractString, g::GaussianGrid{FT, Nv, NP}) where {FT, Nv, NP}
+    f["$prefix/grid/u0_ms"] = g.u0
+    f["$prefix/grid/dv_ms"] = g.dv
+    f["$prefix/grid/sigma_ms"] = g.sigma
+    f["$prefix/grid/nodes"] = Int64(Nv)
+    f["$prefix/grid/symmetric"] = UInt8(NP < Nv)
+    f["$prefix/grid/default_weights"] = collect(g.w0)
+    f["$prefix/grid/node_velocities_ms"] = [_grid_node(g, n) for n in 1:Nv]
+    return nothing
+end
 
 function _write_species_group!(f, prefix::AbstractString, sp)
     f["$prefix/mass_kg"] = Float64(sp.mass)
     f["$prefix/charge"] = Float64(sp.charge)
-    f["$prefix/u_ms"] = Float64(sp.u)
-    f["$prefix/T_J"] = Float64(sp.T)
+    _write_u_T!(f, prefix, sp.f, sp)
     f["$prefix/fraction"] = Float64(sp.fraction)
     f["$prefix/shape"] = _shape_name(sp.f)
     p = parameters(sp.f)
     for k in keys(p)
         f["$prefix/shape_p/$k"] = Float64(p[k])
     end
+    _write_grid!(f, prefix, sp.f)
     return nothing
 end
 
@@ -201,18 +230,17 @@ end
 Writes the trace's tabulated values (`docs/derivations/data_layout.md`): `layout_version`,
 `axis_name`, `axis` (SI), `axis_unit`, `paths` (the SI leaf paths, row order), `values` (`N_leaf
 x N_t`, SI), and a `template` group describing `trace.template` (density, and, per species,
-mass, charge, flow, temperature, fraction, shape name and shape parameters). Does **not** write
-enough to reconstruct a `PlasmaTrace` (that needs the component registry of Step 3.6);
-`read_trace` returns plain arrays. An empty `source` is written as `"-"` (Phase 4.N spec D20).
-A template with a species carrying a lab-frame distribution (a `GaussianGrid`) is refused before the
-file is opened: the layout has no place for its grid (Phase G.1 spec D13).
+mass, charge, flow, temperature, fraction, shape name and shape parameters). `read_trace(path; as =
+:trace)` rebuilds the trace through `SHAPE_REGISTRY`. An empty `source` is written as `"-"` (Phase 4.N
+spec D20). **The layout is `trust-trace-3`** (Phase G.2 spec D11): a species carrying a lab-frame
+distribution stores its registry name under `shape`, its template log-weights under `shape_p`, and its
+grid under `grid/` (`u0_ms`, `dv_ms`, `sigma_ms`, `nodes`, `symmetric`, `default_weights`,
+`node_velocities_ms`), and **no `u_ms` and no `T_J`**, which are computed from the distribution; its
+per-bin log-weights are rows of `values`, as every leaf is (`docs/derivations/data_layout.md` Section 2).
 
-Spec D20; Phase 4.N spec D20; Phase G.1 spec D13.
+Spec D20; Phase 4.N spec D20; Phase G.2 spec D11.
 """
 function write_trace(path::AbstractString, trace::PlasmaTrace; source="")
-    for set in (trace.template.electrons, trace.template.ions), sp in set
-        _require_trace_layout(sp.f, sp.name)
-    end
     jldopen(path, "w") do f
         f["layout_version"] = TRACE_LAYOUT_VERSION
         f["axis_name"] = String(trace.axis_name)
@@ -234,8 +262,9 @@ function _read_species_group(f, prefix::AbstractString)
     d = Dict{String,Any}()
     d["mass_kg"] = f["$prefix/mass_kg"]
     d["charge"] = f["$prefix/charge"]
-    d["u_ms"] = f["$prefix/u_ms"]
-    d["T_J"] = f["$prefix/T_J"]
+    # Phase G.2 spec D11: a gridded species stores no u_ms or T_J, and a grid/ group instead
+    haskey(f, "$prefix/u_ms") && (d["u_ms"] = f["$prefix/u_ms"])
+    haskey(f, "$prefix/T_J") && (d["T_J"] = f["$prefix/T_J"])
     d["fraction"] = f["$prefix/fraction"]
     d["shape"] = f["$prefix/shape"]
     shape_p = Dict{String,Float64}()
@@ -245,6 +274,13 @@ function _read_species_group(f, prefix::AbstractString)
         end
     end
     d["shape_p"] = shape_p
+    if haskey(f, "$prefix/grid")
+        grid = Dict{String,Any}()
+        for k in keys(f["$prefix/grid"])
+            grid[k] = f["$prefix/grid/$k"]
+        end
+        d["grid"] = grid
+    end
     return d
 end
 
@@ -260,28 +296,32 @@ end
 """
     read_trace(path::AbstractString; as::Symbol = :arrays) -> NamedTuple or PlasmaTrace
 
-Reads a trace written by `write_trace`. `as = :arrays` (the default, Phase 2's behaviour,
-unchanged) returns `(; layout_version, axis_name, axis, axis_unit, paths, values, template)` with
-`template` a `Dict{String,Any}` of the group's contents; the round trip (IO6) is on these arrays,
-bit for bit, not on a reconstructed object.
+Reads a trace written by `write_trace`, in either layout of `TRACE_LAYOUTS_READ` (`trust-trace-3`, and
+`trust-trace-2`, whose files hold no gridded species and read exactly as before; Phase G.2 spec D11).
+`as = :arrays` (the default, Phase 2's behaviour, unchanged) returns `(; layout_version, axis_name, axis,
+axis_unit, paths, values, template)` with `template` a `Dict{String,Any}` of the group's contents, every
+entry as stored (a gridded species' dictionary has no `"u_ms"` or `"T_J"` and has a `"grid"` dictionary);
+the round trip (IO6) is on these arrays, bit for bit, not on a reconstructed object.
 
-`as = :trace` (Step 3.6, spec D35) rebuilds a `PlasmaTrace`: each species' shape is looked up by
-name in `SHAPE_REGISTRY` and built from its `shape_p`, the species themselves through `electrons`/
+`as = :trace` (Step 3.6, spec D35) rebuilds a `PlasmaTrace`: each species' distribution is looked up by
+name in `SHAPE_REGISTRY` and built from its `shape_p` (and, for a `GaussianGrid`, its `grid`, the grid,
+the default weights and every log-weight to the bit), the species themselves through `electrons`/
 `ion`, the template through `Plasma`'s own keyword constructor, and the leaf table through the
 package-internal `_finish_trace` directly (not the public `PlasmaTrace(template; t_ns|t_s, ...)`
 constructor, whose axis keyword is hard-coded to the `:t` unit row regardless of `axis_name` —
 `axis` here is already SI, so no such keyword is needed). An unknown `as` is a loud error naming
 both accepted values.
 
-Spec D20, D35.
+Spec D20, D35; Phase G.2 spec D11.
 """
 function read_trace(path::AbstractString; as::Symbol=:arrays)
     as === :arrays || as === :trace || throw(ArgumentError(
         "read_trace: as must be :arrays or :trace; got :$as"))
     arrays = jldopen(path, "r") do f
         layout_version = _canonical_version(_require_dataset(f, "layout_version", path))
-        layout_version == TRACE_LAYOUT_VERSION || throw(ArgumentError(
-            "read_trace: \"$path\" has layout_version \"$layout_version\"; expected \"$TRACE_LAYOUT_VERSION\""))
+        layout_version in TRACE_LAYOUTS_READ || throw(ArgumentError(
+            "read_trace: \"$path\" has layout_version \"$layout_version\"; expected " *
+            join(("\"$v\"" for v in TRACE_LAYOUTS_READ), " or ")))
         axis_name = _require_dataset(f, "axis_name", path)
         axis = _require_dataset(f, "axis", path)
         axis_unit = _require_dataset(f, "axis_unit", path)
@@ -303,7 +343,8 @@ end
 
 Builds the shape `ctor` (a `SHAPE_REGISTRY` value) names from its stored parameters, by dispatch
 on `ctor` — never an `if name == ...` chain (`conventions.md` 7.2). Add a method here when
-`SHAPE_REGISTRY` gains an entry whose shape takes parameters.
+`SHAPE_REGISTRY` gains an entry whose shape takes parameters. A lab-frame distribution is built by
+`_build_distribution` from the whole species dictionary, since it stores more than its parameters.
 """
 _build_shape(::Type{Maxwellian}, ::AbstractDict) = Maxwellian()
 _build_shape(::Type{SuperGaussian}, shape_p::AbstractDict) = SuperGaussian(Float64(shape_p["m"]))
@@ -314,17 +355,51 @@ _build_shape(::Type{HermiteExpansion}, shape_p::AbstractDict) =
     HermiteExpansion(Float64(shape_p["c3"]), Float64(shape_p["c4"]), Float64(shape_p["c5"]), Float64(shape_p["c6"]))
 
 """
-    _shape_from_dict(d::AbstractDict) -> AbstractVelocityDistribution
+    _build_distribution(ctor, d::AbstractDict) -> distribution
+
+The distribution `ctor` (a `SHAPE_REGISTRY` value) names, from one species dictionary of
+`_read_species_group` (Phase G.2 spec D12): a shape from `d["shape_p"]` through `_build_shape`; a
+`GaussianGrid` from `d["grid"]` and `d["shape_p"]`, its centre, spacing, width, default weights and
+log-weights exactly as stored (through the inner constructor, so nothing is recomputed). A grid whose
+`nodes` is not the length of its `default_weights` is refused.
+"""
+_build_distribution(ctor::Type{<:AbstractVelocityDistribution}, d::AbstractDict) = _build_shape(ctor, d["shape_p"])
+
+function _build_distribution(::Type{GaussianGrid}, d::AbstractDict)
+    grid = d["grid"]
+    w0 = Vector{Float64}(grid["default_weights"])
+    Int(grid["nodes"]) == length(w0) || throw(ArgumentError(
+        "read_trace: a GaussianGrid's grid/nodes is $(grid["nodes"]) but its grid/default_weights has $(length(w0)) entries"))
+    g0 = _gaussian_grid(Float64(grid["u0_ms"]), Float64(grid["dv_ms"]), Float64(grid["sigma_ms"]), Tuple(w0),
+                        grid["symmetric"] != 0)
+    return _grid_from_stored(g0, d["shape_p"])
+end
+
+# The stored log-weights g1, g2, … onto a grid (spec D12), behind a function barrier on the node count.
+function _grid_from_stored(g0::GaussianGrid{Float64, Nv, NP}, shape_p::AbstractDict) where {Nv, NP}
+    length(shape_p) == NP || throw(ArgumentError(
+        "read_trace: a GaussianGrid of $Nv nodes has $NP parameters; the file stores $(length(shape_p))"))
+    names = _grid_names(Val(NP))
+    return reconstruct(g0, NamedTuple{names}(ntuple(k -> Float64(shape_p[String(names[k])]), Val(NP))))
+end
+
+"""
+    _shape_from_dict(d::AbstractDict) -> distribution
 
 `d`'s `"shape"` name looked up in `SHAPE_REGISTRY` (a loud error naming the shape and the valid
-names if absent), then built from `d["shape_p"]` through `_build_shape`.
+names if absent), then built from `d` through `_build_distribution`.
 """
 function _shape_from_dict(d::AbstractDict)
     name = d["shape"]
     haskey(SHAPE_REGISTRY, name) || throw(ArgumentError(
         "read_trace: unknown shape \"$name\"; valid shapes are $(sort(collect(keys(SHAPE_REGISTRY))))"))
-    return _build_shape(SHAPE_REGISTRY[name], d["shape_p"])
+    return _build_distribution(SHAPE_REGISTRY[name], d)
 end
+
+# The keywords a species builder takes beside its distribution (Phase G.2 spec D12): a shape's T and u as
+# stored; nothing for a lab-frame distribution, whose T and u its builder computes.
+_species_u_T_from_dict(::AbstractVelocityDistribution, d::AbstractDict) = (T_eV = d["T_J"] / EV, u_ms = d["u_ms"])
+_species_u_T_from_dict(::AbstractLabDistribution, d::AbstractDict) = NamedTuple()
 
 """
     _species_spec_from_dict(name, d::AbstractDict, kind::Symbol) -> SpeciesSpec
@@ -333,16 +408,17 @@ One electron or ion `SpeciesSpec` (`kind === :electrons` or `:ions`) from `read_
 `_read_species_group` dictionary `d`, through `electrons`/`ion`'s own keyword constructors —
 `T_eV` from `d["T_J"] / EV` (the one place this file converts a unit), `u_ms`, `fraction` and the
 shape passed through directly (already SI). Electron mass is not read from `d["mass_kg"]`:
-`electrons` always uses `ELECTRON_MASS`, matching how the mass was written in the first place.
+`electrons` always uses `ELECTRON_MASS`, matching how the mass was written in the first place. A
+species carrying a lab-frame distribution is built from its distribution and fraction alone, its `T`
+and `u` computed by the builder (`_species_u_T_from_dict`; Phase G.2 spec D12).
 """
 function _species_spec_from_dict(name::AbstractString, d::AbstractDict, kind::Symbol)
     f = _shape_from_dict(d)
-    T_eV = d["T_J"] / EV
+    uT = _species_u_T_from_dict(f, d)
     if kind === :electrons
-        return electrons(; name=name, T_eV=T_eV, u_ms=d["u_ms"], fraction=d["fraction"], f=f)
+        return electrons(; name=name, uT..., fraction=d["fraction"], f=f)
     else
-        return ion(; name=name, mass_kg=d["mass_kg"], charge=d["charge"], T_eV=T_eV,
-            u_ms=d["u_ms"], fraction=d["fraction"], f=f)
+        return ion(; name=name, mass_kg=d["mass_kg"], charge=d["charge"], uT..., fraction=d["fraction"], f=f)
     end
 end
 
