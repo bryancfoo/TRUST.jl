@@ -307,7 +307,17 @@ a callable `g`, evaluated as `g(axis_boundary[j]) * factor` where `axis_boundary
 everything at this boundary is in the unit its own keyword names. Duplicate keys resolving to
 the same SI path are an error; the row order is the order `leaves` is given in.
 
-Spec D6, D28.
+**A whole distribution as one leaf** (Phase G.2, [OQ-69](../../dev/open_questions.md#oq-69) item
+1): the key of a species' distribution, `"electrons.<name>.f"` or `"ions.<name>.f"`, takes a
+matrix with one row per parameter, in `parameters(f)`'s order, and one column per bin, or a
+function of the axis value returning that many numbers. It stands for one row per parameter, in
+that order, at the key's place in `leaves`, and gives the same trace, bitwise, as the pairs
+`"<key>.<parameter>" => row` would. Refused, naming the key: a distribution with no parameter; a
+row count, or a function's value count, that is not the parameter count; a column count that is
+not the bin count; anything but a matrix or a function; and the key given beside a key of one of
+its own parameters.
+
+Spec D6, D28; Phase G.2 spec D3.
 """
 function _widen_shape(f::AbstractVelocityDistribution, ::Type{FT}) where {FT}
     p = parameters(f)
@@ -348,11 +358,79 @@ function _widen_plasma(p::Plasma, ::Type{FT}) where {FT}
     return Plasma{FT,typeof(electron_set),typeof(ion_set)}(FT(p.n_e), electron_set, ion_set)
 end
 
+# Phase G.2 spec D3 (OQ-69 item 1): "electrons.<name>.f" or "ions.<name>.f", a whole distribution.
+function _is_distribution_key(key::AbstractString)
+    segs = split(key, '.')
+    return length(segs) == 3 && (segs[1] == "electrons" || segs[1] == "ions") && segs[3] == "f"
+end
+
+"""
+    _expand_distribution_leaves(template, pairs_list, axis_raw, nt) -> Vector
+
+`pairs_list` with every whole-distribution key (`"electrons.<name>.f"`, `"ions.<name>.f"`) replaced,
+at its own place, by one `"<key>.<parameter>" => row` pair per parameter of that species'
+distribution, in `parameters(f)`'s order (Phase G.2 spec D3, OQ-69 item 1). A matrix gives its rows
+(`value[i, :]`); a function is called once per bin on the boundary axis and gives one value per
+parameter. `pairs_list` itself, untouched, when it holds no such key. Construction-time only.
+"""
+function _expand_distribution_leaves(template::Plasma, pairs_list::Vector, axis_raw, nt::Integer)
+    any(kv -> _is_distribution_key(String(first(kv))), pairs_list) || return pairs_list
+    given = [String(first(kv)) for kv in pairs_list]
+    out = Pair{String,Any}[]
+    for (k, kv) in enumerate(pairs_list)
+        key = given[k]
+        if !_is_distribution_key(key)
+            push!(out, key => last(kv))
+            continue
+        end
+        count(==(key), given) == 1 || throw(ArgumentError("\"$key\" is given twice"))
+        for other in given
+            startswith(other, key * ".") && throw(ArgumentError(
+                "\"$key\" is given with \"$other\", one of its own parameters; give the whole " *
+                "distribution or its parameters, not both"))
+        end
+        segs = split(key, '.')
+        species_set = segs[1] == "electrons" ? template.electrons : template.ions
+        idx = findfirst(==(segs[2]), species_set.names)
+        idx === nothing && throw(ArgumentError("\"$key\" has no species named \"$(segs[2])\""))
+        f = species_set[idx].f
+        pnames = keys(parameters(f))
+        NP = length(pnames)
+        dname = nameof(typeof(f))
+        NP > 0 || throw(ArgumentError(
+            "\"$key\": $dname has no parameter, so its distribution cannot be a leaf"))
+        val = last(kv)
+        if val isa AbstractMatrix
+            size(val, 1) == NP || throw(ArgumentError(
+                "\"$key\" has $(size(val, 1)) rows but $dname has $NP parameters, one row each"))
+            size(val, 2) == nt || throw(ArgumentError(
+                "\"$key\" has $(size(val, 2)) columns but the axis has $nt bins"))
+            for i in 1:NP
+                push!(out, "$key.$(pnames[i])" => val[i, :])
+            end
+        elseif val isa AbstractArray
+            throw(ArgumentError(
+                "\"$key\" takes a matrix with one row per parameter and one column per bin, or a " *
+                "function of the axis returning one value per parameter; got a $(typeof(val))"))
+        else
+            per_bin = [val(axis_raw[j]) for j in 1:nt]
+            for j in 1:nt
+                length(per_bin[j]) == NP || throw(ArgumentError(
+                    "\"$key\" returned $(length(per_bin[j])) values at bin $j but $dname has $NP parameters"))
+            end
+            for i in 1:NP
+                push!(out, "$key.$(pnames[i])" => [per_bin[j][i] for j in 1:nt])
+            end
+        end
+    end
+    return out
+end
+
 function PlasmaTrace(template::Plasma; axis_name::Symbol=:t, leaves=(), kwargs...)
     axis_raw, axis_factor = _axis_kwarg(kwargs)
     nt = length(axis_raw)
 
-    pairs_list = collect(leaves)
+    pairs_list = _expand_distribution_leaves(template, collect(leaves), axis_raw, nt)
     n_leaf = length(pairs_list)
     paths = Vector{LeafPath}(undef, n_leaf)
     refs = Vector{LeafRef}(undef, n_leaf)
@@ -403,8 +481,11 @@ function _enumerate_leaves(template::Plasma)
         for idx in 1:length(set)
             sp = set[idx]
             nm = set.names[idx]
-            push!(out, (LeafRef(setsym, idx, :T, false), LeafPath([String(setsym), nm, "T"])))
-            push!(out, (LeafRef(setsym, idx, :u, false), LeafPath([String(setsym), nm, "u"])))
+            # Phase G.2 spec D4 (OQ-69 item 1): a lab-frame species' T and u are derived, not leaves
+            if !_derives_u_T(sp.f)
+                push!(out, (LeafRef(setsym, idx, :T, false), LeafPath([String(setsym), nm, "T"])))
+                push!(out, (LeafRef(setsym, idx, :u, false), LeafPath([String(setsym), nm, "u"])))
+            end
             push!(out, (LeafRef(setsym, idx, :fraction, false),
                         LeafPath([String(setsym), nm, "fraction"])))
             if setsym === :ions      # Phase 4.J spec D13: an ion's charge is a leaf, an electron's is not
@@ -419,6 +500,23 @@ function _enumerate_leaves(template::Plasma)
     return out
 end
 
+"""
+    _same_grid(a, b) -> Bool
+
+Whether two distributions of one type sit on the same grid (Phase G.2 spec D4, OQ-69 item 1):
+always `true` for a shape, which has none; for a lab-frame distribution, a method beside its type
+(`GaussianGrid`'s compares the centre, the spacing, the width and the default weights).
+"""
+_same_grid(::AbstractVelocityDistribution, ::AbstractVelocityDistribution) = true
+
+# Phase G.2 spec D4: a snapshot whose lab-frame distribution is on another grid is refused, naming the bin.
+function _check_same_grid(t_sp::Species, p_sp::Species, j::Integer)
+    _same_grid(t_sp.f, p_sp.f) || throw(ArgumentError(
+        "snapshot at bin $j: species \"$(t_sp.name)\" carries its $(nameof(typeof(t_sp.f))) on another " *
+        "grid than the template's; a trace's grid is the same in every bin"))
+    return nothing
+end
+
 function _check_same_species(template::Plasma, p::Plasma, j::Integer)
     (template.electrons.names == p.electrons.names && template.ions.names == p.ions.names) ||
         throw(ArgumentError("snapshot at bin $j differs from the template's species (names)"))
@@ -427,6 +525,7 @@ function _check_same_species(template::Plasma, p::Plasma, j::Integer)
         (typeof(t_sp.f) === typeof(p_sp.f) && t_sp.mass == p_sp.mass && t_sp.charge == p_sp.charge) ||
             throw(ArgumentError(
                 "snapshot at bin $j differs from the template's species \"$(t_sp.name)\""))
+        _check_same_grid(t_sp, p_sp, j)
     end
     for idx in 1:length(template.ions)
         t_sp, p_sp = template.ions[idx], p.ions[idx]
@@ -434,6 +533,7 @@ function _check_same_species(template::Plasma, p::Plasma, j::Integer)
         (typeof(t_sp.f) === typeof(p_sp.f) && t_sp.mass == p_sp.mass) ||
             throw(ArgumentError(
                 "snapshot at bin $j differs from the template's species \"$(t_sp.name)\""))
+        _check_same_grid(t_sp, p_sp, j)
     end
     return nothing
 end
@@ -450,7 +550,13 @@ not named in `leaves` that differs from the template at any bin is an error nami
 the first bin where it differs (compared with `!=` on the SI value, so a bitwise-constant leaf
 passes); this check runs once, at construction.
 
-Spec D6, D28.
+**A species carrying a lab-frame distribution** (Phase G.2, [OQ-69](../../dev/open_questions.md#oq-69)
+item 1): its `T` and `u` are computed from the distribution in every bin and are neither leaves nor
+compared; its parameters (`electrons.<name>.f.g1`, …) are leaves as a shape's are; and its grid must
+be the template's in every snapshot, a snapshot on another grid being refused, naming the bin and the
+species.
+
+Spec D6, D28; Phase G.2 spec D4.
 """
 function PlasmaTrace(snapshots::AbstractVector{<:Plasma}; axis_name::Symbol=:t, leaves=(), kwargs...)
     axis_raw, axis_factor = _axis_kwarg(kwargs)

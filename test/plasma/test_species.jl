@@ -31,7 +31,7 @@ end
 @testset "S5: T keyword errors" begin
     @test_throws "no unit keyword given for T; expected exactly one of (:T_eV, :T_keV)" electrons()
     @test_throws "more than one unit keyword given for T: (:T_eV, :T_keV); expected exactly one" electrons(T_eV = 500, T_keV = 0.5)
-    @test_throws "unrecognised keyword(s) (:T_ev,); accepted keywords are (:name, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction)" electrons(T_eV = 500, T_ev = 500)
+    @test_throws "unrecognised keyword(s) (:T_ev,); accepted keywords are (:name, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction, :grid)" electrons(T_eV = 500, T_ev = 500)
 end
 
 @testset "S6: Int/Float64 promotion" begin

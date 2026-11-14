@@ -177,6 +177,58 @@ function shapes_problem(name::Symbol)
 end
 
 """
+    bimaxwellian_hydrogen_problem(; nlambda_epw = 256, nlambda_iaw = 256, nt_epw = 1024, nt_iaw = 960, nbins = 32)
+
+The fourth synthetic problem of Phase G.2 ([OQ-69](../dev/open_questions.md#oq-69) item 7; the user's
+of 2026-11-13, its numbers Level 1's, accepted the same day): a hydrogen plasma, mass 1.008 amu and
+charge 1, whose electrons and protons are each **two Maxwellians**, in `two_channel_problem`'s form and
+on its probe, collection, two cameras (windows, instrument chains, noise, time axes, the IAW camera's
+0.05 ns shift), regions and `n_e(t)`, with its own seeds (EPW `20261113`, IAW `20261114`). With `t` in ns:
+
+    electrons "cold":  u = 0,  T = 300 + 200 (1 − exp(−(t − 2)/1.0)) eV,   fraction 1 − f_hot
+    electrons "hot":   u = 0,  T = 1000 + 500 exp(−(t − 2)/1.35) eV,       fraction f_hot
+                       f_hot = 0.05 + 0.25 exp(−((t − 4.0)/1.0)²)
+    protons "H":       u = 0,  T = 150 + 350 (1 − exp(−(t − 2)/1.0)) eV,   fraction 0.7
+    protons "Hb":      u = 300 exp(−(t − 2)/1.2) km/s,
+                       T = 100 + 300 (t − 2)/3.8 eV,                       fraction 0.3
+
+The template is the state at `t = 2` with the hot electrons' fraction rounded to 0.05; the leaves
+override it on every bin. The gridded twin holds each pair in one distribution (`twin_cameras`).
+
+Phase G.2 spec D8.
+"""
+function bimaxwellian_hydrogen_problem(; nlambda_epw=256, nlambda_iaw=256, nt_epw=1024, nt_iaw=960, nbins=32)
+    template = Plasma(n_e_cm3=1.5e19,
+        electrons=(electrons(name="cold", T_eV=300.0, fraction=0.95),
+                   electrons(name="hot", T_eV=1500.0, fraction=0.05)),
+        ions=(ion(name="H", mass_amu=1.008, charge=1, T_eV=150.0, fraction=0.7),
+              ion(name="Hb", mass_amu=1.008, charge=1, T_eV=100.0, u_kms=300.0, fraction=0.3)))
+    n_e_of_t(t) = 1.5e19 + 6.3e19 * (1 - exp(-(t - 2.0) / 0.75)) - 0.42e19 * (t - 2.0)
+    f_hot(t) = 0.05 + 0.25 * exp(-((t - 4.0) / 1.0)^2)
+    leaves = ("n_e_cm3" => n_e_of_t,
+              "electrons.cold.T_eV" => t -> 300 + 200 * (1 - exp(-(t - 2.0) / 1.0)),
+              "electrons.cold.fraction" => t -> 1 - f_hot(t),
+              "electrons.hot.T_eV" => t -> 1000 + 500 * exp(-(t - 2.0) / 1.35),
+              "electrons.hot.fraction" => f_hot,
+              "ions.H.T_eV" => t -> 150 + 350 * (1 - exp(-(t - 2.0) / 1.0)),
+              "ions.Hb.T_eV" => t -> 100 + 300 * (t - 2.0) / 3.8,
+              "ions.Hb.u_kms" => t -> 300 * exp(-(t - 2.0) / 1.2))
+    probe = ProbeBeam(lambda_probe_nm=263.25)
+    collection = Collection(theta_deg=60, k_model=:exact)
+    epw = (; t_ns_recorded=collect(range(2.0, 5.8; length=nt_epw)), t_shift_ns=0.0,
+        lambda=collect(range(220e-9, 260e-9; length=nlambda_epw)),
+        effects=(SpectralIRF(fwhm_nm=0.5), TemporalIRF(fwhm_ns=0.08), Sensitivity(scale=2.0e-4),
+                 ConstantBackground(level=25.0)),
+        noise=StreakCameraNoise(), seed=20261113)
+    iaw = (; t_ns_recorded=collect(range(1.95, 5.75; length=nt_iaw)), t_shift_ns=0.05,
+        lambda=collect(range(262.0e-9, 264.5e-9; length=nlambda_iaw)),
+        effects=(SpectralIRF(fwhm_nm=0.08), TemporalIRF(fwhm_ns=0.05), Sensitivity(scale=1.0e-6)),
+        noise=StreakCameraNoise(), seed=20261114)
+    regions = [AveragingRegion(; nbins=nbins, t_range_ns=[2.2, 5.6])]
+    return (; name="bimaxwellian_hydrogen", template, leaves, probe, collection, epw, iaw, regions)
+end
+
+"""
     synthesize_channel(problem, name::Symbol) -> StreakData
 
 One camera's synthetic streak, as that camera records it: the trace is built on the camera's
@@ -397,4 +449,107 @@ function jump_width(t_ns, u, a, b, J; ts=1.15)
     c90 = jump_crossing(t_ns, u, a + 0.9 * (b - a), J; ts=ts)
     (c10 === nothing || c90 === nothing) && return nothing
     return abs(c90 - c10)
+end
+
+# ------------------------------------------------------------------------------------------
+# The gridded twins (Phase G.2 spec D8; OQ-69 item 7): one definition for the fast suite's GT rows,
+# the slow tier's and examples/diagnostics/gridded_identifiability.jl. Functions only, as above.
+# ------------------------------------------------------------------------------------------
+
+"""
+    twin_sources(name::AbstractString) -> (sources, names)
+
+The fitted species of the problem called `name` as `project_to_grid` sources, and the names the
+merged species take (`nothing` keeps the first key's): `epw_ablation`'s electrons; `iaw_multiflow`'s
+and `iaw_shock`'s deuterons and carbon, each a source of its own; `bimaxwellian_hydrogen`'s two
+electron species merged into `e` and its two proton species into `H` (OQ-69 item 7). Species no deck
+fits stay parametric. Phase G.2 spec D8.
+"""
+function twin_sources(name::AbstractString)
+    name == "epw_ablation" && return (["electrons.e"], nothing)
+    (name == "iaw_multiflow" || name == "iaw_shock") && return (["ions.D", "ions.C"], nothing)
+    name == "bimaxwellian_hydrogen" &&
+        return ([("electrons.cold", "electrons.hot"), ("ions.H", "ions.Hb")], ("e", "H"))
+    throw(ArgumentError("twin_sources: no gridded twin is defined for problem \"$name\""))
+end
+
+"""
+    gridded_twin(trace, sources; names = nothing, sizing_trace = trace, spacing, extent, width, symmetric)
+        -> (; trace, grids, projection)
+
+`trace` with each of `sources` written on a grid of its own: each grid `size_grid(sizing_trace,
+source; …)` (the four keywords passed through, `size_grid`'s defaults otherwise), then
+`project_to_grid(trace, source => grid, …; names)`. Returns the gridded trace, the grids in the order
+of `sources`, and `project_to_grid`'s whole result (its per-bin errors, iterations and convergence).
+Phase G.2 spec D8.
+"""
+function gridded_twin(trace, sources; names=nothing, sizing_trace=trace, grid_kwargs...)
+    grids = [size_grid(sizing_trace, s; grid_kwargs...) for s in sources]
+    projection = project_to_grid(trace, (s => g for (s, g) in zip(sources, grids))...; names=names)
+    return (; trace=projection.trace, grids, projection)
+end
+
+"""
+    camera_trace(problem, camera::Symbol) -> PlasmaTrace
+
+A two-camera problem's trace on one camera's **true** axis (recorded plus shift), as
+`synthesize_channel` builds it. Phase G.2 spec D8.
+"""
+function camera_trace(problem, camera::Symbol)
+    c = getproperty(problem, camera)
+    return PlasmaTrace(problem.template; t_ns=c.t_ns_recorded .+ c.t_shift_ns, leaves=problem.leaves)
+end
+
+# One camera's Experiment on `trace`: the problem's probe and collection, the camera's window and chain.
+_twin_experiment(problem, camera, trace) = Experiment(trace=trace, probe=problem.probe,
+    collection=problem.collection, lambda_m=camera.lambda, effects=camera.effects)
+
+"""
+    twin_cameras(problem; spacing, extent, width, symmetric) -> Vector{NamedTuple}
+
+The gridded twin of `problem`, one entry per camera, each `(; camera, parametric, gridded, noise,
+grids, projection)`: the camera's name (`:main` for a one-camera problem, `:epw` and `:iaw`
+otherwise), the `Experiment` on the parametric trace and on its twin (`twin_sources`, through
+`gridded_twin`), the camera's noise model, the grids and the projection's result. A two-camera
+problem's grids are sized once, on a trace over the union of both cameras' true axes, and each camera's
+trace is projected onto those same grids. Phase G.2 spec D8.
+"""
+function twin_cameras(problem; grid_kwargs...)
+    sources, names = twin_sources(problem.name)
+    if hasproperty(problem, :trace)
+        tw = gridded_twin(problem.trace, sources; names=names, grid_kwargs...)
+        return [(; camera=:main, parametric=_twin_experiment(problem, problem, problem.trace),
+                 gridded=_twin_experiment(problem, problem, tw.trace), noise=problem.noise,
+                 grids=tw.grids, projection=tw.projection)]
+    end
+    axis = sort(unique(vcat(problem.epw.t_ns_recorded .+ problem.epw.t_shift_ns,
+                            problem.iaw.t_ns_recorded .+ problem.iaw.t_shift_ns)))
+    sizing = PlasmaTrace(problem.template; t_ns=axis, leaves=problem.leaves)
+    out = NamedTuple[]
+    for camera in (:epw, :iaw)
+        c = getproperty(problem, camera)
+        trace = camera_trace(problem, camera)
+        tw = gridded_twin(trace, sources; names=names, sizing_trace=sizing, grid_kwargs...)
+        push!(out, (; camera, parametric=_twin_experiment(problem, c, trace),
+                    gridded=_twin_experiment(problem, c, tw.trace), noise=c.noise,
+                    grids=tw.grids, projection=tw.projection))
+    end
+    return out
+end
+
+"""
+    twin_worst_sigma(cam) -> (worst, at)
+
+The pass mark's number for one camera of `twin_cameras` (OQ-69 item 7): the largest
+`|M_twin − M_parametric| / σ` over every pixel, `M` each `Experiment`'s noise-free `measure` and `σ` the
+camera's noise model on the parametric streak, `sigma(noise, M_parametric)`; and the pixel `(l, j)`
+where it is. Synthetic streaks carry no mask, so every pixel counts. Phase G.2 spec D8.
+"""
+function twin_worst_sigma(cam)
+    Mp = measure(cam.parametric)
+    Mg = measure(cam.gridded)
+    s = sigma(cam.noise, Mp)
+    r = abs.(Mg .- Mp) ./ s
+    worst, at = findmax(r)
+    return (worst=worst, at=Tuple(at))
 end

@@ -80,6 +80,9 @@ _wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
     if _wanted("lab-frame family")
         @safetestset "lab-frame family" begin include("plasma/test_species_lab_frame.jl") end
     end
+    if _wanted("gridded trace")
+        @safetestset "gridded trace" begin include("plasma/test_trace_gridded.jl") end
+    end
     if _wanted("expressions")
         @safetestset "expressions" begin include("inversion/test_expressions.jl") end
     end
@@ -232,6 +235,9 @@ _wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
     end
     if _wanted("examples")
         @safetestset "examples" begin include("instrument/test_examples.jl") end
+    end
+    if _wanted("gridded twins")
+        @safetestset "gridded twins" begin include("instrument/test_examples_twins.jl") end
     end
     if _wanted("reproduce")
         @safetestset "reproduce" begin include("inversion/test_reproduce.jl") end

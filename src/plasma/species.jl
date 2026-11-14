@@ -153,8 +153,9 @@ A builder's flow and temperature (Phase G.1 spec D9). For a shape, from the unit
 before Phase G.1 (`T` required, `u` defaulting to zero, then every keyword outside `consumed`
 refused). For a lab-frame distribution, a `T_…` or `u_…` keyword is refused, naming the species and
 saying that the two are computed from its distribution; every other keyword outside `consumed`
-(less the four temperature and flow keywords, plus `grid`) is refused; and `(u, T)` are the moments,
-`_distribution_u_T`.
+(less the four temperature and flow keywords) is refused; and `(u, T)` are the moments,
+`_distribution_u_T`. `consumed` ends in `:grid` since Phase G.2 (spec D9, the G.1 summary's A6), so
+both refusals list it.
 """
 function _species_u_T(::AbstractVelocityDistribution, name, mass, kwargs, consumed)
     T = _si_value(:T, kwargs)
@@ -168,7 +169,7 @@ function _species_u_T(dist::AbstractLabDistribution, name, mass, kwargs, consume
     isempty(given) || throw(ArgumentError(
         "species \"$name\" carries a lab-frame distribution ($(nameof(typeof(dist)))): its T and u are " *
         "computed from the distribution and cannot be given; got $given"))
-    _reject_extra_kwargs(kwargs, (Tuple(k for k in consumed if !(k in _SPECIES_U_T_KEYWORDS))..., :grid))
+    _reject_extra_kwargs(kwargs, Tuple(k for k in consumed if !(k in _SPECIES_U_T_KEYWORDS)))
     return _distribution_u_T(dist, mass, nothing, nothing)
 end
 
@@ -231,7 +232,7 @@ function electrons(; name = "e", f = nothing, grid = nothing, fraction = 1, kwar
     _validate_species_name(name)
     mass = ELECTRON_MASS
     dist = _species_distribution(name, f, grid, mass)
-    u, T = _species_u_T(dist, name, mass, kwargs, (:name, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction))
+    u, T = _species_u_T(dist, name, mass, kwargs, (:name, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction, :grid))
     _primal_value(T) > 0 || throw(ArgumentError("temperature must be positive; got $T J for species \"$name\""))
 
     charge = -1
@@ -267,7 +268,7 @@ function ion(; name = "i", charge::Real, f = nothing, grid = nothing, fraction =
     mass = _si_value(:mass, kwargs)
     dist = _species_distribution(name, f, grid, mass)
     u, T = _species_u_T(dist, name, mass, kwargs,
-                        (:name, :mass_amu, :mass_kg, :charge, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction))
+                        (:name, :mass_amu, :mass_kg, :charge, :T_eV, :T_keV, :u_kms, :u_ms, :f, :fraction, :grid))
     _primal_value(mass) > 0 || throw(ArgumentError("mass must be positive; got $mass kg for species \"$name\""))
     _primal_value(T) > 0 || throw(ArgumentError("temperature must be positive; got $T J for species \"$name\""))
     (isfinite(charge) && _primal_value(charge) >= 1) || throw(ArgumentError("ion \"$name\" has charge $charge; an ion's charge number must be a finite real ≥ 1: for a mixture of charge states it is ⟨Z²⟩/⟨Z⟩, never below 1"))

@@ -195,7 +195,7 @@ thermal speeds (GP1), against the plan's M1 (which standardized its comb to the 
 | `Maxwellian` | 9.80e-5 | 4.83e-6 | 14 | 9.6e-5 |
 | `SuperGaussian(3)` | 9.44e-5 | 4.11e-6 | 19 | 8.9e-5 |
 | `SuperGaussian(5)` | 2.57e-3 | 2.21e-4 | 21 | 2.9e-3 |
-| `Kappa(3)` | 6.39e-4 | 1.30e-4 | 7 | 1.1e-2 |
+| `Kappa(3)` | 6.38e-4 | 1.30e-4 | 7 | 1.1e-2 |
 | `SkewNormal(2)` | 1.65e-4 | 9.66e-6 | 16 | 2.0e-4 |
 | `GeneralizedNormal(4)` | 3.16e-3 | 4.38e-4 | 13 | 3.3e-3 |
 | `HermiteExpansion(0.02, 0.01, 0, 0)` | 1.44e-4 | 8.69e-6 | 15 | not measured |
@@ -206,7 +206,7 @@ read 8.5e-5 and 7.4e-5. A projection takes 5 to 10 ms once compiled.
 
 **`Kappa(3)` is limited by the grid's extent, and it shows in the moments**, not in `𝒞f` inside the grid. Its
 power-law tail beyond the last node carries variance a finite grid cannot hold: the derived `T` of the
-projection reads 1.1 % low on ±6 thermal speeds (`T/T_source` 0.98877), 0.27 % low on ±10 (0.99728) and
+projection reads 1.1 % low on ±6 thermal speeds (`T/T_source` 0.98877), 0.27 % low on ±10 (0.99727) and
 0.11 % on ±15 (0.99887), while the error in `𝒞f` on the grid falls only from 6.4e-4 to 5.6e-4 (GP2). M1's
 1.1e-2 is the standardization's: forcing the variance to the source's moved the whole comb.
 
@@ -255,4 +255,75 @@ forms against quadrature, ForwardDiff and the Maxwellian; `test/plasma/test_spec
 `lab-frame family`, GC1 to GC12): the species, the spectra, the trace and the refusals;
 `test/distributions/test_grid_projection.jl` (gate `grid projection`, GP1 to GP7): the projection. Every
 loose tolerance is a sampling error of the grid, pinned at the measurement above; every tight one is an
-identity. `dev/phaseG1_instructions.md` D10 lists each row with its tolerance and its reason.
+identity. `dev/phaseG1_instructions.md` D10 lists each row with its tolerance and its reason. Phase G.2's
+rows are in Section 11.
+
+## 11. A trace on grids (Phase G.2)
+
+Phase G.2 ([OQ-69](../../dev/open_questions.md#oq-69) items 1 to 3 and 7) puts a gridded species through
+`PlasmaTrace`, `measure` and `synthesize`. Measured through the package on 2026-11-13, as above.
+
+**A whole distribution as one leaf.** In `PlasmaTrace(template; leaves = …)` the key `"electrons.<name>.f"` or
+`"ions.<name>.f"` takes a matrix with one row per parameter, in `parameters(f)`'s order, and one column per bin,
+or a function of the axis returning one value per parameter. It stands for the pairs `"<key>.g1" => row 1`, and
+so on, at its place in `leaves`, and gives the same trace bit for bit. In a trace built from snapshots, a
+gridded species' `T` and `u` are computed in every bin and are not leaves, and every snapshot must carry the
+template's grid.
+
+**A trace projected onto grids.** `project_to_grid(trace, source => grid, …)` replaces each source by one
+gridded species, projected bin by bin with Section 7's fit. A source is one species or several species of one
+set, mass and charge; for several, the distribution projected in bin `j` is their number-weighted mixture,
+
+    fⱼ(v) = Σᵢ fᵢⱼ f_lab,ᵢⱼ(v) / Σᵢ fᵢⱼ,        𝒞fⱼ(v) = Σᵢ fᵢⱼ 𝒞f_lab,ᵢⱼ(v) / Σᵢ fᵢⱼ,
+
+`fᵢⱼ` the species' fractions in that bin (of `n_e` for electrons; for ions of one charge, charge fractions in
+the ratio of the number densities, so the same weights), and the new species' fraction is `Σᵢ fᵢⱼ`. This is
+exact physics, not an approximation: the susceptibility is linear in the distribution and the density, so
+`Σᵢ χᵢ = −(ω_p²/k²) 𝒞f` for the mixture's `ω_p²` and `f`, and likewise each term of `S(k, ω)`. Its moments
+follow: the mean flow is `Σᵢ wᵢ uᵢ` and the variance temperature `Σᵢ wᵢ (Tᵢ + m (uᵢ − u)²)`, `wᵢ` the
+normalized fractions, which the projection reproduces to its own accuracy (row GT5: 2e-6 in `T`). In a bin
+where every fraction is zero the species contributes nothing, and the mixture is taken with equal weights so
+that its distribution is defined. One species is Section 7's projection of that species, bit for bit.
+
+**A grid sized for a trace.** `size_grid(trace, source; spacing = 0.2, extent = 4, width = 1.2)` reads every
+bin's `T` and `u` of the source's species and builds the grid at `g = 0`:
+
+    v_ref = √(2 T_hot/m),    dv = spacing · √(2 T_cold/m),    σ = width · dv,
+    u₀ = (u_lo + u_hi)/2,    N_v = 2 ⌈((u_hi − u_lo)/2 + extent · v_ref)/dv⌉ + 1,
+
+the smallest odd count whose end nodes reach `extent` reference thermal speeds beyond the lowest and the
+highest flow, its default the Maxwellian of `T_hot` (Section 5, at spacing `dv/v_ref`). The grid resolves the
+coldest state and spans the hottest, so in every colder bin the projection's `g` fall in the tails: the
+harmless sign, since a weight of `e^{−100}` never reaches the data (the plan's Section 4.4). For a source with
+one flow, `N_v` depends only on `extent/spacing` and `T_hot/T_cold`. **The defaults are the user's of
+2026-11-13**: OQ-69 proposed spacing 0.25 and extent 5, and at those the EPW ablation problem's twin missed
+the pass mark below by a factor of 7, as the next paragraph shows.
+
+**The four twins.** A twin is a problem's trace with every fitted species written on a grid sized by
+`size_grid` at its defaults (`examples/problems.jl`'s `twin_cameras`); its noise-free measured streak is
+compared, pixel by pixel, with the parametric problem's, in units of the problem's own noise σ, and must stay
+within a tenth of σ everywhere (the user's mark, OQ-69 item 7). Worst pixel, cut-down (128 × 32) and full size
+(512 × 256; the two-camera problem 256 × 1024 and 256 × 960):
+
+| Problem | Grids (nodes) | Worst pixel, cut-down | Worst pixel, full | Worst 𝒞f error of a bin |
+|---|---|---|---|---|
+| EPW ablation | electrons 77 | 0.038 σ | 0.036 σ | 9.3e-5 |
+| IAW multi-flow | D 107, C 133 | 0.0023 σ | below 1e-4 σ | 1.1e-4 |
+| IAW shock | D 123, C 185 | 0.0005 σ | below 1e-4 σ | 1.5e-4 |
+| bi-Maxwellian hydrogen | electrons 91, protons 101 | 0.0020 σ, 0.0014 σ | 0.0023 σ, 0.0013 σ | 9.5e-5 |
+
+At spacing 0.25 and extent 5 the EPW twin read 0.72 σ (0.74 σ at full size), at the super-Gaussian's flat top
+near `m = 4.9`, where the projection's error in `𝒞f` rose to 7.7e-4: a steep edge needs a finer spacing, as
+Section 7's `SuperGaussian(5)` row says. Only the spacing closed it (0.2: 0.038 σ; 0.125: 0.002 σ); a width of
+1.0 or 1.5 did not (0.63 σ, 3.1 σ) and the extent changed nothing (0.72 σ from 3 to 6). The multi-flow twin's
+figure is real: the comb's ripple lies at the node spacing in velocity, and the 0.08 nm instrument function
+averages it away. A twin holds `g` at the projection's floor of −200 wherever a source is empty: the EPW
+twin's cold late bins on a grid sized for 1500 eV (578 of 2464 values at cut-down) and the shock's pre-shock
+bins on grids sized for 440 and 1550 eV (750 of 9600); none in the bi-Maxwellian twin, whose hot population
+fills the tails in every bin.
+
+**The tests.** `test/plasma/test_trace_gridded.jl` (gate `gridded trace`, GT1 to GT8): the whole-distribution
+leaf against the pairs it stands for, the snapshot route, the trace projection against Section 7's projection
+of each bin and against a test-local mixture, `size_grid` against its rule; `test/instrument/test_examples_twins.jl`
+(gate `gridded twins`, GW1 to GW5) and its namesake in `test/slow/`: the four twins against the mark, their node
+counts pinned. `dev/phaseG2_instructions.md` lists each row with its tolerance and its reason.

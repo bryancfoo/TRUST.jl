@@ -31,4 +31,5 @@ using Test
     @safetestset "continuous charge (slow)" begin include("test_charge.jl") end
     @safetestset "uncertainty (slow)" begin include("test_uncertainty.jl") end
     @safetestset "Hermite (slow)" begin include("test_hermite.jl") end
+    @safetestset "gridded twins (slow)" begin include("test_examples_twins.jl") end
 end

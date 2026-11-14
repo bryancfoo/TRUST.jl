@@ -372,6 +372,10 @@ end
 # A species' element type over its distribution's parameters (species.jl's _shape_eltype; Phase G.1 spec D8).
 _shape_eltype(::GaussianGrid{FT}) where {FT} = FT
 
+# The same grid: the centre, the spacing, the width and the default weights (trace.jl's _same_grid;
+# Phase G.2 spec D4). The node count and the symmetry are the type's, compared before this is called.
+_same_grid(a::GaussianGrid, b::GaussianGrid) = a.u0 == b.u0 && a.dv == b.dv && a.sigma == b.sigma && a.w0 == b.w0
+
 """
     Base.show(io::IO, f::GaussianGrid)
 
