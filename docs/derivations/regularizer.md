@@ -2,14 +2,16 @@
 
 > **Front matter (Step 3.3, 2026-09-13; normalization-after-operator revision, chunk 7
 > remediation, 2026-09-13).** Windows 11, Julia 1.12.7; ForwardDiff 1.4.5. Written alongside
-> `src/inversion/regularizer.jl`.
+> `src/inversion/regularizer.jl`. **Section 8 (Step G.3.1, 2026-11-14):** Linux, Julia 1.13.1.
 
 This document derives `src/inversion/regularizer.jl`: the three operators as divided differences
 on a nonuniform axis, why `D2` is exact for a quadratic on any grid, why `R` is a plain sum over
 rows and what that buys under rebinning, the four normalization modes and the anchor-bin rule that
 applies them **after** the operator, the residual-row form and its closed-form Jacobian (including
 `relative`'s quotient-rule term), and the interval-edge rule. Spec D22-D25,
-[OQ-19](../../dev/open_questions.md#oq-19).
+[OQ-19](../../dev/open_questions.md#oq-19). Section 8 derives the second term type,
+`VelocityRegularizerTerm`, which differences a gridded distribution's log-weights across velocity
+(Phase G.3, [OQ-70](../../dev/open_questions.md#oq-70)).
 
 ## 1. The operators, as divided differences on the axis
 
@@ -384,3 +386,147 @@ what `WeightScanResult` having no field naming an optimum (WS7) guards against. 
 estimate bitwise, the member fits' own `converged` flags apart (the file records each member's
 `scan/status`, a `String`, not the `Bool` `lcurve_corner`'s `converged` keyword wants), as
 `docs/derivations/data_layout.md` Section 3 states.
+
+## 8. The regularizer along velocity (Phase G.3)
+
+**What it is.** A species that carries a `GaussianGrid` has one log-weight `g_n = ln(w_n/w⁰_n)` per
+velocity node at every time bin, about forty of them, and a single-angle spectrum fixes ten to
+twenty combinations of them per bin (`docs/derivations/gaussian_grid.md` Section 11). The time
+terms of Sections 1 to 6 smooth each node's `g` along the trace axis; nothing in them says how the
+nodes of one bin relate to each other. `VelocityRegularizerTerm` does: at every bin of its interval
+it differences an ordered list of entries across velocity. The design is the user's and Level 1's
+([OQ-70](../../dev/open_questions.md#oq-70), 2026-11-12 and 2026-11-14); this section derives it.
+
+**The rows.** Let `u_1 … u_N` be the entries' values at one bin (each a fitted variable or a
+dependent, read from the same per-bin value table as the time terms) and `v_1 < … < v_N` their
+velocities **in m/s**. For `i = 1 … N − 3`, over the four entries `i … i+3`:
+
+```
+    row_i = sqrt(v_{i+2} - v_{i+1}) * 6 * u[v_i, v_{i+1}, v_{i+2}, v_{i+3}]          [(m/s)^(-5/2)]
+
+    u[v_a] = u_a,    u[v_a, ..., v_b] = (u[v_{a+1}, ..., v_b] - u[v_a, ..., v_{b-1}]) / (v_b - v_a)
+           so  u[v_i, ..., v_{i+3}] = sum over a = i..i+3 of  u_a / prod over b != a of (v_a - v_b)
+```
+
+On evenly spaced nodes, `v_{n+1} − v_n = dv`, this is `(u_{i+3} − 3u_{i+2} + 3u_{i+1} − u_i) / dv^(5/2)`.
+`(N − 3)` rows per bin, stacked bin by bin over the interval and within a bin by `i`; across bins
+the term is a plain sum, as the time terms are (Section 2). `src/inversion/regularizer.jl` writes
+the value with the recursive form (`_velocity_rows`, the path ForwardDiff differentiates) and the
+coefficients with the product form (`_velocity_coeffs`, the closed-form Jacobian), independently,
+so that the ForwardDiff oracle checks one against the other (`conventions.md` 8.2; row VR8). The
+stencil's width, the row count, the coefficients and the quadrature interval are looked up by the
+term's `operator`, `:D3`, its only value: another operator would be one more branch of
+`_velocity_stencil`, `_velocity_interval`, `_velocity_rows` and `_velocity_coeffs`.
+
+### The factor of 6, and exactness for a cubic
+
+Newton's divided difference of order three on four points is the leading coefficient of the cubic
+through them. If `u = a v³ + b v² + c v + d`, the cubic through any four of its points is `u`
+itself, so `u[v_i, …, v_{i+3}] = a` **on any nodes, even or not**, and `6a = u‴`: the row is the
+third derivative of the cubic through the four points, exactly, with no truncation term, times the
+square root below. The factor 6 is chosen as `D2`'s 2 is (Section 1), so that both operators are
+derivatives and not divided differences. For a quadratic the leading coefficient of degree three is
+zero, so the row is zero. Row VR4 asserts `row_i = 6a √(v_{i+2} − v_{i+1})` on uneven electron
+velocities, VR1 the zero rows for degrees 0 to 2 on even and uneven nodes, both to round-off
+relative to the row's own scale `Σ_a |c_a u_a|`, `c_a` the coefficients (an absolute tolerance
+would be vacuous: a row here is of order 1e-17).
+
+### The null space, and every Maxwellian
+
+On a `GaussianGrid` whose default is the Maxwellian of `T_ref` and `u₀`, a Maxwellian of thermal
+speed `v_th` and flow `u`, written on the grid as the default is written (`w_n = dv · G(v_n; u, s)`,
+`s² = v_th² − σ²`), has
+
+```
+    ln w_n  = -(v_n - u)^2  / (v_th^2  - σ^2) + const
+    ln w⁰_n = -(v_n - u₀)^2 / (v_ref^2 - σ^2) + const
+```
+
+so `g_n` is quadratic in `v_n` and every row of the term is zero, **whatever the Maxwellian's
+density, flow and temperature** (VR1, four Maxwellians from 300 to 1500 eV and −1200 to 900 km/s on a
+500 eV grid). The term says "where the data are silent, continue like a Maxwellian", not "return to
+the default", and it pulls no fit toward `T_ref`. A lower order would: the second difference of the
+same `g` is `2 dv² [1/(v_ref² − σ²) − 1/(v_th² − σ²)]` on every row, zero only at `v_th = v_ref`, and
+a first difference also sees the flow (`dev/gridded_plan.md` Section 4.5). Adding one constant to
+every `g` changes no row (VR2), so the term is blind to the weights' overall scale, which Phase G.4
+fixes by holding one node.
+
+### The quadrature factor, and why the time term has none
+
+On even nodes a row is a third derivative times `√dv`, so `Σ_i row_i² ≈ Σ_i dv (u‴)²`, a sum over
+one interval per row. The interval each row carries is the stencil's **middle** one,
+`v_{i+2} − v_{i+1}`: the middle intervals of consecutive rows tile `[v_2, v_{N−1}]` with neither gap
+nor overlap, so `Σ_i row_i²` is a midpoint-type quadrature of `∫ (∂³u/∂v³)² dv` over that range and
+**does not grow when the nodes are refined**. The outer span over three, `(v_{i+3} − v_i)/3`, equals
+the middle interval on an even grid and not on an uneven one, and the outer spans overlap; VR4 and
+VR3's uneven half tell the two apart. **The discretization error** (VR5): for `u = A sin(kv + φ)` on
+nodes `h` apart, the third difference is exactly `8 sin³(kh/2) A cos(km + φ)` with `m` the middle
+interval's midpoint, so a row is `√h sinc³(kh/2) u‴(m)`, `sinc y = sin y / y`; over a range holding a
+whole period of `(u‴)²` the midpoint sum is exact and `Σ row² = sinc⁶(kh/2) ∫ (u‴)² dv`, whose
+relative error `1 − sinc⁶(kh/2)` is at most `(kh/2)²` (since `sinc y ≥ 1 − y²/6`). VR5 measures
+3.79 % at `kh = π/8` and 0.960 % at half the spacing, each equal to `1 − sinc⁶(kh/2)` to round-off,
+with the electron spacing `h = 3.3e6` m/s.
+
+**Why the time terms carry no such factor** (Section 2): rebinning in time changes the number of
+bins of `χ²` and of a plain sum of rows alike, so `Λ` keeps its meaning with no weight on a row;
+refining a velocity grid leaves `χ²` alone, since the data do not change, so the rows' sum must stay
+put too, and only an integral does.
+
+### Velocity in m/s, and the unit of a weight
+
+The differences are taken in lab velocity in m/s, on the nodes' actual positions (the even grid the
+special case), never in the grid's reduced coordinate `(v − u₀)/v_ref` and never in the node index:
+the user's decision, "so rescaling the velocity grid doesn't require rescaling the regularizer"
+(OQ-70 item 4). The term stores only names and velocities, never a grid: the grid form,
+`VelocityRegularizerTerm(pspec; select, grid)`, reads the node velocities `u₀ + (n − (Nv + 1)/2) dv`
+and nothing else, so the same distribution costs the same on any grid that holds it (VR6: the grid
+form equals the explicit form at those velocities to the bit, and a grid of another default and
+another width on the same nodes gives the same rows to the bit). The price is a dimensional weight.
+A row has the unit (m/s)^(−5/2) and `R` per bin (m/s)^(−5); for a `g` that varies on the scale of a
+thermal speed, `Σ row²` in one bin is of order `v_th⁻⁵`, about 2.4e-36 for electrons at 500 eV
+(`v_th = 1.33e7` m/s) and 1.1e-26 for deuterons at 250 eV (1.55e5 m/s), so a weight of order
+`v_th⁵`, about 1e35 and 1e26, makes the term weigh like an order-one residual (Level 1's arithmetic;
+the twins' projected `g` give the figures in `dev/phaseG3_overall_summary.md`). Two species' weights
+differ by `(m_i T_e / m_e T_i)^(5/2)`. Nothing overflows: a coefficient is about 5e-17 for those
+electrons and 3e-12 for those deuterons.
+
+### The symmetric option, and a name that repeats
+
+With `symmetric = true` a grid's parameters are `g1` to `g⌈Nv/2⌉` and node `n` reads the parameter
+`min(n, Nv + 1 − n)`. The grid form expands to **all `Nv` nodes** (OQ-70 item 6), so the penalty is
+the unsymmetric term's on the mirrored values (VR7, to the bit), including the rows that straddle
+the centre, which a list of the stored half alone would leave out and so leave a kink at `u₀`
+unpenalized. Those rows hold one θ index twice. **A row's coefficients on one θ index are summed
+into one Jacobian entry** (`_term_closed_form`): `jvp!` and `jtvp!` would add two entries
+correctly, but `_gauss_newton_diagonal` (`src/inversion/jacobian.jl`) squares each entry by itself
+and would read `c₁² + c₂²` where the diagonal of `JᵀJ` is `(c₁ + c₂)²` (VR9). The same summing
+covers a dependent whose chain reaches a variable that is also an entry of the same row. On an even
+`Nv` the centre row reads two mirrored pairs, and its summed coefficients cancel: the cubic through
+values symmetric about `u₀` is even and has no third derivative there.
+
+### What an entry may be; intervals; the floor
+
+An entry is whatever the time terms read: a time-varying fitted variable; a scalar one, whose value
+repeats at every bin; **a variable that is not varied, which enters its rows as a constant and has
+no Jacobian column** (how Phase G.4 will hold one node; this phase knows nothing of which); or a
+dependent, chained through its expression as in Section 4. The interval rule is Section 6's, D13
+included: a term's interval must lie inside every selected variable's own, refused by the same
+check (`_check_term_inside_variables`, shared since Phase G.3; VR11). `normalization` accepts
+`:unit` alone: `:relative` and `:initial` would divide by a log-weight, which is zero at the default
+distribution, and `:absolute`'s fixed divisor is the weight under another name (OQ-70 item 4).
+Where a projected `g` sits at the projection's floor of −200 (a source with no particles at a node,
+`docs/derivations/gaussian_grid.md` Section 11), the rows stay plain and read each such edge as a
+cliff (OQ-70 item 8); how a fit's start is smoothed there is Phase G.4's.
+
+### Tests
+
+`test/inversion/test_regularizer_velocity.jl`, gate `velocity regularizer`, rows VR1 to VR15, on
+electron velocities (nodes 3.3e6 m/s apart) throughout: the null space (VR1), `g + c` (VR2), the
+stencil on even and uneven nodes (VR3), a cubic (VR4), refinement (VR5, the one deliberately loose
+row, bounded by `(kh/2)²`), the grid's irrelevance (VR6), the symmetric form (VR7), the closed-form
+Jacobian against ForwardDiff through the recursive rows on a term with a held entry, a scalar, a
+repeated name and a dependent (VR8), one summed entry per row and θ index and
+`_gauss_newton_diagonal` against `JᵀJ`'s diagonal (VR9), `R` and its gradient (VR10), the interval
+and D13 (VR11), the row count (VR12), a `Regularizer` of both term types (VR13), the refusals (VR14)
+and `show` (VR15). Every tight row is an identity, to round-off relative to the row's own scale or
+to the bit.

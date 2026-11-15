@@ -125,6 +125,7 @@ export jacobian, gradient!
 
 # inversion (3.3)
 export AbstractRegularizerTerm, RegularizerTerm, Regularizer
+export VelocityRegularizerTerm    # (G.3.1)
 
 # inversion (3.4a)
 export objective, FitResult

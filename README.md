@@ -320,6 +320,18 @@ have gridded twins whose measured streaks stay within a tenth of the noise of th
 the weights the data fix at each time and which velocities they see. Nothing fits a grid yet, and every other
 result is exactly what it was.
 
+**Phase G.3 (the regularizer along velocity) is complete.** `VelocityRegularizerTerm` penalizes the roughness
+of a gridded species' log-weights across velocity at every time bin, beside the existing terms that smooth each
+weight along time. Its one operator, `:D3`, is the third derivative of the cubic through four neighbouring
+nodes, taken in m/s on the nodes' own positions, times the square root of the middle node spacing, so the
+penalty approximates `∫(∂³g/∂v³)² dv`: it does not change when the grid is refined, re-centred or rescaled, and
+the log-weights of any Maxwellian, whatever its temperature and flow, cost nothing.
+`VelocityRegularizerTerm(pspec; select = names, grid = G)` takes the variables that stand for a grid's
+log-weights (all the mirrored nodes with the symmetric option), or `velocities = …` any increasing list, and
+sits in a `Regularizer` beside time terms. Its weight is dimensional, of order the thermal speed to the fifth
+power in (m/s)⁵, about 1e35 for 500 eV electrons and 1e26 for 250 eV deuterons. No deck names the term and
+nothing fits a grid yet; every other result is exactly what it was.
+
 The package was named OTIS until 2026-10-18. Files it wrote under that name carry layout
 versions spelled `otis-…`; every reader accepts that spelling for the same layout number and
 reports the canonical `trust-…` string, and every writer emits only `trust-…`. Decks that say

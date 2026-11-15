@@ -12,6 +12,11 @@
 # calls `k` -- not at every bin of the term's window (D24/D25 revised 2026-09-13: `relative` is no
 # longer degenerate at the default zero reference, since the divisor is the trace's own value, not
 # `(x-ref)/x`).
+#
+# Phase G.3 (OQ-70, spec D3-D8) adds the second concrete term, VelocityRegularizerTerm, which
+# differences an ordered list of names across velocity at each time bin (its section is the last
+# before `show`). The walkers below read only a term's rows, weight and normalization and call its
+# own _term_raw / _term_closed_form, so a Regularizer holds terms of either type.
 
 import ForwardDiff
 
@@ -22,13 +27,17 @@ import ForwardDiff
 """
     AbstractRegularizerTerm
 
-The regularizer term interface. `RegularizerTerm` (D22) is the single concrete subtype this
-phase builds: it is parameterized by its `operator` field rather than by its own type, so that
-`operator = :I` (a ridge penalty) and `operator = :D2`/`:D1` are the same struct. `TotalVariation`
-and `TGV` (Step 4.3) are the reason this stays an abstract type rather than being dropped in
-favor of `RegularizerTerm` alone.
+The regularizer term interface. `RegularizerTerm` (D22) differences one name along the time axis:
+it is parameterized by its `operator` field rather than by its own type, so that `operator = :I`
+(a ridge penalty) and `operator = :D2`/`:D1` are the same struct. `VelocityRegularizerTerm`
+(Phase G.3, [OQ-70](../../dev/open_questions.md#oq-70)) differences an ordered list of names across
+velocity at each time bin. A concrete term has the fields `rows`, `weight`, `normalization` and
+`interval`, and methods of `_term_raw` (its rows), `_term_closed_form` (its rows and their Jacobian
+entries), `_with_rows` (the term with its row range in a `Regularizer`) and `_term_line` (its line
+in a `Regularizer`'s listing); nothing else of it is read outside its own code, and the two types
+are told apart by those methods, never by `isa`.
 
-Spec D22.
+Spec D22; Phase G.3 spec D7.
 """
 abstract type AbstractRegularizerTerm end
 
@@ -64,11 +73,13 @@ end
 """
     Regularizer{T<:Tuple}
 
-A list of `RegularizerTerm`s (a `Tuple`, so the row assembly in `residuals.jl`/`jacobian.jl`
+A list of terms (a `Tuple`, so the row assembly in `residuals.jl`/`jacobian.jl`
 unrolls, exactly as `Experiment.effects` and `ParameterSpec.dependents` are), the global weight
-`weight` (Lambda), and `nrows`, the total row count every term's `rows` range partitions.
+`weight` (Lambda), and `nrows`, the total row count every term's `rows` range partitions. The terms
+are `RegularizerTerm`s and, since Phase G.3, `VelocityRegularizerTerm`s, in the caller's order; a
+regularizer of time terms alone has the type it had before.
 
-Spec D22.
+Spec D22; Phase G.3 spec D7.
 """
 struct Regularizer{T<:Tuple}
     terms::T
@@ -91,34 +102,60 @@ end
 _operator_min_bins(op::Symbol) = op === :D2 ? 3 : op === :D1 ? 2 : 1
 
 """
-    _resolve_term_interval(pspec, interval) -> Int
+    _resolve_term_interval(pspec, interval; who = "RegularizerTerm") -> Int
 
-`interval` as `RegularizerTerm.interval` stores it: `0` (default, or explicitly given) for the
+`interval` as a term's `interval` field stores it: `0` (default, or explicitly given) for the
 whole axis, an `Int` taken as a 1-based index into `pspec.intervals` directly, or a name looked up
 against `iv.name` for every `iv in pspec.intervals`. Inline `t_range_ns` ranges are the deck
 layer's job (chunk 12), which registers an anonymous `FitInterval` into `pspec.intervals` before
 building a `RegularizerTerm` that names it -- not given an explicit shape by D22; Level 3's choice
-under rule 11 zero, flagged in the chunk 7 report.
+under rule 11 zero, flagged in the chunk 7 report. `who` names the term type in a refusal; shared
+with `VelocityRegularizerTerm` since Phase G.3 (spec D8).
 """
-function _resolve_term_interval(pspec::ParameterSpec, interval)
+function _resolve_term_interval(pspec::ParameterSpec, interval; who::AbstractString="RegularizerTerm")
     if interval isa Integer
         iv = Int(interval)
         (iv == 0 || (1 <= iv <= length(pspec.intervals))) || throw(ArgumentError(
-            "RegularizerTerm: interval index $iv is out of range 1:$(length(pspec.intervals))"))
+            "$who: interval index $iv is out of range 1:$(length(pspec.intervals))"))
         return iv
     elseif interval isa AbstractString
         idx = findfirst(iv -> iv.name == interval, pspec.intervals)
-        idx === nothing && throw(ArgumentError("RegularizerTerm: no interval named \"$interval\""))
+        idx === nothing && throw(ArgumentError("$who: no interval named \"$interval\""))
         return idx
     else
         throw(ArgumentError(
-            "RegularizerTerm: interval must be an Int index into pspec.intervals, an interval " *
+            "$who: interval must be an Int index into pspec.intervals, an interval " *
             "name, or 0 for the whole axis; got $(typeof(interval))"))
     end
 end
 
-_term_bins(term::RegularizerTerm, pspec::ParameterSpec) =
+# A term's bins: the whole axis, or its interval's. Every concrete term has an `interval` field.
+_term_bins(term::AbstractRegularizerTerm, pspec::ParameterSpec) =
     term.interval == 0 ? (1:nbins(pspec.trace)) : pspec.intervals[term.interval].bins
+
+"""
+    _check_term_inside_variables(pspec, selected, slots, intv, bins, who)
+
+Phase 4.C spec D13, shared by both term types since Phase G.3 (spec D8): a term's bins must lie
+inside every selected variable's own interval, since a time-varying fitted variable on an interval
+is `NaN` in `_value_table` outside it. Refuses the first name that is undefined at one of `bins`,
+naming it and both intervals; `who` names the term type. The check is `_slot_defined_at`'s own.
+"""
+function _check_term_inside_variables(pspec::ParameterSpec, selected, slots, intv::Int, bins,
+                                      who::AbstractString)
+    nvar = length(pspec.variables)
+    for (nm, slot) in zip(selected, slots)
+        all(j -> _slot_defined_at(slot, j, pspec.variables, nvar, pspec.intervals), bins) && continue
+        v = pspec.variables[slot]
+        term_iv = intv == 0 ? "the whole axis" : "interval \"$(pspec.intervals[intv].name)\""
+        throw(ArgumentError(
+            "$who: the term selecting \"$nm\" is on $term_iv (bins $bins), but " *
+            "\"$nm\" is defined only on its own interval \"$(pspec.intervals[v.interval].name)\" " *
+            "(bins $(pspec.intervals[v.interval].bins)); a term's interval must lie inside every " *
+            "selected variable's own interval"))
+    end
+    return nothing
+end
 
 """
     RegularizerTerm(pspec::ParameterSpec; select, operator::Symbol, normalization::Symbol,
@@ -194,16 +231,7 @@ function RegularizerTerm(pspec::ParameterSpec; select, operator::Symbol, normali
         "RegularizerTerm: interval has $n bins, but operator :$operator needs at least $needed"))
 
     # Phase 4.C spec D13: a term's bins must lie inside every selected variable's own interval.
-    for (nm, slot) in zip(selected, slots)
-        all(j -> _slot_defined_at(slot, j, pspec.variables, nvar, pspec.intervals), bins) && continue
-        v = pspec.variables[slot]
-        term_iv = intv == 0 ? "the whole axis" : "interval \"$(pspec.intervals[intv].name)\""
-        throw(ArgumentError(
-            "RegularizerTerm: the term selecting \"$nm\" is on $term_iv (bins $bins), but " *
-            "\"$nm\" is defined only on its own interval \"$(pspec.intervals[v.interval].name)\" " *
-            "(bins $(pspec.intervals[v.interval].bins)); a term's interval must lie inside every " *
-            "selected variable's own interval"))
-    end
+    _check_term_inside_variables(pspec, selected, slots, intv, bins, "RegularizerTerm")
 
     scale_f = Float64(scale)
     if normalization === :absolute && scale_f == 0.0
@@ -235,30 +263,36 @@ end
 """
     Regularizer(terms; weight::Real = 1.0) -> Regularizer
 
-Combine already-resolved `RegularizerTerm`s (each built with `RegularizerTerm(pspec; ...)`
-against the same `ParameterSpec`) into one `Regularizer`, fixing up every term's `rows` to its
-true offset within the combined row numbering (D25: "`Regularizer.nrows` is the total and
-`RegularizerTerm.rows` is each term's range within it"). `weight` is the global Lambda, default
-`1.0`.
+Combine already-resolved terms (each built with `RegularizerTerm(pspec; ...)` or
+`VelocityRegularizerTerm(pspec; ...)` against the same `ParameterSpec`, in any mix and order) into
+one `Regularizer`, fixing up every term's `rows` to its true offset within the combined row
+numbering, in the order given (D25: "`Regularizer.nrows` is the total and `RegularizerTerm.rows` is
+each term's range within it"). `weight` is the global Lambda, default `1.0`. The terms are stored
+as a `Tuple` of their own types, so a regularizer of time terms alone is what it was before Phase
+G.3 (spec D7).
 
 Not given an explicit Julia signature by D22 (only the struct fields and the deck form); this
 shape is Level 3's choice under rule 11 zero, flagged in the chunk 7 report.
 
-Spec D22, D25.
+Spec D22, D25; Phase G.3 spec D7.
 """
 function Regularizer(terms; weight::Real=1.0)
-    ts = collect(RegularizerTerm, terms)
+    ts = collect(AbstractRegularizerTerm, terms)
     isempty(ts) && throw(ArgumentError("Regularizer: at least one term is required"))
-    fixed = Vector{RegularizerTerm}(undef, length(ts))
+    fixed = Vector{AbstractRegularizerTerm}(undef, length(ts))
     pos = 1
     for (i, t) in enumerate(ts)
         nr = length(t.rows)
-        fixed[i] = RegularizerTerm(t.select, t.slots, t.operator, t.normalization, t.scale,
-                                    t.weight, t.interval, t.reference, pos:(pos + nr - 1))
+        fixed[i] = _with_rows(t, pos:(pos + nr - 1))
         pos += nr
     end
     return Regularizer(Tuple(fixed), Float64(weight), pos - 1)
 end
+
+# The term with its row range in a Regularizer (spec D25; one method per term type, Phase G.3 spec D7).
+_with_rows(t::RegularizerTerm, rows::UnitRange{Int}) =
+    RegularizerTerm(t.select, t.slots, t.operator, t.normalization, t.scale, t.weight, t.interval,
+                    t.reference, rows)
 
 # ------------------------------------------------------------------------------------------
 # D23: the operators, as divided differences on the axis
@@ -687,6 +721,308 @@ function _regularizer_gradient!(g::AbstractVector, reg::Regularizer, pspec::Para
     return g
 end
 
+# ------------------------------------------------------------------------------------------
+# Phase G.3 (OQ-70; spec D3-D8): the regularizer along velocity. An ordered list of names, each at
+# the velocity of its node in m/s, differenced across velocity at every bin of the term's interval.
+# One operator, :D3; one normalization, :unit. Its rows enter the walkers above through its own
+# _term_raw and _term_closed_form.
+# ------------------------------------------------------------------------------------------
+
+"""
+    VelocityRegularizerTerm <: AbstractRegularizerTerm
+    VelocityRegularizerTerm(pspec::ParameterSpec; select, velocities, operator = :D3,
+                            normalization = :unit, weight = 1.0, interval = 0)
+    VelocityRegularizerTerm(pspec::ParameterSpec; select, grid, operator = :D3,
+                            normalization = :unit, weight = 1.0, interval = 0)
+
+A regularizer term along **velocity**: at every time bin of its interval it differences an ordered
+list of entries, each a name (a fitted variable or a dependent) at the velocity of its node in m/s,
+where `RegularizerTerm` differences one name along the time axis. Its one operator, `:D3`, is the
+third derivative of the cubic through four neighbouring entries times the square root of the
+stencil's middle interval: for the entries' values `u₁ … u_N` at one bin, at velocities
+`v₁ < … < v_N`, row `i = 1 … N − 3` is
+
+    rowᵢ = √(v_{i+2} − v_{i+1}) · 6 · Σ_{a=i}^{i+3} u_a / Π_{b≠a} (v_a − v_b)        [(m/s)^(−5/2)]
+
+6 times Newton's third divided difference is exact for a cubic on any nodes and zero for any
+quadratic, so for the log-weights of every Maxwellian on a `GaussianGrid` whose default is a
+Maxwellian; the square root makes the rows' sum of squares in one bin approximate
+`∫ (∂³u/∂v³)² dv` over `[v₂, v_{N−1}]`, so that it stays put when the nodes are refined. On evenly
+spaced nodes a row is `(u_{i+3} − 3u_{i+2} + 3u_{i+1} − u_i)/dv^(5/2)`. There are `N − 3` rows per
+bin, stacked bin by bin over the interval's bins and within a bin by `i`; across bins the term is a
+plain sum, as the time term is. A weight on it is dimensional, in (m/s)⁵
+(`docs/derivations/regularizer.md` Section 8).
+
+**The explicit form**: `select` is `N ≥ 4` names and `velocities` `N` finite, strictly increasing
+numbers in m/s (no unit suffix, so SI, `conventions.md` 1.2), in node order. **The grid form**:
+`grid` is a `GaussianGrid` and `select` the names of the variables bound to its parameters, in
+parameter order (`g1` to `gNP`); node `n` becomes the entry `select[k]`, `k` the parameter node `n`
+reads (`n` itself, or `min(n, Nv + 1 − n)` with the symmetric option), at the node's velocity
+`u₀ + (n − (Nv + 1)/2) dv`. Both forms store the expanded list of entries and nothing of the grid:
+the term never reads a reference temperature, a spacing or a width, so the same distribution costs
+the same on any grid that holds it. **A name may repeat** (with the symmetric option every
+parameter but an odd count's middle one appears twice): a row's coefficients on one θ index are
+summed into one Jacobian entry. An entry may be a time-varying fitted variable, a scalar one, one
+that is not varied (a constant in its rows, with no Jacobian column) or a dependent.
+
+`operator` accepts `:D3` alone and defaults to it; that default does not change when another
+operator is added. `normalization` accepts `:unit` alone, the rows as written. `weight` is the
+term's own scalar under the global Λ; `interval` an index into `pspec.intervals`, an interval's
+name, or `0` for the whole axis, and it must lie inside every selected variable's own interval
+(Phase 4.C spec D13). Refused, each with a message: both or neither of `velocities` and `grid`; an
+operator other than `:D3`; a normalization other than `:unit`; a length mismatch; a `select` whose
+length is not the grid's parameter count; fewer than four entries; a velocity that is not finite,
+or velocities not strictly increasing; a name that is neither a fitted variable nor a dependent;
+an interval as `RegularizerTerm` refuses one.
+
+`rows` is the term's row range in a `Regularizer`, `1:n` when built alone.
+
+[OQ-70](../../dev/open_questions.md#oq-70); Phase G.3 spec D3 to D8.
+"""
+struct VelocityRegularizerTerm <: AbstractRegularizerTerm
+    select::Vector{String}
+    slots::Vector{Int}
+    velocities::Vector{Float64}
+    operator::Symbol
+    normalization::Symbol
+    weight::Float64
+    interval::Int
+    rows::UnitRange{Int}
+end
+
+# The operators a velocity term accepts (OQ-70 item 5: :D3 alone for now). Another operator is one
+# more value here and one more branch in each of the four lookups below, never a new type.
+const _VELOCITY_OPERATORS = (:D3,)
+
+_velocity_operator_error(op::Symbol) = ArgumentError("VelocityRegularizerTerm: operator must be " *
+    join((":$o" for o in _VELOCITY_OPERATORS), " or ") * "; got :$op")
+
+"""
+    _velocity_stencil(op::Symbol) -> Int
+
+The number of neighbouring entries one row of the velocity operator `op` reads (OQ-70 item 5): 4
+for `:D3`, so a term needs at least four entries. Any other operator is refused here, which is the
+constructor's check.
+"""
+function _velocity_stencil(op::Symbol)
+    op === :D3 && return 4
+    throw(_velocity_operator_error(op))
+end
+
+# The rows per bin of a velocity term with n entries: one per position of the stencil.
+_velocity_row_count(op::Symbol, n::Int) = n - _velocity_stencil(op) + 1
+
+"""
+    _velocity_interval(op::Symbol, i::Int, v::AbstractVector) -> Float64
+
+Row `i`'s quadrature interval in m/s: for `:D3` the stencil's **middle** interval
+`v[i+2] − v[i+1]`, not its outer span over three, so that the middle intervals of consecutive rows
+tile `[v₂, v_{N−1}]` and the rows' sum of squares approximates an integral over velocity (OQ-70
+item 2). A row carries its square root.
+"""
+function _velocity_interval(op::Symbol, i::Int, v::AbstractVector)
+    op === :D3 && return v[i+2] - v[i+1]
+    throw(_velocity_operator_error(op))
+end
+
+"""
+    _velocity_rows(op::Symbol, u::AbstractVector, v::AbstractVector) -> Vector
+
+One bin's rows of the velocity operator `op` on the entries' values `u` at the velocities `v`
+(m/s), generic in `eltype(u)` so that a dual `u` differentiates: the value path and the side the
+ForwardDiff oracle differentiates, never the closed-form Jacobian. For `:D3`, row `i` is
+`√(v[i+2] − v[i+1])` times 6 times Newton's third divided difference on entries `i … i+3`, written
+**recursively**, a difference of two second divided differences over the outer span (as
+`_operator_rows` writes `D2`), independently of `_velocity_coeffs`' product form.
+"""
+function _velocity_rows(op::Symbol, u::AbstractVector, v::AbstractVector)
+    op === :D3 || throw(_velocity_operator_error(op))
+    return [sqrt(_velocity_interval(op, i, v)) * 6 *
+            ((((u[i+3] - u[i+2]) / (v[i+3] - v[i+2]) - (u[i+2] - u[i+1]) / (v[i+2] - v[i+1])) / (v[i+3] - v[i+1]) -
+              ((u[i+2] - u[i+1]) / (v[i+2] - v[i+1]) - (u[i+1] - u[i]) / (v[i+1] - v[i])) / (v[i+2] - v[i])) /
+             (v[i+3] - v[i])) for i in 1:_velocity_row_count(op, length(u))]
+end
+
+"""
+    _velocity_coeffs(op::Symbol, i::Int, v::AbstractVector) -> Tuple
+
+Row `i`'s linear coefficients, `(entry_index, ∂rowᵢ/∂u[entry_index])` pairs, independent of the
+values: the closed-form half of the term's Jacobian, never autodifferentiated. For `:D3` the
+coefficient of `u_a` is `6 √(v[i+2] − v[i+1]) / Π_{b≠a} (v_a − v_b)` over the stencil's other three
+entries, the **product form** of the divided difference, written independently of `_velocity_rows`'
+recursive one so that the ForwardDiff oracle is a real check (`conventions.md` 8.2).
+"""
+function _velocity_coeffs(op::Symbol, i::Int, v::AbstractVector)
+    op === :D3 || throw(_velocity_operator_error(op))
+    q = 6 * sqrt(_velocity_interval(op, i, v))
+    va, vb, vc, vd = v[i], v[i+1], v[i+2], v[i+3]
+    return ((i, q / ((va - vb) * (va - vc) * (va - vd))),
+            (i + 1, q / ((vb - va) * (vb - vc) * (vb - vd))),
+            (i + 2, q / ((vc - va) * (vc - vb) * (vc - vd))),
+            (i + 3, q / ((vd - va) * (vd - vb) * (vd - vc))))
+end
+
+function VelocityRegularizerTerm(pspec::ParameterSpec; select, velocities=nothing, grid=nothing,
+                                  operator::Symbol=:D3, normalization::Symbol=:unit, weight::Real=1.0,
+                                  interval=0)
+    (velocities === nothing) == (grid === nothing) && throw(ArgumentError(
+        "VelocityRegularizerTerm: give exactly one of `velocities` (the explicit form) and `grid` " *
+        "(the grid form); got " * (grid === nothing ? "neither" : "both")))
+    _velocity_stencil(operator)       # refuses an operator other than :D3
+    normalization === :unit || throw(ArgumentError(
+        "VelocityRegularizerTerm: normalization must be :unit; got :$normalization (:relative and " *
+        ":initial would divide by a log-weight, which is zero at the default distribution, and " *
+        ":absolute's fixed divisor is the weight under another name)"))
+    names = select isa AbstractString ? [String(select)] : collect(String, select)
+    if grid === nothing
+        length(names) == length(velocities) || throw(ArgumentError(
+            "VelocityRegularizerTerm: select has $(length(names)) names but velocities has " *
+            "$(length(velocities))"))
+        return _velocity_term(pspec, names, Float64.(collect(velocities)), operator, weight, interval)
+    end
+    entries, vel = _velocity_grid_entries(grid, names)
+    return _velocity_term(pspec, entries, vel, operator, weight, interval)
+end
+
+"""
+    _velocity_grid_entries(grid::GaussianGrid, names) -> (entries::Vector{String}, velocities::Vector{Float64})
+
+The grid form's expansion (Phase G.3 spec D4): `names` name the grid's `NP` parameters in
+parameter order; node `n` of `Nv` becomes the entry `names[_grid_parameter(n, …)]` at the velocity
+`_grid_node(grid, n)`, in m/s. With the symmetric option every parameter but an odd count's middle
+one appears twice, and the list has `Nv` entries. Nothing else of the grid is read.
+"""
+function _velocity_grid_entries(grid::GaussianGrid{FT, Nv, NP}, names::Vector{String}) where {FT, Nv, NP}
+    length(names) == NP || throw(ArgumentError(
+        "VelocityRegularizerTerm: the grid has $NP parameters (g1 to g$NP), so select must name $NP " *
+        "variables, in parameter order; got $(length(names))"))
+    entries = [names[_grid_parameter(n, Val(Nv), Val(NP))] for n in 1:Nv]
+    vel = [_grid_node(grid, n) for n in 1:Nv]
+    return entries, vel
+end
+
+"""
+    _velocity_term(pspec, names, velocities, operator, weight, interval) -> VelocityRegularizerTerm
+
+The one inner path of both constructor forms (Phase G.3 spec D4), checking in order: the entries'
+count against the operator's stencil; the velocities, finite and strictly increasing; the names,
+each a fitted variable or a dependent; the interval (`_resolve_term_interval`); and that it lies
+inside every selected variable's own (`_check_term_inside_variables`, Phase 4.C spec D13). `rows`
+is `1:n`, the term alone.
+"""
+function _velocity_term(pspec::ParameterSpec, names::Vector{String}, velocities::Vector{Float64},
+                        operator::Symbol, weight::Real, interval)
+    n = length(names)
+    width = _velocity_stencil(operator)
+    n >= width || throw(ArgumentError(
+        "VelocityRegularizerTerm: operator :$operator needs at least $width entries; got $n"))
+    for (a, v) in enumerate(velocities)
+        isfinite(v) || throw(ArgumentError("VelocityRegularizerTerm: velocity $a is not finite; got $v"))
+        (a == 1 || v > velocities[a-1]) || throw(ArgumentError(
+            "VelocityRegularizerTerm: the velocities must be strictly increasing; velocity $a ($v m/s) " *
+            "is not above velocity $(a - 1) ($(velocities[a-1]) m/s)"))
+    end
+    slots = Vector{Int}(undef, n)
+    for (a, nm) in enumerate(names)
+        slot = get(pspec.slots, nm, 0)
+        slot == 0 && throw(ArgumentError(
+            "VelocityRegularizerTerm: \"$nm\" is not a fitted variable or a dependent; valid names " *
+            "are $(sort(collect(keys(pspec.slots))))"))
+        slots[a] = slot
+    end
+    intv = _resolve_term_interval(pspec, interval; who="VelocityRegularizerTerm")
+    bins = intv == 0 ? (1:nbins(pspec.trace)) : pspec.intervals[intv].bins
+    _check_term_inside_variables(pspec, names, slots, intv, bins, "VelocityRegularizerTerm")
+    nrows = _velocity_row_count(operator, n) * length(bins)
+    return VelocityRegularizerTerm(names, slots, velocities, operator, :unit, Float64(weight), intv,
+                                   1:nrows)
+end
+
+# The term with its row range in a Regularizer (Phase G.3 spec D7).
+_with_rows(t::VelocityRegularizerTerm, rows::UnitRange{Int}) =
+    VelocityRegularizerTerm(t.select, t.slots, t.velocities, t.operator, t.normalization, t.weight,
+                            t.interval, rows)
+
+# The raw rows, generic (the value path and the ForwardDiff oracle's side, spec D6): at each bin of
+# the interval, the entries' values from the shared value table, then _velocity_rows. `x0table` is
+# unused (`:unit` only); the argument keeps the walkers' one call for both term types.
+function _term_raw(term::VelocityRegularizerTerm, pspec::ParameterSpec, vtable::AbstractMatrix{T},
+                    x0table::Union{Nothing,AbstractMatrix{Float64}}) where {T<:Real}
+    bins = _term_bins(term, pspec)
+    n = length(term.slots)
+    nr = _velocity_row_count(term.operator, n)
+    out = Vector{T}(undef, length(term.rows))
+    u = Vector{T}(undef, n)
+    for (k, j) in enumerate(bins)
+        for a in 1:n
+            u[a] = vtable[term.slots[a], j]
+        end
+        out[((k - 1) * nr + 1):(k * nr)] .= _velocity_rows(term.operator, u, term.velocities)
+    end
+    return out
+end
+
+"""
+    _term_closed_form(term::VelocityRegularizerTerm, pspec, theta, vtable, x0table, cache) -> (raw, entries)
+
+The velocity term's raw rows (from `_velocity_rows`, the value path) and its **unweighted**
+closed-form Jacobian entries `(local_row, theta_index, ∂raw_row/∂theta_index)` (spec D6): each
+row's coefficients `_velocity_coeffs`, each entry's value and partials `_slot_value_and_grad`
+(memoized in `cache` by `(slot, bin)`, shared with every other term of the evaluation), so a held
+entry contributes no column and a dependent its chain. **Within one row the contributions to one
+theta index are summed into one entry** (OQ-70 item 3): a repeated name, or two dependents of one
+variable, would otherwise give two entries on one row and column, which `jvp!` and `jtvp!` add
+correctly but `_gauss_newton_diagonal` squares one by one. The entries of a row are in the order
+their theta indices first appear in it.
+"""
+function _term_closed_form(term::VelocityRegularizerTerm, pspec::ParameterSpec, theta::AbstractVector{Float64},
+                            vtable::AbstractMatrix{Float64}, x0table::Union{Nothing,AbstractMatrix{Float64}},
+                            cache::Dict{Tuple{Int,Int},Tuple{Float64,Vector{Int},Vector{Float64}}})
+    bins = _term_bins(term, pspec)
+    n = length(term.slots)
+    nr = _velocity_row_count(term.operator, n)
+    raw = Vector{Float64}(undef, length(term.rows))
+    entries = Tuple{Int,Int,Float64}[]
+    u = Vector{Float64}(undef, n)
+    cols = Int[]        # one row's theta indices, in the order they first appear
+    sums = Float64[]    # and the sum of the row's coefficients on each
+    for (k, j) in enumerate(bins)
+        for a in 1:n
+            u[a] = vtable[term.slots[a], j]
+        end
+        rows_here = _velocity_rows(term.operator, u, term.velocities)
+        for r in 1:nr
+            lr = (k - 1) * nr + r
+            raw[lr] = rows_here[r]
+            empty!(cols)
+            empty!(sums)
+            for (a, c) in _velocity_coeffs(term.operator, r, term.velocities)
+                slot = term.slots[a]
+                key = (slot, j)
+                sv = get(cache, key, nothing)
+                if sv === nothing
+                    sv = _slot_value_and_grad(pspec, theta, j, slot)
+                    cache[key] = sv
+                end
+                _, active, grad = sv
+                for (m, aidx) in enumerate(active)
+                    p = findfirst(==(aidx), cols)
+                    if p === nothing
+                        push!(cols, aidx)
+                        push!(sums, c * grad[m])
+                    else
+                        sums[p] += c * grad[m]
+                    end
+                end
+            end
+            for (aidx, s) in zip(cols, sums)
+                push!(entries, (lr, aidx, s))
+            end
+        end
+    end
+    return raw, entries
+end
+
 # --- show (spec D40) ---
 
 function Base.show(io::IO, term::RegularizerTerm)
@@ -703,7 +1039,24 @@ function Base.show(io::IO, ::MIME"text/plain", reg::Regularizer)
     println(io, "  weight (Lambda) = ", reg.weight)
     println(io, "  terms (", length(reg.terms), "), ", reg.nrows, " rows:")
     for term in reg.terms
-        println(io, "    ", join(term.select, ", "), ": :", term.operator, ", :",
-            term.normalization, ", weight = ", term.weight, ", rows ", term.rows)
+        println(io, "    ", _term_line(term), ", rows ", term.rows)
     end
+end
+
+# One term's line in a Regularizer's listing, before its rows (one method per term type, Phase G.3
+# spec D7; a time term's line is the one this listing printed before).
+_term_line(term::RegularizerTerm) = string(join(term.select, ", "), ": :", term.operator, ", :",
+    term.normalization, ", weight = ", term.weight)
+_term_line(term::VelocityRegularizerTerm) = string(_velocity_entries_phrase(term), ": :",
+    term.operator, ", :", term.normalization, ", weight = ", term.weight)
+
+# A velocity term's entries in one phrase (Phase G.3 spec D7): the first and last names, the count,
+# and the velocity range in m/s to four significant digits.
+_velocity_entries_phrase(term::VelocityRegularizerTerm) = string(first(term.select), " … ",
+    last(term.select), " (", length(term.select), " entries, ", round(first(term.velocities); sigdigits=4),
+    " to ", round(last(term.velocities); sigdigits=4), " m/s)")
+
+function Base.show(io::IO, term::VelocityRegularizerTerm)
+    print(io, "VelocityRegularizerTerm(", _velocity_entries_phrase(term), "; :", term.operator, ", :",
+        term.normalization, ", weight = ", term.weight, ")")
 end

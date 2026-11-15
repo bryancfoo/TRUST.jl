@@ -107,6 +107,9 @@ _wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
     if _wanted("regularizer")
         @safetestset "regularizer" begin include("inversion/test_regularizer.jl") end
     end
+    if _wanted("velocity regularizer")
+        @safetestset "velocity regularizer" begin include("inversion/test_regularizer_velocity.jl") end
+    end
     if _wanted("objective")
         @safetestset "objective" begin include("inversion/test_objective.jl") end
     end
