@@ -452,7 +452,7 @@ function jump_width(t_ns, u, a, b, J; ts=1.15)
 end
 
 # ------------------------------------------------------------------------------------------
-# The gridded twins (Phase G.2 spec D8; OQ-69 item 7): one definition for the fast suite's GT rows,
+# The gridded twins (Phase G.2 spec D8; OQ-69 item 7): one definition for the fast suite's GW rows,
 # the slow tier's and examples/diagnostics/gridded_identifiability.jl. Functions only, as above.
 # ------------------------------------------------------------------------------------------
 

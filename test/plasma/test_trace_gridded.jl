@@ -267,7 +267,7 @@ end
     ref = GaussianGrid(; mass_kg = ELECTRON_MASS, T_ref_eV = (1200.0 * EV) / EV, u0_ms = 0.0, nodes = Nv,
                        spacing = 0.2 * vcold / vref, width = 1.2)
     @test isapprox(collect(g.w0), collect(ref.w0); rtol = 1e-13)
-    # the protons merged, with flows from 0 to 200 km/s: u0 the middle, the ends u_lo − 5 v_ref and u_hi + 5 v_ref
+    # the protons merged, with flows from 0 to 200 km/s: u0 the middle, the ends u_lo − 4 v_ref and u_hi + 4 v_ref
     gi = size_grid(tr, ["ions.H", "ions.Hb"])
     vref_i, vcold_i = vth(200.0, 1.008 * ATOMIC_MASS_UNIT), vth(100.0, 1.008 * ATOMIC_MASS_UNIT)
     @test gi.u0 === 100e3

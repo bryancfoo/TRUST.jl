@@ -281,7 +281,7 @@ the ratio of the number densities, so the same weights), and the new species' fr
 exact physics, not an approximation: the susceptibility is linear in the distribution and the density, so
 `Σᵢ χᵢ = −(ω_p²/k²) 𝒞f` for the mixture's `ω_p²` and `f`, and likewise each term of `S(k, ω)`. Its moments
 follow: the mean flow is `Σᵢ wᵢ uᵢ` and the variance temperature `Σᵢ wᵢ (Tᵢ + m (uᵢ − u)²)`, `wᵢ` the
-normalized fractions, which the projection reproduces to its own accuracy (row GT5: 2e-6 in `T`). In a bin
+normalized fractions, which the projection reproduces to its own accuracy (row GT5: 2e-7 in `T`). In a bin
 where every fraction is zero the species contributes nothing, and the mixture is taken with equal weights so
 that its distribution is defined. One species is Section 7's projection of that species, bit for bit.
 

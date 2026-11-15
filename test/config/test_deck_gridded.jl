@@ -96,6 +96,11 @@ end
         d2 = _gr_read(dir, _gr_deck(data, joinpath(dir, "out2"); eshape = "{ type = \"Maxwellian\" }", eextra = "T_eV = 400.0",
             dshape = ""); name = "d2.toml")
         @test d2.sections["plasma"]["electrons"]["e"]["shape"]["type"] == "Maxwellian"
+        # Step G.3.0 (Phase G.2 summary A9): the deuterons on a grid, built with the deuteron mass
+        d4 = _gr_read(dir, replace(_gr_deck(data, joinpath(dir, "out4"); eshape = "{ type = \"Maxwellian\" }", eextra = "T_eV = 400.0"),
+            "T_eV = \"T_D\"\nu_kms = \"u_D\"" => "shape = { type = \"GaussianGrid\", T_ref_eV = 250.0, nodes = 41 }"); name = "d4.toml")
+        @test build_problem(d4)[1].experiment.trace.template.ions[1].f ===
+              ion(name = "D", mass_amu = 2.014, charge = 1, grid = (T_ref_eV = 250.0,)).f
         txt3 = replace(_gr_deck(data, joinpath(dir, "out3")),
             "shape = { type = \"GaussianGrid\", T_ref_eV = 400.0, nodes = 41 }" =>
             "shape = { type = \"GaussianGrid\", T_ref_eV = 400.0, u0_kms = 10.0, nodes = 31, spacing = 0.3, width = 1.1, symmetric = true }")
