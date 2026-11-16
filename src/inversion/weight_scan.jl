@@ -71,7 +71,7 @@ function _with_weight(problem::FitProblem, weight::Real)
     newreg = Regularizer(reg.terms, Float64(weight), reg.nrows)
     return FitProblem(problem.experiment, problem.pspec, problem.data, newreg, problem.mask,
         problem.npixels, problem.sigma, problem.pixel_index, problem.scheduler, problem.channel,
-        problem.name)
+        problem.name, problem.chunk)
 end
 
 function _with_weight(jp::JointFitProblem, weight::Real)

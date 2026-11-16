@@ -29,7 +29,8 @@ the frozen `sigma`, the column-major linear indices of the mask-true pixels (`pi
 computed once here and reused unchanged by every Jacobian row and every `jvp!`/`jtvp!` from Step
 3.2b onward), the `scheduler` passed through to `measure`, and (Step 4.A.3a, D31) `channel`, the
 1-based channel this problem occupies in a `JointFitProblem` (`1` alone for a single-channel fit),
-and `name`, the channel's name (`"main"` alone for a single-channel fit).
+and `name`, the channel's name (`"main"` alone for a single-channel fit); and (Phase G.4, [OQ-71](../../dev/open_questions.md#oq-71)
+item 4) `chunk`, the ForwardDiff chunk width of the problem's Jacobian.
 
 **`sigma` is user-supplied and frozen** ([OQ-14](../../dev/open_questions.md#oq-14), the user
 2026-09-12): the constructor requires `data.sigma !== nothing` and nothing downstream
@@ -38,14 +39,24 @@ model's own prediction (RS6). **`mask[l,j] == true` means the pixel is used** --
 the commoner convention (`StreakData`'s own docstring; `conventions.md` Section 4).
 
 Built with `FitProblem(experiment, pspec, data; regularizer = nothing, scheduler = :auto,
-channel = 1, name = "main", allow_empty_mask = false)`. The constructor checks, in this order:
+channel = 1, name = "main", allow_empty_mask = false, chunk = JACOBIAN_CHUNK)`. The constructor checks, in this order:
 `data.sigma !== nothing`; `experiment.trace === pspec.trace` (A17, 2026-09-13 -- a spec built
 over a different trace object leaves chi2 insensitive to theta silently); `name` matches
 `^[a-z][a-z0-9_]*\$` (D31: it becomes a result-file group at chunk 7); the materialized mask is
 not empty, unless `allow_empty_mask = true` (D31, D35: the one way a zero-pixel channel exists,
-for the masked-channel test); the axes of `data` agree with `axes(experiment)` to `rtol = 1e-12`.
+for the masked-channel test); the axes of `data` agree with `axes(experiment)` to `rtol = 1e-12`;
+`chunk >= 1`.
 
-Spec D15, D31.
+**`chunk`** (Phase G.4 spec D10) is the width `jacobian(problem, theta)` takes by default, so every
+reader of the Jacobian (both optimizers, `gn_decrease`, `normal_matrices`, `laplace`, the scans)
+follows it with no keyword of its own. `JACOBIAN_CHUNK` (8), the default, is the width every problem
+used before Phase G.4, and such a problem's Jacobian and fit are bitwise what they were. A wider
+chunk sweeps more of a bin's entries at once: a gridded species gives a bin 40 to 185 entries, and
+one sweep over them costs about a third of chunk-8 sweeps (`dev/gridded_plan.md` M6), against a
+compilation of the per-bin kernel for each new width, since the width is part of every dual cache's
+type. A chunk wider than a bin's entries is the bin's whole block.
+
+Spec D15, D31; Phase G.4 spec D10.
 """
 struct FitProblem{FT<:Real,E<:Experiment,P<:ParameterSpec,DA<:StreakData{FT},R,S,M} <: AbstractFitProblem
     experiment::E
@@ -59,6 +70,7 @@ struct FitProblem{FT<:Real,E<:Experiment,P<:ParameterSpec,DA<:StreakData{FT},R,S
     scheduler::Symbol
     channel::Int
     name::String
+    chunk::Int
 end
 
 """
@@ -87,7 +99,7 @@ end
 
 function FitProblem(experiment::Experiment, pspec::ParameterSpec, data::StreakData;
     regularizer=nothing, scheduler::Symbol=:auto, channel::Int=1, name::AbstractString="main",
-    allow_empty_mask::Bool=false)
+    allow_empty_mask::Bool=false, chunk::Integer=JACOBIAN_CHUNK)
     data.sigma === nothing && throw(ArgumentError(
         "FitProblem: data has no sigma; make one with sigma(model, streak)"))
 
@@ -105,9 +117,11 @@ function FitProblem(experiment::Experiment, pspec::ParameterSpec, data::StreakDa
 
     _check_axes_match(data, experiment)
 
+    chunk >= 1 || throw(ArgumentError("FitProblem: chunk must be a positive integer; got $chunk"))
+
     pixel_index = findall(vec(mask))
     return FitProblem(experiment, pspec, data, regularizer, mask, npixels, data.sigma,
-        pixel_index, scheduler, channel, String(name))
+        pixel_index, scheduler, channel, String(name), Int(chunk))
 end
 
 """

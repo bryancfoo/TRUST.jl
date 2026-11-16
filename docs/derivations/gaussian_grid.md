@@ -328,3 +328,52 @@ of each bin and against a test-local mixture, `size_grid` against its rule; `tes
 (gate `gridded twins cut-down (slow)`, GW1 to GW5, the fast suite's until Phase G.4) and its full-size namesake
 `test/slow/test_examples_twins.jl`: the four twins against the mark, their node counts pinned.
 `dev/phaseG2_instructions.md` lists each row with its tolerance and its reason.
+
+## 12. A fit on a grid (Phase G.4)
+
+**The fitted variables.** `grid_variables(grid, key; prefix, bounds, …)` makes one `FittedVariable` per parameter
+of the grid, `prefix * string(k)` bound to the leaf `<key>.f.g<k>`, each with `init = 0` (the default distribution)
+and the same `bounds`, which are the caller's and have no default; and **it holds one of them at 0**, not varied.
+The caller adds them to its own variables and bindings and builds the `ParameterSpec`, the `Regularizer` (time terms
+on the varied parameters, `VelocityRegularizerTerm(pspec; select = names, grid)` on all of them, the held one a
+constant in its rows) and the `FitProblem` as for any fit.
+
+**Why one is held.** With `w_n = w⁰_n e^{g_n}` and `m₀ = Σ_n w_n` (Section 1), adding a constant `c` to every `g_n` of
+a bin multiplies every weight and `m₀` by `e^c` and leaves `f` unchanged, and the velocity term's rows (third
+differences of `g`) do not see it either. So in each bin there is exactly one direction along which the data and the
+velocity term do not change, and no other: `JᵀJ` is singular along it, and everything that inverts `JᵀJ` (`gn_decrease`,
+`laplace`, a data fraction) is meaningless. Holding one `g_h` at 0 removes it: the other `NP − 1` numbers then describe
+every positive unit-integral comb on the grid once and only once, as the softmax with a reference category does. A
+fitted `g_n` reads `ln(w_n/w_h) − ln(w⁰_n/w⁰_h)`, the logarithm of the weights' ratio to the held node's over the
+default's, so the bounds bound that ratio, and a fitted distribution is read from its normalized weights `w_n/m₀`,
+never from raw `g`. The node held by default (`hold = :centre`) is the one nearest the centre `u₀`, where a distribution
+is rarely empty: node `(Nv + 1)/2`, at `u₀` itself, for an odd node count; the lower of the two middle nodes, `Nv/2`,
+for an even one; the middle parameter, the last, with the symmetric option (`dev/gridded_plan.md` GQ-4, M9).
+
+**What the choice changes.** For the data and the velocity term, nothing: holding another node writes the same
+distribution down (GF7 holds the centre and a tail node in turn and lands on the same normalized weights to 1.7e-10 of
+the largest). **A time term on the varied parameters is not indifferent to it**: it differences `g_n(t) − g_h(t)` along
+time, a different penalty for each `h`, and on the same fixture with a time term on, the fits holding three different
+nodes end 2e-3 of the largest weight apart (Phase G.4 spec D9). With the centre held, the time term smooths each node's
+log-ratio to the centre. With every node fitted and time rows over several bins, `JᵀJ` has two zero eigenvalues, the
+per-bin shifts constant and linear in time, which the time rows (second differences) do not see (GF6).
+
+**The start.** `grid_start(trace, key, family)` reads the species' `g` at every bin of a gridded trace (a projection's,
+Section 11) and subtracts the held parameter's `g` in each bin: the same distribution, in the family's variables, in
+the form `flatten(pspec, values)` takes. A value not strictly inside the bounds is refused, never clipped: the logit of
+a bound is infinite, and a value far below the bounds is the projection's floor of −200 or a tail it left
+unconstrained (Section 11), which a fit should not start from. How a projected start is brought inside the bounds and
+smoothed is Phase G.4's Step G.4.3, the user's choice.
+
+**The chunk.** A gridded bin has `NP − 1` entries of its own, 76 for the EPW problem's electrons and 100 for the
+bi-Maxwellian problem's protons, where a parametric bin has a handful; at the default chunk of 8 the per-bin model is
+evaluated once per eight of them. `FitProblem(…; chunk)` sets the width the problem's Jacobian takes (`jacobian.md`
+Section 3): one sweep over a bin's whole block costs about a third of chunk-8 sweeps (`dev/gridded_plan.md` M6), and
+each new width compiles the per-bin kernel again. The values do not depend on it.
+
+**The tests.** `test/inversion/test_grid_fit.jl` (gate `gridded fit`, GF1 to GF9), on deuterons on an 11-node grid in
+the IAW window, four bins, sixteen wavelengths, `g` in closed form: `grid_variables` on odd, even and symmetric grids
+and its refusals; `grid_start`, its subtraction, its round trip through `measure` and its refusals; the Jacobian
+against brute-force ForwardDiff at two chunks; `JᵀJ` held and unheld; the same distribution whichever node is held,
+without a time penalty; the per-bin pass at a wide chunk allocating nothing; the chunk reaching the Jacobian.
+`dev/phaseG4_instructions.md` D12 lists each row with its tolerance and its reason.

@@ -436,7 +436,7 @@ function calibration_scan(problem::AbstractFitProblem, theta_star::AbstractVecto
             lambda_m=expt.lambda, t_s=expt.t, effects=new_effects, prefactor=expt.prefactor,
             gain=expt.gain)
         new_ch = FitProblem(new_expt, ch.pspec, ch.data; regularizer=ch.regularizer,
-            scheduler=ch.scheduler, channel=ch.channel, name=ch.name)
+            scheduler=ch.scheduler, channel=ch.channel, name=ch.name, chunk=ch.chunk)
         new_problem = if problem isa JointFitProblem
             new_channels = ntuple(length(channels)) do c
                 c == channel ? new_ch : channels[c]

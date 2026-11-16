@@ -22,7 +22,10 @@ specialization (and hence a recompile of the kernel) per distinct block width. E
 against `SuperGaussian`'s per-chunk construction cost (Phase 1.SG); D43 item 1 measures the
 Jacobian's cost at `C = 4, 8, 12` and reports whether 8 is the right constant.
 
-Spec D18.
+Since Phase G.4 it is the default of `FitProblem`'s field `chunk`, which `jacobian(problem, theta)`
+reads: a problem built without that keyword has the width every problem had before.
+
+Spec D18; Phase G.4 spec D10.
 """
 const JACOBIAN_CHUNK = 8
 
@@ -565,14 +568,17 @@ per-bin kernel per bin per sweep for the per-bin entries and the kernel globals 
 chain globals' closed forms (D19). `J` itself is never formed; `jvp!`/`jtvp!` consume
 `FitJacobian`'s fields directly.
 
-`chunk` overrides `JACOBIAN_CHUNK` (default); not part of D17-D21's own signature, added so
-JT12 can assert the assembled Jacobian agrees with itself across `C = 4, 8, 12` without
-redefining the `const` -- Level 3's addition, flagged under rule 11 zero in the chunk 6 report.
+`chunk` is the ForwardDiff chunk width, `problem.chunk` by default (Phase G.4 spec D10;
+`JACOBIAN_CHUNK`, 8, unless the problem was built with another), and a bin is swept in
+`cld(p_j + G, C)` passes, `C = min(chunk, p_j + G)` over its `p_j` entries and the `G` kernel
+globals. The keyword was added so that JT12 can assert the assembled Jacobian agrees with itself
+across `C = 4, 8, 12` without redefining the `const` -- Level 3's addition, flagged under rule 11
+zero in the chunk 6 report.
 
-Spec D17, D18, D19.
+Spec D17, D18, D19; Phase G.4 spec D10.
 """
 function jacobian(problem::FitProblem, theta::AbstractVector{FT};
-    chunk::Integer=JACOBIAN_CHUNK) where {FT<:Real}
+    chunk::Integer=problem.chunk) where {FT<:Real}
     pspec = problem.pspec
     nvar = length(pspec.variables)
     nt = nbins(pspec.trace)
@@ -678,14 +684,18 @@ struct JointFitJacobian{FT<:Real,CH<:Tuple}
 end
 
 """
-    jacobian(jp::JointFitProblem, theta::AbstractVector; chunk = JACOBIAN_CHUNK) -> JointFitJacobian
+    jacobian(jp::JointFitProblem, theta::AbstractVector; chunk = nothing) -> JointFitJacobian
 
-Spec D34.
+Each channel's `jacobian` at its own `chunk` (Phase G.4 spec D10), or at `chunk` for every channel
+when it is given.
+
+Spec D34; Phase G.4 spec D10.
 """
 function jacobian(jp::JointFitProblem, theta::AbstractVector{FT};
-    chunk::Integer=JACOBIAN_CHUNK) where {FT<:Real}
+    chunk::Union{Nothing,Integer}=nothing) where {FT<:Real}
     channel_jacs = ntuple(length(jp.channels)) do c
-        jacobian(jp.channels[c], theta; chunk=chunk)
+        ch = jp.channels[c]
+        jacobian(ch, theta; chunk=chunk === nothing ? ch.chunk : chunk)
     end
     if jp.regularizer === nothing
         reg_rows, reg_cols, reg_coeffs = Int[], Int[], FT[]

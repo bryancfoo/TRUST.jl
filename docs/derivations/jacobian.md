@@ -94,9 +94,11 @@ variable, D3) — not on the bound value `x` — the dual pass differentiates st
 `_from_unconstrained`, so `dx/dy` (D3's `_dx_dy`) is obtained **for free** as part of the same
 arithmetic that computes `dP/dθ`, with no separate multiplication anywhere in the per-bin path.
 
-The chunk width `C = min(max_j p_j + G, JACOBIAN_CHUNK)` is one constant for the whole assembly
+The chunk width `C = min(max_j p_j + G, chunk)` is one constant for the whole assembly
 (never per bin), so the dual type `Dual{Tag,FT,C}` is a single concrete type the kernel
-specializes on once. When `n_j > C`, a bin needs `⌈n_j / C⌉` sweeps; within sweep `s` (`0`-based),
+specializes on once; `chunk` is the problem's own (`FitProblem`'s field since Phase G.4,
+`JACOBIAN_CHUNK`, 8, unless the problem was built with another), and a new width compiles the
+per-bin kernel again. When `n_j > C`, a bin needs `⌈n_j / C⌉` sweeps; within sweep `s` (`0`-based),
 only the seed positions in `(sC, (s+1)C]` carry a one-hot partial — every other entry, including
 ones seeded in an *earlier* sweep of the *same* bin, carries an all-zero-partial dual, rebuilt
 fresh each sweep rather than mutated (`ForwardDiff.Dual` is immutable, and a stale nonzero partial
