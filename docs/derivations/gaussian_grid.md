@@ -324,6 +324,7 @@ fills the tails in every bin.
 
 **The tests.** `test/plasma/test_trace_gridded.jl` (gate `gridded trace`, GT1 to GT8): the whole-distribution
 leaf against the pairs it stands for, the snapshot route, the trace projection against Section 7's projection
-of each bin and against a test-local mixture, `size_grid` against its rule; `test/instrument/test_examples_twins.jl`
-(gate `gridded twins`, GW1 to GW5) and its namesake in `test/slow/`: the four twins against the mark, their node
-counts pinned. `dev/phaseG2_instructions.md` lists each row with its tolerance and its reason.
+of each bin and against a test-local mixture, `size_grid` against its rule; `test/slow/test_examples_twins_cut.jl`
+(gate `gridded twins cut-down (slow)`, GW1 to GW5, the fast suite's until Phase G.4) and its full-size namesake
+`test/slow/test_examples_twins.jl`: the four twins against the mark, their node counts pinned.
+`dev/phaseG2_instructions.md` lists each row with its tolerance and its reason.

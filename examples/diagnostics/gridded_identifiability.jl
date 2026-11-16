@@ -13,7 +13,9 @@
 # in ln(weight). Two readings: each bin alone; and the bin with `neighbours` bins on each side sharing one set of
 # log-weights, each bin with its own nuisances (the limit of strong time regularization). The sensitivity per node
 # is the column norm of the same projected block; a node whose sensitivity is below `unseen` (1 by default: a unit
-# change in its g moves the data by less than one σ in all) is marked unseen.
+# change in its g moves the data by less than one σ in all) is marked unseen. A channel whose amplitude is a
+# `Sensitivity` scale per bin (Phase 4.I) has that scale cut to each reading's bins, so that every bin of a reading
+# has its own amplitude among the nuisances (Phase G.4 Step G.4.0).
 #
 # Run, from the repository root, for the four synthetic problems:
 #   julia --project=examples/figures examples/diagnostics/gridded_identifiability.jl [cut|full]
@@ -27,7 +29,7 @@ using TRUST
 using LinearAlgebra: svd, svdvals, norm
 const ForwardDiff = TRUST.ForwardDiff   # the package's own: a script environment need not list it (spec D17)
 
-# problems.jl, unless the includer has it already (test/instrument/test_examples.jl does, and Pkg.test() warns of every
+# problems.jl, unless the includer has it already (a test file that includes both does, and Pkg.test() warns of every
 # method defined twice).
 isdefined(@__MODULE__, :twin_cameras) || include(joinpath(@__DIR__, "..", "problems.jl"))
 
@@ -57,6 +59,12 @@ function _ident_window(expt)
     end
     return w
 end
+
+# A per-bin Sensitivity scale (Phase 4.I; TRUST._scale_bins counts its values, 0 for every other effect and for a scalar
+# scale) cut to the bins `win` of a reading's window, so that each bin of the window has its own amplitude among the
+# nuisances, as it has its own plasma nuisances; every other effect as it is (Phase G.4 Step G.4.0). Experiment refuses
+# a per-bin scale whose length is not the trace's bin count, and the window's trace has the window's bins.
+_ident_cut(e, win) = TRUST._scale_bins(e) > 0 ? reconstruct(e, (; scale=e.scale[win])) : e
 
 # The amplitude and background parameters of one channel's effects (spec D16): Sensitivity's scale, every
 # background's parameters; with the effects rebuilt from a vector of values.
@@ -160,12 +168,19 @@ end
 
 # The whitened Jacobian of every channel's streak at the bins `cols[c]` (spec D16): the block's log-weights shared
 # by every bin and channel, every other row of each bin its own nuisance (shared across channels at one bin
-# index of each), each channel's amplitude and background its own. Through `measure` on a window of each trace.
+# index of each), each channel's amplitude and background its own (a per-bin amplitude one per bin of the window,
+# _ident_cut). Through `measure` on a window of each trace: the reading's bins and as many each side as the
+# temporal IRF reaches.
 function _ident_jacobian(channels, twins, cols, grow, block, nuis_rows)
     nb = length(block)
     nwin = length(cols[1])
     nn = length(nuis_rows) * nwin
-    eff0 = [_ident_effect_values(ch.experiment.effects) for ch in channels]
+    wins = [begin
+                W = _ident_window(ch.experiment)
+                max(1, first(cols[c]) - W):min(nbins(twins[c]), last(cols[c]) + W)
+            end for (c, ch) in enumerate(channels)]
+    effs = [map(e -> _ident_cut(e, wins[c]), ch.experiment.effects) for (c, ch) in enumerate(channels)]
+    eff0 = [_ident_effect_values(e) for e in effs]
     nx = nb + nn + sum(length, eff0)
     blockrow = Dict{Tuple{Int,Int},Int}()
     for (i, sk) in grow
@@ -177,9 +192,8 @@ function _ident_jacobian(channels, twins, cols, grow, block, nuis_rows)
         e0 = nb + nn
         for (c, ch) in enumerate(channels)
             tw = twins[c]
-            W = _ident_window(ch.experiment)
-            lo, hi = max(1, first(cols[c]) - W), min(nbins(tw), last(cols[c]) + W)
-            win = lo:hi
+            win = wins[c]
+            lo = first(win)
             vals = Matrix{FT}(tw.values[:, win])
             for (b, sk) in enumerate(block)
                 for j in cols[c]
@@ -194,7 +208,7 @@ function _ident_jacobian(channels, twins, cols, grow, block, nuis_rows)
             trace = TRUST._finish_trace(TRUST._widen_plasma(tw.template, FT), tw.axis_name, Vector{FT}(tw.axis[win]),
                                         tw.paths, refs, vals)
             ne = length(eff0[c])
-            effects = _ident_effects(ch.experiment.effects, FT.(eff0[c]) .+ x[e0+1:e0+ne])
+            effects = _ident_effects(effs[c], FT.(eff0[c]) .+ x[e0+1:e0+ne])
             e0 += ne
             ex = Experiment(trace=trace, probe=ch.experiment.probe, collection=ch.experiment.collection,
                             lambda_m=ch.experiment.lambda, effects=effects, prefactor=ch.experiment.prefactor,

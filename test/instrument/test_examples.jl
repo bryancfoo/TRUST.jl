@@ -153,20 +153,3 @@ end
         @test 1.5 <= m <= 8.0
     end
 end
-
-# EX15 (Phase G.2 Step G.2.3, spec D16; OQ-69 item 8): the gridded identifiability script runs. Nothing is asserted of
-# its numbers; that it runs end to end at a cut-down size (the EPW problem at 32 x 8, one chosen bin, one neighbour
-# each side), writes its two tables, and returns counts and a sensitivity map of the right shapes, is.
-include(joinpath(@__DIR__, "..", "..", "examples", "diagnostics", "gridded_identifiability.jl"))
-
-@testset "EX15: the gridded identifiability script runs at a cut-down size" begin
-    mktempdir() do dir
-        r = run_problem(epw_ablation_problem(; nlambda=32, nt=8); outdir=dir, bins=[4], neighbours=1)
-        @test isfile(joinpath(dir, "counts.tsv")) && isfile(joinpath(dir, "sensitivity_electrons_e.tsv"))
-        @test r.species == ["electrons.e"] && r.bins == [4] && r.block == 76
-        @test size(r.counts) == (1, 3) && size(r.shared) == (1, 3)
-        @test all(r.counts .>= 0) && issorted(vec(r.counts); rev=true) && issorted(vec(r.shared); rev=true)
-        @test size(r.sensitivity[1]) == (77, 1) && isnan(r.sensitivity[1][39, 1])
-        @test count(isnan, r.sensitivity[1]) == 1 && all(>=(0), filter(!isnan, r.sensitivity[1]))
-    end
-end

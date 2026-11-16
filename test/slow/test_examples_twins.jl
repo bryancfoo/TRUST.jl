@@ -1,7 +1,7 @@
-# Step G.2.1: the gridded twins at full size (Phase G.2 spec D8, D10; OQ-69 item 7), the slow tier's namesake
-# of test/instrument/test_examples_twins.jl. Gate "gridded twins (slow)": GW1 to GW4 at 512 × 256 (the
+# Step G.2.1: the gridded twins at full size (Phase G.2 spec D8, D10; OQ-69 item 7), the namesake of the cut-down
+# rows in test/slow/test_examples_twins_cut.jl. Gate "gridded twins (slow)": GW1 to GW4 at 512 × 256 (the
 # two-camera problem at 256 × 1024 and 256 × 960, its own default sizes), the same checks and the same pinned
-# node counts as the fast rows (test/fixtures/twins_fixture.jl).
+# node counts as the cut-down rows (test/fixtures/twins_fixture.jl).
 
 include(joinpath(@__DIR__, "..", "fixtures", "twins_fixture.jl"))
 

@@ -1,5 +1,6 @@
-# Phase G.2 spec D10 (OQ-69 item 7): the gridded twins' checks, shared by the fast suite's GW rows (cut-down,
-# test/instrument/test_examples_twins.jl) and the slow tier's (full size, test/slow/test_examples_twins.jl).
+# Phase G.2 spec D10 (OQ-69 item 7): the gridded twins' checks, shared by the slow tier's GW rows at cut-down size
+# (test/slow/test_examples_twins_cut.jl, the fast suite's until Phase G.4's Step G.4.0) and at full size
+# (test/slow/test_examples_twins.jl).
 # The twin is examples/problems.jl's twin_cameras at size_grid's defaults; its oracle is the parametric
 # problem's own measured streak, which shares no code with the comb (conventions.md 8.2).
 

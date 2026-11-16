@@ -1,9 +1,10 @@
-# Step G.2.1: the gridded twins at cut-down size (Phase G.2 spec D8, D10; OQ-69 item 7). Gate "gridded twins":
-# GW1 to GW5. Each problem's fitted species written on grids sized by size_grid at its defaults and projected
-# bin by bin (examples/problems.jl's twin_cameras); the twin's noise-free measured streak within 0.1 σ of the
-# parametric one at every pixel of every camera (test/fixtures/twins_fixture.jl). Cut-down is the suite's
-# 128 × 32; the two-camera problem 128 × 32 on its EPW camera and 128 × 30 on its IAW camera (spec D8). The
-# full-size rows are the slow tier's.
+# Step G.2.1: the gridded twins at cut-down size (Phase G.2 spec D8, D10; OQ-69 item 7), in the slow tier since
+# Phase G.4's Step G.4.0 (the user, 2026-11-16, OQ-71 (6); until then the fast suite's gate "gridded twins"). Gate
+# "gridded twins cut-down (slow)": GW1 to GW5, unchanged. Each problem's fitted species written on grids sized by
+# size_grid at its defaults and projected bin by bin (examples/problems.jl's twin_cameras); the twin's noise-free
+# measured streak within 0.1 σ of the parametric one at every pixel of every camera (test/fixtures/twins_fixture.jl).
+# Cut-down is 128 × 32; the two-camera problem 128 × 32 on its EPW camera and 128 × 30 on its IAW camera (Phase G.2
+# spec D8). The full-size rows are test/slow/test_examples_twins.jl's.
 
 include(joinpath(@__DIR__, "..", "fixtures", "twins_fixture.jl"))
 
