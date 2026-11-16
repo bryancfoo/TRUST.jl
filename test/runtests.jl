@@ -119,6 +119,9 @@ _wanted(name::AbstractString) = isempty(_TRUST_TESTS_TOKENS) ||
     if _wanted("optimizer diagnostics")
         @safetestset "optimizer diagnostics" begin include("inversion/test_optimizers_diagnostics.jl") end
     end
+    if _wanted("gauss-newton diagonal")
+        @safetestset "gauss-newton diagonal" begin include("inversion/test_jacobian_diagonal.jl") end
+    end
     if _wanted("weight scan")
         @safetestset "weight scan" begin include("inversion/test_weight_scan.jl") end
     end

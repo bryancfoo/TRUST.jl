@@ -972,7 +972,8 @@ row's coefficients `_velocity_coeffs`, each entry's value and partials `_slot_va
 entry contributes no column and a dependent its chain. **Within one row the contributions to one
 theta index are summed into one entry** (OQ-70 item 3): a repeated name, or two dependents of one
 variable, would otherwise give two entries on one row and column, which `jvp!` and `jtvp!` add
-correctly but `_gauss_newton_diagonal` squares one by one. The entries of a row are in the order
+correctly and which `_gauss_newton_diagonal` squared one by one until Phase G.4 (it now sums a row's
+entries on a column before squaring, spec D6 of that phase). The entries of a row are in the order
 their theta indices first appear in it.
 """
 function _term_closed_form(term::VelocityRegularizerTerm, pspec::ParameterSpec, theta::AbstractVector{Float64},

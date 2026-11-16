@@ -766,8 +766,9 @@ end
 `d = diag(J_fullᵀ J_full)` in `y` (D34): the **first contributing channel**'s
 `_gauss_newton_diagonal(ch, J.channels[c])` (`FitProblem`'s own method), times `w_c` unless `w_c ==
 1.0` (rows scale by `sqrt(w)`, their squares by `w`, Pitfall 25), writes `d` directly; later
-contributing channels accumulate. Then `d[col] += coeff^2` over `J`'s own regularizer triples,
-`FitProblem`'s own loop.
+contributing channels accumulate. Then `J`'s own regularizer triples, through
+`_add_regularizer_diagonal!` as in `FitProblem`'s method: a row's triples on one column summed, then
+squared (Phase G.4 spec D6).
 
 Spec D34.
 """
@@ -787,9 +788,7 @@ function _gauss_newton_diagonal(jp::JointFitProblem, J::JointFitJacobian)
         end
     end
 
-    @inbounds for m in eachindex(J.reg_rows)
-        d[J.reg_cols[m]] += Float64(J.reg_coeffs[m])^2
-    end
+    _add_regularizer_diagonal!(d, J.reg_rows, J.reg_cols, J.reg_coeffs)
 
     return d
 end
@@ -950,6 +949,57 @@ function _weighted_sumabs2(w::AbstractVector, u::AbstractVector)
 end
 
 """
+    _add_regularizer_diagonal!(d, rows, cols, coeffs) -> d
+
+The regularizer's share of `diag(J_fullᵀ J_full)` (Phase G.4 spec D6): the diagonal is `Σ_rows (∂ρ_row/∂θ_col)²`,
+and a row's entry on a column is the **sum** of its triples `(rows[m], cols[m], coeffs[m])` there, as `jvp!` and
+`jtvp!` add them; so within each row the coefficients on one column are summed first and the square of each sum is
+added to `d` at its column. A term emits two or more triples on one row and column when one θ index enters several
+bins of the row: a `:D2` or `:D1` row on a scalar fitted variable, or on a dependent whose expression reads one.
+
+The triples of one row are contiguous and the rows increase, as `_regularizer_closed_form` emits them (terms in order,
+rows within a term in order, a row's entries together); a row that comes back after a later row is refused. Within a
+row the sums are kept in the order their columns first appear and added to `d` in that order, so that where no row
+repeats a column `d` is bitwise what adding each triple's square in turn gives.
+"""
+function _add_regularizer_diagonal!(d::Vector{Float64}, rows::AbstractVector{Int}, cols::AbstractVector{Int},
+                                    coeffs::AbstractVector)
+    n = length(rows)
+    n == 0 && return d
+    seen = zeros(Int, length(d))    # seen[c]: the row whose sum on column c is held, 0 for none
+    pos = zeros(Int, length(d))     # pos[c]: where in rowcols and sums that sum is
+    rowcols = Int[]
+    sums = Float64[]
+    m = 1
+    prev = 0
+    while m <= n
+        r = rows[m]
+        r > prev || throw(ArgumentError("_add_regularizer_diagonal!: the regularizer's triples are not grouped by " *
+                                        "row in increasing order (row $r after row $prev)"))
+        prev = r
+        empty!(rowcols)
+        empty!(sums)
+        while m <= n && rows[m] == r
+            c = cols[m]
+            x = Float64(coeffs[m])
+            if seen[c] == r
+                sums[pos[c]] += x
+            else
+                seen[c] = r
+                push!(rowcols, c)
+                push!(sums, x)
+                pos[c] = length(sums)
+            end
+            m += 1
+        end
+        for k in eachindex(rowcols)
+            d[rowcols[k]] += sums[k]^2
+        end
+    end
+    return d
+end
+
+"""
     _gauss_newton_diagonal(problem::FitProblem, Jac::FitJacobian) -> Vector{Float64}
 
 `d_i = sum_rows (d r_full / d y_i)^2` (D16), the diagonal of `J_full^T J_full` in the unconstrained
@@ -980,8 +1030,12 @@ measures (P1's own `Sensitivity(scale = 1e-6)` alone is a 1e-12 factor). This fu
 - for each chain global `c` (`chain_globals[c]`, already the full `dM/dtheta_c` including its own
   `Klambda`/`Kt`/`response` where the chain rule needs them, D19): `d += sum(invsig2 .*
   chain_globals[c].^2)` -- no further propagation, since `jvp!` adds it to `W` directly;
-- for each regularizer triple `(row, col, coeff)` (`Jac.reg_rows`/`reg_cols`/`reg_coeffs`, D25,
-  already in theta-space, independent of the pixel/sigma weighting): `d[col] += coeff^2`.
+- the regularizer's rows (`Jac.reg_rows`/`reg_cols`/`reg_coeffs`, D25, already in theta-space,
+  independent of the pixel/sigma weighting), through `_add_regularizer_diagonal!`: within each row the
+  coefficients of the triples on one column are summed, and the square of the sum is added at that
+  column (Phase G.4 spec D6). Until Phase G.4 each triple's square was added by itself, which reads
+  `c₁² + c₂²` for `(c₁ + c₂)²` where a row has two triples on one column: a `:D2` or `:D1` row on a
+  scalar fitted variable or on a dependent that reads one.
 
 A theta index reachable from more than one of these (a variable that is both a kernel global and a
 chain global, D11; a column a regularizer term also touches) accumulates (`+=`), never overwrites.
@@ -1047,10 +1101,8 @@ function _gauss_newton_diagonal(problem::FitProblem, Jac::FitJacobian)
         end
     end
 
-    # --- regularizer rows ---
-    @inbounds for m in eachindex(Jac.reg_rows)
-        d[Jac.reg_cols[m]] += Float64(Jac.reg_coeffs[m])^2
-    end
+    # --- regularizer rows: a row's triples on one column summed, then squared (Phase G.4 spec D6) ---
+    _add_regularizer_diagonal!(d, Jac.reg_rows, Jac.reg_cols, Jac.reg_coeffs)
 
     return d
 end

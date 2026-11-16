@@ -230,6 +230,25 @@ form, never autodifferentiated" rule's target, which is the operator's and the n
 formulas above — those are hand-derived in Sections 1, 3 and this one and never touched by
 ForwardDiff in the production path (`_regularizer_closed_form`, `jacobian.jl`'s `jvp!`/`jtvp!`).
 
+**A row's entries on one θ index, and the Gauss–Newton diagonal** (Phase G.4, Step G.4.1). The
+closed form emits one triple `(row, θ index, coefficient)` for each bin of a row's stencil and each
+θ index active there. A time-varying variable has its own θ index at each bin, so a row of it holds
+each index once. A **scalar** fitted variable has one index at every bin, and so does a dependent
+that reads one (its active set holds every scalar entry at every bin, `_dependent_value_and_grad`):
+a `D2` row on it holds three triples on that index and a `D1` row two. `jvp!` and `jtvp!` add the
+triples, which is right. The diagonal of `JᵀJ`, `Σ_rows (∂ρ_row/∂θ)²`, needs the square of their
+**sum**: for a scalar variable that sum is `Σ_j c_{r,j}/N_r · dx/dy`, zero under `absolute`,
+`initial` and `unit` since a divided difference's coefficients sum to zero, and under `relative`
+the quotient-rule term alone, `−g_r/N_r² · dx/dy`, itself zero unless the reference varies (the row
+of a value that is the same at every bin is zero); for a dependent the bins' partials differ and the
+sum is whatever it is. Until Phase G.4 `_gauss_newton_diagonal` added each triple's square by
+itself, reading `Σ c²` where the diagonal is `(Σ c)²`; it now sums a row's triples on one index
+first (`_add_regularizer_diagonal!`, which relies on a row's triples being emitted together, rows
+in order, as `_regularizer_closed_form` does). An `I` row has one bin and so one triple per index,
+and a velocity term sums its own (Section 8). The diagonal reaches only the preconditioners of
+L-BFGS and of Levenberg–Marquardt's inner solve and the diagnostics that read it, never `r_full`,
+its Jacobian or the gradient, so the objective and every Jacobian entry are what they were.
+
 ## 5. `R` excludes `Λ`
 
 `R` as defined in Section 4 carries no `Λ`: `R = sum_terms w_term ||g_r / N_r||^2`, and `𝒪 = chi2 +
@@ -498,8 +517,10 @@ the unsymmetric term's on the mirrored values (VR7, to the bit), including the r
 the centre, which a list of the stored half alone would leave out and so leave a kink at `u₀`
 unpenalized. Those rows hold one θ index twice. **A row's coefficients on one θ index are summed
 into one Jacobian entry** (`_term_closed_form`): `jvp!` and `jtvp!` would add two entries
-correctly, but `_gauss_newton_diagonal` (`src/inversion/jacobian.jl`) squares each entry by itself
-and would read `c₁² + c₂²` where the diagonal of `JᵀJ` is `(c₁ + c₂)²` (VR9). The same summing
+correctly, and `_gauss_newton_diagonal` (`src/inversion/jacobian.jl`), which until Phase G.4 squared
+each entry by itself and would have read `c₁² + c₂²` where the diagonal of `JᵀJ` is `(c₁ + c₂)²`,
+now sums a row's entries on one index first (Section 4); the term's own summing is kept, one entry
+per row and index (VR9). The same summing
 covers a dependent whose chain reaches a variable that is also an entry of the same row. On an even
 `Nv` the centre row reads two mirrored pairs, and its summed coefficients cancel: the cubic through
 values symmetric about `u₀` is even and has no third derivative there.
