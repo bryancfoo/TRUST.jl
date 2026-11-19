@@ -362,8 +362,23 @@ per-bin shifts constant and linear in time, which the time rows (second differen
 Section 11) and subtracts the held parameter's `g` in each bin: the same distribution, in the family's variables, in
 the form `flatten(pspec, values)` takes. A value not strictly inside the bounds is refused, never clipped: the logit of
 a bound is infinite, and a value far below the bounds is the projection's floor of −200 or a tail it left
-unconstrained (Section 11), which a fit should not start from. How a projected start is brought inside the bounds and
-smoothed is Phase G.4's Step G.4.3, the user's choice.
+unconstrained (Section 11), which a fit should not start from.
+
+**The Maxwellian start.** `grid_maxwellian_start(trace, key, family)` is the start a gridded fit takes (Phase G.4's
+start hold: the user's choice of 2026-11-16, among a projection as it is, its tails continued by a quadratic, a
+projection penalized by the velocity term's rows, and this). At each bin it reads only the species' flow `ū` and
+variance `V` (Section 3) and writes the Maxwellian of those two moments on the grid against the default weights,
+
+    gₙ = −((vₙ − ū)/s)² − ln w⁰ₙ,     s = √(2V − σ²),
+
+re-centred on the held parameter. The node weights `w⁰ₙ e^{gₙ}` are then a Gaussian of variance `s²/2` about `ū`, and
+each node's own Gaussian adds `σ²/2`, so the comb carries the bin's variance, as the default does with `s₀` (Section 5),
+to the nodes' sampling of that Gaussian. On `size_grid`'s grids, whose default is itself a Gaussian, `g` is a quadratic
+in `v`, so the velocity term's rows are zero on it; and it stays well inside any sensible bounds (above −45 on Phase
+G.4's recovery problems). It carries no shape on purpose: under Levenberg–Marquardt the shape a projected start
+carries is forgotten wherever no value is clamped, while its tails, floored at −200 or left unconstrained, are clamped
+into cliffs by any moderate lower bound, a super-Gaussian's smooth continuation reaching −930 to −7500 at the grid's
+edge (`dev/phaseG4_instructions.md` Section 6). It refuses what `grid_start` refuses, naming itself.
 
 **The chunk.** A gridded bin has `NP − 1` entries of its own, 76 for the EPW problem's electrons and 100 for the
 bi-Maxwellian problem's protons, where a parametric bin has a handful; at the default chunk of 8 the per-bin model is
@@ -371,9 +386,11 @@ evaluated once per eight of them. `FitProblem(…; chunk)` sets the width the pr
 Section 3): one sweep over a bin's whole block costs about a third of chunk-8 sweeps (`dev/gridded_plan.md` M6), and
 each new width compiles the per-bin kernel again. The values do not depend on it.
 
-**The tests.** `test/inversion/test_grid_fit.jl` (gate `gridded fit`, GF1 to GF9), on deuterons on an 11-node grid in
+**The tests.** `test/inversion/test_grid_fit.jl` (gate `gridded fit`, GF1 to GF11), on deuterons on an 11-node grid in
 the IAW window, four bins, sixteen wavelengths, `g` in closed form: `grid_variables` on odd, even and symmetric grids
-and its refusals; `grid_start`, its subtraction, its round trip through `measure` and its refusals; the Jacobian
+and its refusals; `grid_start`, its subtraction, its round trip through `measure` and its refusals;
+`grid_maxwellian_start` against its closed form with the moments summed by hand, the moments its comb carries, a
+Maxwellian given back, and its refusals (GF10, GF11, Phase G.4 Step G.4.4a); the Jacobian
 against brute-force ForwardDiff at two chunks; `JᵀJ` held and unheld; the same distribution whichever node is held,
 without a time penalty; the per-bin pass at a wide chunk allocating nothing; the chunk reaching the Jacobian.
-`dev/phaseG4_instructions.md` D12 lists each row with its tolerance and its reason.
+`dev/phaseG4_instructions.md` D12 and D27 list each row with its tolerance and its reason.

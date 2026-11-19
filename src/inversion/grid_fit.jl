@@ -1,7 +1,7 @@
-# A gridded fit from Julia (Phase G.4 Step G.4.2; OQ-71 item 4): the fitted variables of a GaussianGrid's
-# log-weights, one of them held at 0, and a start for them from a gridded trace. Nothing here fits anything or reads a
-# deck: a caller adds the variables and bindings to its own, and builds the ParameterSpec, the Regularizer and the
-# FitProblem as for any fit.
+# A gridded fit from Julia (Phase G.4 Steps G.4.2 and G.4.4a; OQ-71 items 4 and 9): the fitted variables of a
+# GaussianGrid's log-weights, one of them held at 0, and two starts for them from a gridded trace, its own g or the
+# Maxwellian of each bin's moments. Nothing here fits anything or reads a deck: a caller adds the variables and bindings
+# to its own, and builds the ParameterSpec, the Regularizer and the FitProblem as for any fit.
 
 """
     grid_variables(grid::GaussianGrid, key::AbstractString; prefix, bounds, time_varying = true, interval = 0,
@@ -76,22 +76,7 @@ whose bindings are not to `key`'s log-weights (the family records no grid, so a 
 taken for the family's); a family whose variables are not time-varying.
 """
 function grid_start(trace::PlasmaTrace, key::AbstractString, family)
-    set, name = _grid_key(key, "grid_start")
-    species = _grid_species_set(trace.template, set)
-    idx = findfirst(==(name), species.names)
-    idx === nothing && throw(ArgumentError("grid_start: \"$key\" names no species of the trace"))
-    NP = _grid_start_parameters(species[idx].f, key)
-    nf = length(family.names)
-    nf == NP || throw(ArgumentError(
-        "grid_start: \"$key\" carries a grid of $NP parameters, but the family has $nf; it was made for another grid"))
-    for k in 1:NP
-        want = string(key, ".f.g", k)
-        family.bindings[k] == (family.names[k] => want) || throw(ArgumentError(
-            "grid_start: the family binds \"$(first(family.bindings[k]))\" to \"$(last(family.bindings[k]))\", " *
-            "not to \"$want\"; it was made for another species"))
-    end
-    all(v -> v.time_varying, family.variables) || throw(ArgumentError(
-        "grid_start: the family's variables are not time-varying; a start per bin is for a time-varying family"))
+    set, idx, NP = _grid_family(trace, key, family, "grid_start")
     h = family.held
     nt = nbins(trace)
     out = [family.names[k] => Vector{Float64}(undef, nt) for k in 1:NP if k != h]
@@ -102,12 +87,59 @@ function grid_start(trace::PlasmaTrace, key::AbstractString, family)
         for k in 1:NP
             k == h && continue
             q += 1
-            x = Float64(g[k] - gh)
-            v = family.variables[k]
-            v.lower < x < v.upper || throw(ArgumentError(
-                "grid_start: \"$(v.name)\" at bin $j is $x once the held parameter's g is subtracted, not strictly " *
-                "inside its bounds ($(v.lower), $(v.upper))"))
-            last(out[q])[j] = x
+            last(out[q])[j] = _grid_start_value(family.variables[k], j, Float64(g[k] - gh), "grid_start")
+        end
+    end
+    return out
+end
+
+"""
+    grid_maxwellian_start(trace::PlasmaTrace, key::AbstractString, family) -> Vector{Pair{String, Vector{Float64}}}
+
+A start for `family`, what `grid_variables` returned, that carries no shape: at each bin of `trace`, **the Maxwellian
+of the species' own flow and variance**, written on the species' grid against the grid's default weights and
+re-centred on the held parameter ([OQ-71](../../dev/open_questions.md#oq-71), "The start hold": the user's choice of
+2026-11-16). `trace` is a trace whose species `key` carries the family's grid, in practice the `trace` of
+`project_to_grid`'s result. At bin `j`, with `ū = mean_velocity(f)` and `V = velocity_variance(f)` of that bin's
+distribution `f`, node velocities `vₙ`, the grid's kernel width `σ` and default weights `w⁰ₙ`:
+
+    gₙ = −((vₙ − ū)/s)² − ln w⁰ₙ,   s = √(2V − σ²),
+
+and then `g_held` is subtracted from every `gₙ` of the bin, which leaves the distribution what it was. The node
+weights `w⁰ₙ e^{gₙ}` are then a Gaussian of variance `s²/2` about `ū`, and each node's own Gaussian adds `σ²/2`, so
+the comb has the bin's variance `V` (OQ-68 item 3; to the nodes' sampling of that Gaussian). On `size_grid`'s grids,
+whose default is itself a Gaussian, `g` is a quadratic in `v` and the velocity term's rows are zero on it. Only the
+two moments of each bin are read: the projection's tails, floored at −200 or left unconstrained, are not.
+
+Returns what `grid_start` returns, `name => values` over the trace's bins for every varied parameter, in parameter
+order, the form `flatten(pspec, values)` takes; every bin of `trace` is read, whatever the variables' interval. With
+the symmetric option, parameter `k` takes node `k`'s value (the bin's own distribution is then symmetric about `u₀`,
+and so is its Maxwellian).
+
+Refused as `grid_start` refuses, naming this function: a value not strictly inside the family's bounds, **naming the
+parameter, the bin and the value** (nothing is clipped; a bin whose distribution has no spread beyond the kernel's own
+has no finite value and is refused by the same rule); a key of another form, or one that names no species of the
+trace; a species that does not carry a `GaussianGrid`; a family whose parameter count is not the grid's, or whose
+bindings are not to `key`'s log-weights; a family whose variables are not time-varying.
+"""
+function grid_maxwellian_start(trace::PlasmaTrace, key::AbstractString, family)
+    set, idx, NP = _grid_family(trace, key, family, "grid_maxwellian_start")
+    h = family.held
+    nt = nbins(trace)
+    out = [family.names[k] => Vector{Float64}(undef, nt) for k in 1:NP if k != h]
+    g = Vector{Float64}(undef, NP)
+    for j in 1:nt
+        f = _grid_species_set(plasma(trace, j), set)[idx].f
+        ubar = Float64(mean_velocity(f))
+        s = sqrt(max(2 * Float64(velocity_variance(f)) - f.sigma^2, 0.0))
+        for k in 1:NP
+            g[k] = -((_grid_node(f, k) - ubar) / s)^2 - log(f.w0[k])
+        end
+        q = 0
+        for k in 1:NP
+            k == h && continue
+            q += 1
+            last(out[q])[j] = _grid_start_value(family.variables[k], j, g[k] - g[h], "grid_maxwellian_start")
         end
     end
     return out
@@ -121,8 +153,38 @@ function _grid_key(key::AbstractString, caller::String)
     return Symbol(segs[1]), String(segs[2])
 end
 
-# The parameter count of a species' GaussianGrid; any other distribution refused (one method per family, never `isa`:
-# conventions.md Section 4).
-_grid_start_parameters(::GaussianGrid{FT, Nv, NP}, key) where {FT, Nv, NP} = NP
-_grid_start_parameters(f, key) = throw(ArgumentError(
-    "grid_start: \"$key\" does not carry a GaussianGrid; its distribution is a $(nameof(typeof(f)))"))
+# A start's checks of `family` against `trace` and `key`, shared by both starts, each refusal naming `caller`: the
+# species' set, its index in the set, and its grid's parameter count.
+function _grid_family(trace::PlasmaTrace, key::AbstractString, family, caller::String)
+    set, name = _grid_key(key, caller)
+    species = _grid_species_set(trace.template, set)
+    idx = findfirst(==(name), species.names)
+    idx === nothing && throw(ArgumentError("$caller: \"$key\" names no species of the trace"))
+    NP = _grid_start_parameters(species[idx].f, key, caller)
+    nf = length(family.names)
+    nf == NP || throw(ArgumentError(
+        "$caller: \"$key\" carries a grid of $NP parameters, but the family has $nf; it was made for another grid"))
+    for k in 1:NP
+        want = string(key, ".f.g", k)
+        family.bindings[k] == (family.names[k] => want) || throw(ArgumentError(
+            "$caller: the family binds \"$(first(family.bindings[k]))\" to \"$(last(family.bindings[k]))\", " *
+            "not to \"$want\"; it was made for another species"))
+    end
+    all(v -> v.time_varying, family.variables) || throw(ArgumentError(
+        "$caller: the family's variables are not time-varying; a start per bin is for a time-varying family"))
+    return set, idx, NP
+end
+
+# A start's value `x` of variable `v` at bin `j`, refused unless strictly inside the variable's bounds.
+function _grid_start_value(v, j::Int, x::Float64, caller::String)
+    v.lower < x < v.upper || throw(ArgumentError(
+        "$caller: \"$(v.name)\" at bin $j is $x once the held parameter's g is subtracted, not strictly inside its " *
+        "bounds ($(v.lower), $(v.upper))"))
+    return x
+end
+
+# The parameter count of a species' GaussianGrid; any other distribution refused, naming `caller` (one method per
+# family, never `isa`: conventions.md Section 4).
+_grid_start_parameters(::GaussianGrid{FT, Nv, NP}, key, caller) where {FT, Nv, NP} = NP
+_grid_start_parameters(f, key, caller) = throw(ArgumentError(
+    "$caller: \"$key\" does not carry a GaussianGrid; its distribution is a $(nameof(typeof(f)))"))

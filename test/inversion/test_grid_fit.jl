@@ -1,9 +1,11 @@
-# Step G.4.2: the gridded fit path (Phase G.4 spec D8 to D13; OQ-71 item 4). Gate "gridded fit": GF1 to GF9.
-# grid_variables makes a GaussianGrid's fitted variables with one held at 0; grid_start reads a start from a gridded
-# trace; FitProblem's `chunk` is its Jacobian's ForwardDiff width. The fixture is small so that the gate compiles
-# quickly: deuterons on an 11-node grid in the IAW window, sixteen wavelengths, four bins. Oracles share no code with
-# what they test (conventions.md 8.2): brute-force ForwardDiff of the full residual vector for the Jacobian, the trace's
-# own g rows and `measure` on the projected trace for the start, LinearAlgebra's eigenvalues for JᵀJ.
+# Steps G.4.2 and G.4.4a: the gridded fit path (Phase G.4 spec D8 to D13, D27; OQ-71 items 4 and 9). Gate "gridded
+# fit": GF1 to GF11. grid_variables makes a GaussianGrid's fitted variables with one held at 0; grid_start reads a start
+# from a gridded trace, grid_maxwellian_start the Maxwellian of each bin's moments; FitProblem's `chunk` is its
+# Jacobian's ForwardDiff width. The fixture is small so that the gate compiles quickly: deuterons on an 11-node grid in
+# the IAW window, sixteen wavelengths, four bins. Oracles share no code with what they test (conventions.md 8.2):
+# brute-force ForwardDiff of the full residual vector for the Jacobian, the trace's own g rows and `measure` on the
+# projected trace for the start, moments summed by hand from the fixture's g for the Maxwellian start, LinearAlgebra's
+# eigenvalues for JᵀJ.
 
 using Test
 using TRUST
@@ -244,7 +246,7 @@ end
     work_trace = _widen_trace(pspec.trace, DFT)
     vals = Vector{DFT}(undef, pspec.nslots)
     col_cache = _make_cache(DFT, nlambda)
-    block = Matrix{Float64}(undef, nlambda, 10)
+    block = Matrix{Float64}(undef, nlambda, length(pspec.bin_entries[2]))   # bin 2's block, the bin _jb! runs
     kernel_globals = Array{Float64,3}(undef, nlambda, 4, G)
     prefactor_flag = TRUST._prefactor_flag(ex.prefactor)
     _jb!() = _jacobian_bin!(block, kernel_globals, 2, work_trace, vals, col_cache, pspec, nvar, G,
@@ -268,7 +270,7 @@ end
     @test Jd.blocks == Je.blocks && Jd.kernel_globals == Je.kernel_globals && Jd.reg_coeffs == Je.reg_coeffs
     @test jacobian(problem11, theta).blocks == jacobian(problem8, theta; chunk=11).blocks
     # the values are the same at any width (GF5), but the dual caches are not: the width a call used shows in what it
-    # allocates (spec D12: chunk 8 about 128.6 kB and chunk 11 about 141.4 kB, within 32 B from run to run)
+    # allocates (spec D12: chunk 11 allocates 12 864 B more than chunk 8, within 32 B from run to run)
     alloc(f) = (f(); f(); minimum(@allocated(f()) for _ in 1:3))
     a8, a11 = alloc(() -> jacobian(problem8, theta)), alloc(() -> jacobian(problem11, theta))
     @test abs(a11 - alloc(() -> jacobian(problem8, theta; chunk=11))) <= 1024 && a11 - a8 >= 8192
@@ -292,4 +294,77 @@ end
     @test aj - aj8 >= 4096
     @test_throws "chunk must be a positive integer; got 0" FitProblem(problem8.experiment, problem8.pspec,
         problem8.data; chunk=0)
+end
+
+# ------------------------------------------------------------------------------------------
+# GF10, GF11: grid_maxwellian_start (Step G.4.4a)
+# ------------------------------------------------------------------------------------------
+
+# The start as a g matrix (11 × bins), the held parameter's row 0.
+function _gf_gmat(start, fam, nt)
+    G = zeros(11, nt)
+    q = 0
+    for k in 1:11
+        k == fam.held && continue
+        q += 1
+        G[k, :] .= last(start[q])
+    end
+    return G
+end
+
+@testset "GF10: grid_maxwellian_start, the Maxwellian of each bin's own moments" begin
+    problem, fam, expt = _gf_problem()
+    start = grid_maxwellian_start(expt.trace, "ions.D", fam)
+    @test first.(start) == [fam.names[k] for k in 1:11 if k != fam.held] && all(p -> length(last(p)) == 4, start)
+    G = _gf_gmat(start, fam, 4)
+    # against the closed form, each bin's flow and variance summed by hand from the fixture's own g (spec D27)
+    v = [_grid_node(_GF_GRID, n) for n in 1:11]
+    w0 = collect(_GF_GRID.w0)
+    err = 0.0
+    for j in 1:4
+        w = w0 .* exp.(_GF_G[:, j])
+        w ./= sum(w)
+        ub = sum(w .* v)
+        s2 = 2 * (sum(w .* (v .- ub) .^ 2) + _GF_GRID.sigma^2 / 2) - _GF_GRID.sigma^2
+        ref = [-((v[n] - ub)^2 - (v[6] - ub)^2) / s2 - log(w0[n] / w0[6]) for n in 1:11]
+        err = max(err, maximum(abs.(G[:, j] .- ref)) / maximum(abs, ref))
+    end
+    # the start's own distribution carries each bin's flow and variance, to the 11 nodes' sampling of its Gaussian
+    ex = unflatten(problem.experiment, problem.pspec, flatten(problem.pspec, vcat(start, ["T_e" => 400.0])))
+    du, dV = 0.0, 0.0
+    for j in 1:4
+        fs, ft = plasma(ex.trace, j).ions[1].f, plasma(expt.trace, j).ions[1].f
+        du = max(du, abs(mean_velocity(fs) - mean_velocity(ft)) / sqrt(2 * velocity_variance(ft)))
+        dV = max(dV, abs(velocity_variance(fs) / velocity_variance(ft) - 1))
+    end
+    # a trace that is already a Maxwellian on the grid (the fixture's g without its bump) is given back
+    Gm = reduce(hcat, [_gf_g(T, u) .- 0.6 .* exp.(-((v .- 1.5 * _gf_vth(300.0)) ./ (0.6 * _gf_vth(300.0))) .^ 2)
+                       for (T, u) in zip((240.0, 270.0, 300.0, 280.0), (0.0, 2e4, 4e4, 3e4))])
+    tm = PlasmaTrace(expt.trace.template; t_ns=[0.0, 0.5, 1.1, 1.6], leaves=("ions.D.f" => Gm,))
+    back = _gf_gmat(grid_maxwellian_start(tm, "ions.D", fam), fam, 4) .- (Gm .- Gm[6:6, :])
+    @info "GF10 the Maxwellian start" closed_form = err flow_off = du variance_off = dV maxwellian_given_back = maximum(abs, back)
+    @test err <= 1e-13                        # round-off (spec D27: 1.7e-15)
+    @test du <= 1e-4 && dV <= 1e-3            # the 11 nodes' sampling of the Gaussian (3.2e-5 and 1.6e-4)
+    @test maximum(abs, back) <= 2e-3          # the same sampling (5.8e-4)
+end
+
+@testset "GF11: grid_maxwellian_start refuses as grid_start does, naming itself" begin
+    _, fam, expt = _gf_problem()
+    gms(k, f) = grid_maxwellian_start(expt.trace, k, f)
+    tight = grid_variables(_GF_GRID, "ions.D"; prefix="g", bounds=(-1.0, 1.0))
+    @test_throws "grid_maxwellian_start: \"g1\" at bin 1 is" gms("ions.D", tight)
+    @test_throws "not strictly inside its bounds (-1.0, 1.0)" gms("ions.D", tight)
+    @test_throws "grid_maxwellian_start: \"electrons.e\" does not carry a GaussianGrid" gms("electrons.e", fam)
+    @test_throws "grid_maxwellian_start: \"ions.C\" names no species of the trace" gms("ions.C", fam)
+    @test_throws "grid_maxwellian_start: \"D\" is not a species key" gms("D", fam)
+    g10 = GaussianGrid(; mass_kg=_GF_M, T_ref_eV=300.0, nodes=10, spacing=0.5)
+    @test_throws "grid_maxwellian_start: \"ions.D\" carries a grid of 11 parameters, but the family has 10" gms("ions.D",
+        grid_variables(g10, "ions.D"; prefix="g", bounds=(-30, 30)))
+    @test_throws "grid_maxwellian_start: the family binds" gms("ions.D",
+        grid_variables(_GF_GRID, "ions.X"; prefix="g", bounds=(-30, 30)))
+    @test_throws "grid_maxwellian_start: the family's variables are not time-varying" gms("ions.D",
+        grid_variables(_GF_GRID, "ions.D"; prefix="g", bounds=(-30, 30), time_varying=false))
+    # the shared checks still name grid_start for grid_start
+    @test_throws "grid_start: \"electrons.e\" does not carry a GaussianGrid" grid_start(expt.trace, "electrons.e", fam)
+    @test_throws "grid_start: \"g1\" at bin 1 is" grid_start(expt.trace, "ions.D", tight)
 end
