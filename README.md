@@ -332,6 +332,20 @@ sits in a `Regularizer` beside time terms. Its weight is dimensional, of order t
 power in (m/s)⁵, about 1e35 for 500 eV electrons and 1e26 for 250 eV deuterons. No deck names the term and
 nothing fits a grid yet; every other result is exactly what it was.
 
+**Phase G.4 (a gridded fit from Julia) is complete.** A gridded species can be fitted from the Julia API.
+`grid_variables(grid, key; prefix, bounds)` makes one fitted variable per log-weight of a grid and holds the one
+nearest its centre at 0, since adding a constant to every log-weight of a bin changes nothing.
+`grid_maxwellian_start(trace, key, family)` starts each bin at the Maxwellian of that bin's own flow and variance,
+and `grid_start` at the trace's own log-weights. `FitProblem(…; chunk)` sets the width of the Jacobian's
+ForwardDiff sweep: the whole of a gridded bin's block is about four times cheaper than the default of 8. The
+Gauss-Newton diagonal now sums a regularizer row's coefficients on one parameter before squaring them, which
+moved no existing result. Three recoveries on synthetic problems, at 8 bins in the slow tier, recover the EPW
+problem's super-Gaussian electrons (n_e and the temperature within 4 %) and pass a null test on Maxwellian
+electrons, both on a symmetric grid, and recover the protons' temperature and flow and, from a 512-wavelength IAW
+streak, part of their beam's shape. Their streaks carry the camera's noise without its one-pixel point spread, which a gridded fit
+otherwise absorbs into the distribution's tails. No deck names a grid yet; every other result is exactly what it
+was.
+
 The package was named OTIS until 2026-10-18. Files it wrote under that name carry layout
 versions spelled `otis-…`; every reader accepts that spelling for the same layout number and
 reports the canonical `trust-…` string, and every writer emits only `trust-…`. Decks that say

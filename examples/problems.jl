@@ -37,6 +37,26 @@ function epw_ablation_problem(; nlambda=512, nt=256)
 end
 
 """
+    epw_null_problem(; nlambda = 512, nt = 256)
+
+`epw_ablation_problem`'s plasma, probe, collection, window, instrument chain and noise model, with
+the electrons **Maxwellian at every bin**: the trace is built without the leaf `electrons.e.f.m`,
+so the template's `SuperGaussian(2.0)`, a Maxwellian, holds throughout, while `n_e(t)` and `T_e(t)`
+are `epw_ablation_problem`'s own. The null problem of a gridded recovery: a fit of its electrons on
+a grid that finds structure finds what the data did not put there. Its own seed, `20261116`.
+
+Phase G.4 spec Section 7.
+"""
+function epw_null_problem(; nlambda=512, nt=256)
+    p = epw_ablation_problem(; nlambda=nlambda, nt=nt)
+    t_ns = collect(range(2.0, 5.6; length=nt))
+    n_e_of_t(t) = 1.5e19 + 6.3e19 * (1 - exp(-(t - 2.0) / 0.75)) - 0.42e19 * (t - 2.0)
+    Te_of_t(t) = 350 + 1150 * exp(-(t - 2.0) / 1.35)
+    trace = PlasmaTrace(p.trace.template; t_ns=t_ns, leaves=("n_e_cm3" => n_e_of_t, "electrons.e.T_eV" => Te_of_t))
+    return merge(p, (; name="epw_null", trace, seed=20261116))
+end
+
+"""
     iaw_multiflow_problem(; nlambda = 512, nt = 256)
 
 foo2026 Section III.B (Figs. 3 bottom, 4 bottom): interpenetrating deuteron and carbon flows,

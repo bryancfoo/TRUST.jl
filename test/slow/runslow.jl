@@ -34,5 +34,6 @@ using Test
     @safetestset "gridded twins (slow)" begin include("test_examples_twins.jl") end
     @safetestset "gridded twins cut-down (slow)" begin include("test_examples_twins_cut.jl") end
     @safetestset "gridded identifiability (slow)" begin include("test_examples_identifiability.jl") end
+    @safetestset "gridded recovery (slow)" begin include("test_gridded_recovery.jl") end
     @safetestset "shape cost (slow)" begin include("test_shape_cost.jl") end
 end

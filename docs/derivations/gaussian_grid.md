@@ -394,3 +394,24 @@ Maxwellian given back, and its refusals (GF10, GF11, Phase G.4 Step G.4.4a); the
 against brute-force ForwardDiff at two chunks; `JᵀJ` held and unheld; the same distribution whichever node is held,
 without a time penalty; the per-bin pass at a wide chunk allocating nothing; the chunk reaching the Jacobian.
 `dev/phaseG4_instructions.md` D12 and D27 list each row with its tolerance and its reason.
+
+**The recoveries.** `test/slow/test_gridded_recovery.jl` (gate `gridded recovery (slow)`, GV1 to GV3; Phase G.4 Step
+G.4.4b) fits three synthetic problems from the Julia API at 8 bins, with 64 wavelengths on the EPW camera and 512 on the
+IAW camera: the EPW problem's super-Gaussian electrons with `n_e` per bin, the bi-Maxwellian problem's protons (core and
+beam on one grid) on its IAW camera, and the EPW problem with Maxwellian electrons as a null test, each from
+`grid_maxwellian_start` with time terms on every varied `g` and one velocity term, by Levenberg–Marquardt. The electrons' shape is recovered where it departs from a Maxwellian,
+`n_e` and the moments within a few per cent; the null test finds no structure beyond about two Laplace σ; the protons'
+temperature and flow are recovered, and their beam's shape in part: the worst bin's error is a third of its Maxwellian
+start's, where with 64 IAW wavelengths it was three quarters. The IAW streak fixes about 5 to 12 combinations of the 100
+varied log-weights a bin, and no single one. Two things the recoveries found decide how a gridded fit is set up:
+
+- **The camera's point spread.** `StreakCameraNoise` blurs a streak's mean by one pixel in λ and t, which `measure`
+  does not model (`instrument.md` Part 5). A parametric fit can follow the blur only by biasing a few parameters; a
+  gridded fit reshapes the distribution, inflating its tails, and badly so on a small streak, where a pixel is
+  physically wide. The recoveries' streaks therefore carry the camera's own σ without its spread, `GaussianNoise(; a =
+  read_noise², b = camera_gain · noise_factor)` (`dev/phaseG4_instructions.md` D28; the user's, to be revisited).
+- **A one-sided window.** The EPW window sees electrons moving one way only. On a flat-topped distribution the unseen
+  side is then free along a quadratic in `v` that grows linearly in time, which neither the time term nor the velocity
+  term penalizes; the fit fills it and trades it against `n_e`. The symmetric option ties the two sides, and the EPW
+  electrons, at zero flow, are symmetric, so the EPW recovery and the null test use it (D29); the protons, whose beam
+  has a flow, do not.
