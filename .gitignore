@@ -1,6 +1,9 @@
 # Planning documents and phase hand-offs (see CLAUDE.md): local only
 dev/
 
+# The assistants' instructions: local only since 2026-11-18
+CLAUDE.md
+
 # Reference material (textbook and papers): local only
 context/
 
